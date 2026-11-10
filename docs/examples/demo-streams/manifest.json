@@ -1,10 +1,10 @@
 {
   "id": "demo-streams",
   "name": "Demo streams",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "kind": "anime",
   "author": "B-Anime",
-  "description": "Public test videos (Blender open movies, Apple's HLS sample) for trying the player. Not a real anime source.",
+  "description": "Public test videos (Big Buck Bunny, Apple's HLS examples) for trying the player. Not a real anime source.",
   "language": "en",
   "codeUrl": "main.js",
   "apiVersion": 1

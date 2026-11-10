@@ -49,7 +49,7 @@ fn string_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Resu
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "status")]
 pub enum MatchState {
     /// `auto` is false when the user picked it.
     Matched { source_id: String, title: String, auto: bool },
@@ -412,6 +412,15 @@ mod tests {
         assert!(similarity("Kusuriya no Hitorigoto", "Kusuriya no Hitorigoto (TV)") >= AUTO_MATCH);
         assert!(similarity("Sousou no Frieren", "Big Buck Bunny") < 0.3);
         assert!(similarity("Dandadan", "Dandadan 2nd Season") < AUTO_MATCH);
+    }
+
+    #[test]
+    fn match_state_serializes_for_the_ui() {
+        let m = MatchState::Matched { source_id: "s".into(), title: "t".into(), auto: true };
+        assert_eq!(
+            serde_json::to_value(m).unwrap(),
+            json!({ "status": "matched", "sourceId": "s", "title": "t", "auto": true })
+        );
     }
 
     #[tokio::test]

@@ -372,6 +372,34 @@ mod tests {
         assert_eq!(to_vtt(ass, "ass"), "WEBVTT\n\n00:00:01.500 --> 00:00:03.000\nHi, there\nfriend\n\n");
     }
 
+    /// Real network: `cargo test -p banime-core -- --ignored live_proxy --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_proxy_plays_a_public_stream() {
+        let proxy = Proxy::start().await.unwrap();
+        let session = proxy.session(&HashMap::new());
+        let master_url = proxy
+            .url(&session, "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8", None)
+            .unwrap();
+        let master = reqwest::get(&master_url).await.unwrap();
+        println!("master: {} {:?}", master.status(), master.headers().get("content-type"));
+        let master = master.text().await.unwrap();
+        assert!(master.contains("URI=\"/m/"), "subtitle/media URIs should be proxied");
+        let variant = master.lines().find(|l| l.starts_with("/m/")).expect("variant line");
+        let media = reqwest::get(format!("{}{variant}", proxy.origin())).await.unwrap().text().await.unwrap();
+        let seg = media
+            .lines()
+            .find(|l| l.starts_with("/m/") && !l.contains("map"))
+            .or_else(|| media.lines().find(|l| l.starts_with("/m/")))
+            .expect("segment line");
+        let seg = reqwest::get(format!("{}{seg}", proxy.origin())).await.unwrap();
+        let status = seg.status();
+        let ctype = seg.headers().get("content-type").cloned();
+        let bytes = seg.bytes().await.unwrap();
+        println!("segment: {status} {ctype:?} {} bytes", bytes.len());
+        assert!(status.is_success() && bytes.len() > 10_000);
+    }
+
     #[tokio::test]
     async fn proxies_with_headers_and_rewrites() {
         use axum::routing::get as route;

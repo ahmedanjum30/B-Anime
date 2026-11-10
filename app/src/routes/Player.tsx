@@ -115,9 +115,13 @@ export default function Player() {
       setWaiting(true);
       if (!s || !video) return;
       const src = s.sources[Math.min(idx, s.sources.length - 1)];
-      if (src.kind === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
-        const { default: HlsLib } = await import("hls.js");
-        if (!HlsLib.isSupported()) return setVideoError("This system can't play HLS streams.");
+      // HLS goes through hls.js whenever Media Source Extensions exist: newer WebView2 builds
+      // claim native HLS support but play proxied streams unreliably, and hls.js gives us levels.
+      const HlsLib = src.kind === "hls" ? (await import("hls.js")).default : null;
+      if (src.kind === "hls" && !HlsLib?.isSupported() && !video.canPlayType("application/vnd.apple.mpegurl")) {
+        return setVideoError("This system can't play HLS streams.");
+      }
+      if (HlsLib && HlsLib.isSupported()) {
         const instance = new HlsLib({ enableWorker: true, backBufferLength: 90, maxBufferLength: 60 });
         hls = instance;
         instance.on(HlsLib.Events.MANIFEST_PARSED, (_e, data) => {

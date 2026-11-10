@@ -1,15 +1,17 @@
 // Demo streams: a B-Anime extension that serves public test videos for any search.
 // It shows the provider shape without scraping anything. See docs/extensions.md.
 
+const BASE = "https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/examples/demo-streams/";
+
 const VIDEOS = [
   {
-    title: "Big Buck Bunny (Blender open movie)",
+    title: "Big Buck Bunny (Blender open movie, external subtitles)",
     url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    subtitles: [{ url: BASE + "bbb-en.vtt", lang: "en", label: "English (demo)" }],
   },
   {
-    title: "Sintel (Blender open movie, with subtitles)",
-    url: "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8",
-    subtitles: [{ url: "https://bitdash-a.akamaihd.net/content/sintel/subtitles/subtitles_en.vtt", lang: "en", label: "English" }],
+    title: "Apple advanced HLS example (subtitles in the stream)",
+    url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8",
   },
   {
     title: "Apple HLS sample (bipbop)",
