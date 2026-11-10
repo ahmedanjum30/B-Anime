@@ -15,6 +15,7 @@
     "@solidjs/router": "^1.0.1",
     "@tanstack/solid-virtual": "^3.13.53",
     "@tauri-apps/api": "^2.12.4",
+    "hls.js": "^1.7.4",
     "lucide-solid": "^1.71.0",
     "solid-js": "^1.9.18"
   },

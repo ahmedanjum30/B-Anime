@@ -11,7 +11,7 @@ use crate::{Error, Result};
 const DETAIL_QUERY: &str = r#"
 query ($id: Int) {
   Media(id: $id) {
-    id type format status episodes chapters volumes duration source season seasonYear
+    id idMal type format status episodes chapters volumes duration source season seasonYear
     startDate { year month day }
     endDate { year month day }
     title { userPreferred romaji english native }

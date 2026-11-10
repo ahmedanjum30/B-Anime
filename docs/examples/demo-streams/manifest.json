@@ -1,7 +1,7 @@
 {
   "id": "demo-streams",
   "name": "Demo streams",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "kind": "anime",
   "author": "B-Anime",
   "description": "Public test videos (Blender open movies, Apple's HLS sample) for trying the player. Not a real anime source.",

@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, type JSX } from "solid-js";
 
+import { Play } from "../lib/icons";
 import { homeStore } from "../lib/store";
 import { inTauri } from "../lib/api";
 import type { EntrySaver } from "../lib/entry";
@@ -13,6 +14,10 @@ export default function EpisodeList(props: {
   media: Media;
   saver: EntrySaver;
   localFiles: { episode: number; fileName: string }[];
+  /** The online-source bar, shown under the heading. */
+  panel?: JSX.Element;
+  playable?: (episode: number) => boolean;
+  onPlay?: (episode: number) => void;
 }) {
   const { account } = homeStore;
   const m = () => props.media;
@@ -59,6 +64,7 @@ export default function EpisodeList(props: {
             {m().nextAiringEpisode ? ` · ${released()} out so far` : ""}
           </small>
         </h2>
+        {props.panel}
 
         <Show when={chunks() > 1}>
           <div class="tabs ep-ranges" role="tablist" aria-label="Episode range">
@@ -99,11 +105,27 @@ export default function EpisodeList(props: {
                     <Show when={!aired() && !airing()}>Not aired yet</Show>
                   </span>
                   <span class="ep-action">
+                    <Show when={props.playable?.(ep)}>
+                      <button
+                        type="button"
+                        class="btn btn-sm"
+                        classList={{ "btn-primary": next(), "is-play": true }}
+                        onClick={() => props.onPlay?.(ep)}
+                        aria-label={`Play episode ${ep}`}
+                      >
+                        <Play size={12} fill="currentColor" stroke-width={0} aria-hidden="true" /> Play
+                      </button>
+                    </Show>
                     <Show when={canEdit() && aired()}>
                       <Show
                         when={watched()}
                         fallback={
-                          <button type="button" class="btn btn-sm" classList={{ "btn-primary": next() }} onClick={() => props.saver.save({ progress: ep })}>
+                          <button
+                            type="button"
+                            class="btn btn-sm"
+                            classList={{ "btn-primary": next() && !props.playable?.(ep) }}
+                            onClick={() => props.saver.save({ progress: ep })}
+                          >
                             {next() ? "Mark watched" : "Watched up to here"}
                           </button>
                         }

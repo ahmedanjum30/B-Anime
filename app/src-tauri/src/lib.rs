@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use banime_core::anilist::{self, Viewer, auth, browse, media, sync::SyncReport};
-use banime_core::{AppPaths, Error, db, extensions, home};
+use banime_core::{AppPaths, Error, db, extensions, home, streaming};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -21,7 +21,12 @@ struct AppState {
     cancel_login: Arc<Notify>,
     /// Why the last automatic sync failed, until one succeeds. Shown in the UI.
     sync_error: std::sync::Mutex<Option<String>>,
+    /// Loopback proxy every stream, subtitle and manga page goes through.
+    proxy: streaming::Proxy,
+    item_cache: std::sync::Mutex<ItemCache>,
 }
+
+type ItemCache = std::collections::HashMap<(String, String), (std::time::Instant, Vec<streaming::SourceItem>)>;
 
 /// Syncing is automatic: at launch, on this timer, and from the UI's triggers (window focus
 /// after 5+ minutes away, network back online). A failing sync retries on every trigger.
@@ -78,6 +83,162 @@ async fn get_schedule(
 ) -> Result<Vec<browse::ScheduleItem>, String> {
     let client = anilist::Client::new(auth::load_token().ok().flatten()).map_err(msg)?;
     browse::schedule(&client, &state.db, scope, from, to).await.map_err(msg)
+}
+
+// ── Streaming & reading ──────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn find_source(
+    state: tauri::State<'_, AppState>,
+    media_id: i64,
+    ext: String,
+    titles: Vec<String>,
+    year: Option<i64>,
+) -> Result<streaming::MatchState, String> {
+    streaming::find_match(&state.db, &state.paths.extensions, media_id, &ext, &titles, year).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn search_source(state: tauri::State<'_, AppState>, ext: String, query: String) -> Result<Vec<streaming::SourceResult>, String> {
+    streaming::search(&state.db, &state.paths.extensions, &ext, &query).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn set_source_match(
+    state: tauri::State<'_, AppState>,
+    media_id: i64,
+    ext: String,
+    source_id: String,
+    title: String,
+) -> Result<(), String> {
+    streaming::save_match(&state.db, media_id, &ext, &source_id, &title, false).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn clear_source_match(state: tauri::State<'_, AppState>, media_id: i64, ext: String) -> Result<(), String> {
+    streaming::clear_match(&state.db, media_id, &ext).await.map_err(msg)
+}
+
+/// Episodes or chapters on a source. Cached for 10 minutes: the player and reader ask often.
+#[tauri::command]
+async fn source_items(
+    state: tauri::State<'_, AppState>,
+    ext: String,
+    source_id: String,
+    refresh: Option<bool>,
+) -> Result<Vec<streaming::SourceItem>, String> {
+    let key = (ext.clone(), source_id.clone());
+    if !refresh.unwrap_or(false) {
+        if let Some((at, items)) = state.item_cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+            if at.elapsed() < Duration::from_secs(600) {
+                return Ok(items);
+            }
+        }
+    }
+    let installed = extensions::get(&state.db, &ext).await.map_err(msg)?.ok_or("That extension isn't installed.")?;
+    let items = streaming::items(&state.db, &state.paths.extensions, &ext, installed.manifest.kind, &source_id)
+        .await
+        .map_err(msg)?;
+    if let Ok(mut c) = state.item_cache.lock() {
+        c.insert(key, (std::time::Instant::now(), items.clone()));
+    }
+    Ok(items)
+}
+
+#[tauri::command]
+async fn get_stream(state: tauri::State<'_, AppState>, ext: String, episode_id: String) -> Result<streaming::Stream, String> {
+    streaming::stream(&state.db, &state.paths.extensions, &state.proxy, &ext, &episode_id).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn get_pages(state: tauri::State<'_, AppState>, ext: String, chapter_id: String) -> Result<Vec<String>, String> {
+    streaming::pages(&state.db, &state.paths.extensions, &state.proxy, &ext, &chapter_id).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn get_skip_times(mal_id: i64, episode: i64, length: f64) -> Result<Vec<streaming::SkipTime>, String> {
+    // Best effort: no skip buttons is fine, an error dialog is not.
+    Ok(streaming::skip_times(mal_id, episode, length).await.unwrap_or_default())
+}
+
+#[tauri::command]
+async fn save_position(
+    state: tauri::State<'_, AppState>,
+    media_id: i64,
+    episode: i64,
+    position: f64,
+    duration: f64,
+) -> Result<(), String> {
+    streaming::save_position(&state.db, media_id, episode, position, duration).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn get_position(state: tauri::State<'_, AppState>, media_id: i64, episode: i64) -> Result<Option<i64>, String> {
+    streaming::position(&state.db, media_id, episode).await.map_err(msg)
+}
+
+/// MPV or VLC, from PATH or their usual install folders.
+fn find_player(name: &str) -> Option<std::path::PathBuf> {
+    let exe = format!("{name}.exe");
+    let mut candidates: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).map(|d| d.join(&exe)).collect())
+        .unwrap_or_default();
+    let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+    match name {
+        "mpv" => {
+            for base in [env("ProgramFiles"), env("LOCALAPPDATA").map(|p| p.join("Programs"))].into_iter().flatten() {
+                candidates.push(base.join("mpv").join(&exe));
+            }
+            if let Some(home) = env("USERPROFILE") {
+                candidates.push(home.join("scoop").join("apps").join("mpv").join("current").join(&exe));
+            }
+        }
+        "vlc" => {
+            for base in [env("ProgramFiles"), env("ProgramFiles(x86)")].into_iter().flatten() {
+                candidates.push(base.join("VideoLAN").join("VLC").join(&exe));
+            }
+        }
+        _ => return None,
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+#[tauri::command]
+fn external_players() -> Vec<String> {
+    ["mpv", "vlc"].into_iter().filter(|p| find_player(p).is_some()).map(str::to_owned).collect()
+}
+
+/// Opens a proxied stream URL in MPV or VLC. Only the local proxy's URLs are accepted.
+#[tauri::command]
+fn open_external_player(
+    state: tauri::State<'_, AppState>,
+    player: String,
+    url: String,
+    title: String,
+    subtitle: Option<String>,
+) -> Result<(), String> {
+    let origin = state.proxy.origin();
+    if !url.starts_with(&origin) || subtitle.as_deref().is_some_and(|s| !s.starts_with(&origin)) {
+        return Err("Only B-Anime streams can be opened externally.".into());
+    }
+    let exe = find_player(&player).ok_or_else(|| format!("{player} isn't installed."))?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg(&url);
+    match player.as_str() {
+        "mpv" => {
+            cmd.arg(format!("--force-media-title={title}"));
+            if let Some(s) = subtitle {
+                cmd.arg(format!("--sub-file={s}"));
+            }
+        }
+        _ => {
+            cmd.arg(format!("--meta-title={title}"));
+            if let Some(s) = subtitle {
+                cmd.arg(format!("--input-slave={s}"));
+            }
+        }
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start {player}: {e}"))
 }
 
 // ── Extensions ───────────────────────────────────────────────────────────────
@@ -338,7 +499,10 @@ pub fn run() {
             paths.ensure()?;
             tracing::info!(data_dir = %paths.root.display(), "starting B-Anime");
             let db = tauri::async_runtime::block_on(db::open(&paths.db))?;
+            let proxy = tauri::async_runtime::block_on(streaming::Proxy::start())?;
             app.manage(AppState {
+                proxy,
+                item_cache: std::sync::Mutex::new(Default::default()),
                 db,
                 paths,
                 sync_lock: Mutex::new(()),
@@ -371,6 +535,18 @@ pub fn run() {
             save_entry,
             browse,
             get_schedule,
+            find_source,
+            search_source,
+            set_source_match,
+            clear_source_match,
+            source_items,
+            get_stream,
+            get_pages,
+            get_skip_times,
+            save_position,
+            get_position,
+            external_players,
+            open_external_player,
             list_extensions,
             preview_extension,
             install_extension,

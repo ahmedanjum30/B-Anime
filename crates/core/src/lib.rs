@@ -8,6 +8,7 @@ pub mod extensions;
 pub mod home;
 pub mod library;
 pub mod paths;
+pub mod streaming;
 
 pub use error::{Error, Result};
 pub use paths::AppPaths;

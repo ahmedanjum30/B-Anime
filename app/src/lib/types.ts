@@ -70,6 +70,7 @@ export interface MediaRef {
 /** AniList's Media object as the show page query returns it. */
 export interface Media {
   id: number;
+  idMal: number | null;
   type: LibraryKind;
   format: string | null;
   status: string | null;
@@ -204,6 +205,36 @@ export interface RepoEntry {
   kind: ExtKind | null;
   author: string | null;
   description: string | null;
+}
+
+// ── Streaming & reading ──
+export interface SourceResult {
+  id: string;
+  title: string;
+  image: string | null;
+  year: number | null;
+}
+
+export interface SourceItem {
+  id: string;
+  number: number;
+  title: string | null;
+  volume: number | null;
+}
+
+export type MatchState =
+  | { status: "matched"; sourceId: string; title: string; auto: boolean }
+  | { status: "unmatched"; candidates: SourceResult[] };
+
+export interface Stream {
+  sources: { url: string; kind: "hls" | "mp4"; label: string }[];
+  subtitles: { url: string; lang: string; label: string }[];
+}
+
+export interface SkipTime {
+  kind: string;
+  start: number;
+  end: number;
 }
 
 export interface Viewer {

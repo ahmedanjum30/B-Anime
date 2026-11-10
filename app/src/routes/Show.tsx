@@ -1,8 +1,11 @@
 import { For, Match, Show as When, Switch, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
-import { A, useParams } from "@solidjs/router";
+import { A, useNavigate, useParams } from "@solidjs/router";
 
 import ListEditor from "../components/ListEditor";
 import EpisodeList from "../components/EpisodeList";
+import ChapterList from "../components/ChapterList";
+import SourcePanel from "../components/SourcePanel";
+import { createSource } from "../lib/source";
 import { FORMAT_LABEL } from "../components/CoverCard";
 import { ArrowLeft, ExternalLink } from "../lib/icons";
 import { errorText, getMedia, inTauri, openAniList } from "../lib/api";
@@ -65,6 +68,9 @@ export default function Show() {
     const m = page()?.media;
     return m ? (m.type === "ANIME" ? m.episodes : m.chapters) : null;
   };
+  const navigate = useNavigate();
+  const source = createSource(() => page()?.media);
+
   const saver = createEntrySaver({
     mediaId: id,
     total,
@@ -150,8 +156,29 @@ export default function Show() {
                       </section>
                     </When>
 
-                    <When when={m().type === "ANIME"}>
-                      <EpisodeList media={m()} saver={saver} localFiles={p().localFiles} />
+                    <When
+                      when={m().type === "ANIME"}
+                      fallback={
+                        <When when={inTauri && source.usable().length > 0} fallback={<SourcePanel media={m()} source={source} />}>
+                          <ChapterList
+                            items={source.items()}
+                            loading={source.items.loading || source.match.loading}
+                            saver={saver}
+                            total={total()}
+                            panel={<SourcePanel media={m()} source={source} />}
+                            onRead={(c) => navigate(`/read/${m().id}/${c.number}?ext=${encodeURIComponent(source.ext()!)}`)}
+                          />
+                        </When>
+                      }
+                    >
+                      <EpisodeList
+                        media={m()}
+                        saver={saver}
+                        localFiles={p().localFiles}
+                        panel={<SourcePanel media={m()} source={source} />}
+                        playable={(ep) => source.byNumber().has(ep)}
+                        onPlay={(ep) => navigate(`/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}`)}
+                      />
                     </When>
 
                     <Related title="Related" id="rel-h" items={relations(m())} />

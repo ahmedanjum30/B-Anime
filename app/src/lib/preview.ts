@@ -52,7 +52,7 @@ export function browserPreviewMedia(id: number): MediaPage {
   });
   return {
     media: {
-      id, type: "ANIME", format: "TV", status: "RELEASING", episodes: 24, chapters: null, volumes: null, duration: 24,
+      id, idMal: null, type: "ANIME", format: "TV", status: "RELEASING", episodes: 24, chapters: null, volumes: null, duration: 24,
       source: "MANGA", season: "FALL", seasonYear: 2026,
       startDate: { year: 2026, month: 10, day: 4 }, endDate: { year: null, month: null, day: null },
       title: { userPreferred: "Lantern Garden", romaji: "Lantern Garden", english: "The Lantern Garden", native: "灯籠の庭" },

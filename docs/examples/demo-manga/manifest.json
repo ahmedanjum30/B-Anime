@@ -1,0 +1,11 @@
+{
+  "id": "demo-manga",
+  "name": "Demo manga",
+  "version": "1.0.0",
+  "kind": "manga",
+  "author": "B-Anime",
+  "description": "Placeholder pages (random photos from picsum.photos) for trying the reader. Not a real manga source.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1
+}

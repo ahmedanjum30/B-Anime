@@ -1,7 +1,28 @@
 import type {
   Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
-  LibraryEntry, LibraryKind, ListEntry, MediaPage, RepoEntry, ScheduleItem, ScheduleScope,
+  LibraryEntry, LibraryKind, ListEntry, MatchState, MediaPage, RepoEntry, ScheduleItem, ScheduleScope, SkipTime,
+  SourceItem, SourceResult, Stream,
 } from "./types";
+
+// ── Streaming & reading (desktop only) ──
+export const findSource = (mediaId: number, ext: string, titles: string[], year: number | null) =>
+  call<MatchState>("find_source", { mediaId, ext, titles, year });
+export const searchSource = (ext: string, query: string) => call<SourceResult[]>("search_source", { ext, query });
+export const setSourceMatch = (mediaId: number, ext: string, sourceId: string, title: string) =>
+  call<void>("set_source_match", { mediaId, ext, sourceId, title });
+export const clearSourceMatch = (mediaId: number, ext: string) => call<void>("clear_source_match", { mediaId, ext });
+export const sourceItems = (ext: string, sourceId: string, refresh = false) =>
+  call<SourceItem[]>("source_items", { ext, sourceId, refresh });
+export const getStream = (ext: string, episodeId: string) => call<Stream>("get_stream", { ext, episodeId });
+export const getPages = (ext: string, chapterId: string) => call<string[]>("get_pages", { ext, chapterId });
+export const getSkipTimes = (malId: number, episode: number, length: number) =>
+  call<SkipTime[]>("get_skip_times", { malId, episode, length });
+export const savePosition = (mediaId: number, episode: number, position: number, duration: number) =>
+  call<void>("save_position", { mediaId, episode, position, duration });
+export const getPosition = (mediaId: number, episode: number) => call<number | null>("get_position", { mediaId, episode });
+export const externalPlayers = () => (inTauri ? call<string[]>("external_players") : Promise.resolve([]));
+export const openExternalPlayer = (player: string, url: string, title: string, subtitle?: string) =>
+  call<void>("open_external_player", { player, url, title, subtitle: subtitle ?? null });
 
 // ── Extensions (desktop only; the browser preview shows an empty list) ──
 export const listExtensions = () => (inTauri ? call<InstalledExtension[]>("list_extensions") : Promise.resolve([]));

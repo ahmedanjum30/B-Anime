@@ -286,6 +286,12 @@ mod tests {
         let ep = eps.value[0]["id"].as_str().unwrap().to_owned();
         let src = runtime::call(code, "sources", &serde_json::json!([ep]), limits).await.unwrap();
         assert_eq!(src.value["sources"][0]["type"], "hls");
+
+        let manga = include_str!("../../../../docs/examples/demo-manga/main.js");
+        let chapters = runtime::call(manga, "chapters", &serde_json::json!(["demo"]), limits).await.unwrap();
+        let first = chapters.value[0]["id"].as_str().unwrap().to_owned();
+        let pages = runtime::call(manga, "pages", &serde_json::json!([first]), limits).await.unwrap();
+        assert_eq!(pages.value["pages"].as_array().unwrap().len(), 8);
     }
 
     #[test]
