@@ -55,7 +55,7 @@ export default function Shell(props: ParentProps) {
 }
 
 function SyncFoot() {
-  const { home } = homeStore;
+  const { home, now } = homeStore;
   return (
     <div class="sync">
       <Show
@@ -73,7 +73,7 @@ function SyncFoot() {
           <i class="dot" aria-hidden="true" /> Synced with AniList
         </span>
         <span class="sync-evidence">
-          <Show when={home()?.sync.lastSynced}>{(t) => fmtAgo(t())}</Show>
+          <Show when={home()?.sync.lastSynced}>{(t) => fmtAgo(t(), now())}</Show>
           {" · "}
           <span class="num">{fmtCount(home()?.sync.filesMatched ?? 0)}</span> files matched
         </span>

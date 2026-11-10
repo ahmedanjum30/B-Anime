@@ -40,6 +40,14 @@ async fn get_home(state: tauri::State<'_, AppState>) -> Result<home::HomeData, S
 }
 
 #[tauri::command]
+async fn get_library(
+    state: tauri::State<'_, AppState>,
+    kind: banime_core::library::Kind,
+) -> Result<Vec<banime_core::library::LibraryEntry>, String> {
+    banime_core::library::list(&state.db, kind).await.map_err(msg)
+}
+
+#[tauri::command]
 async fn get_account(state: tauri::State<'_, AppState>) -> Result<Account, String> {
     account(&state).await.map_err(msg)
 }
@@ -162,6 +170,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_home,
+            get_library,
             get_account,
             anilist_login,
             anilist_cancel_login,

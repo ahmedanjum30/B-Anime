@@ -34,6 +34,28 @@ export interface SyncStatus {
   filesMatched: number;
 }
 
+export type LibraryKind = "ANIME" | "MANGA";
+export type ListStatus = "CURRENT" | "PLANNING" | "COMPLETED" | "DROPPED" | "PAUSED" | "REPEATING";
+
+export interface LibraryEntry {
+  mediaId: number;
+  title: string;
+  titleEnglish: string | null;
+  coverUrl: string | null;
+  color: string | null;
+  format: string | null;
+  mediaStatus: string | null;
+  /** Episodes or chapters, when known. */
+  total: number | null;
+  /** Episodes out so far for a show still airing. */
+  released: number | null;
+  status: ListStatus;
+  progress: number;
+  /** 0–100 */
+  score: number | null;
+  updatedAt: string;
+}
+
 export interface Viewer {
   id: number;
   name: string;

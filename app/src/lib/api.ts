@@ -1,4 +1,4 @@
-import type { Account, HomeData, SyncReport } from "./types";
+import type { Account, HomeData, LibraryEntry, LibraryKind, SyncReport } from "./types";
 
 /** True inside the Tauri webview; false when the UI runs in a plain browser (vite dev). */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -17,8 +17,16 @@ export async function getHome(): Promise<HomeData> {
   return call<HomeData>("get_home");
 }
 
+export async function getLibrary(kind: LibraryKind): Promise<LibraryEntry[]> {
+  if (!inTauri) {
+    const { browserPreviewLibrary } = await import("./preview");
+    return browserPreviewLibrary(kind);
+  }
+  return call<LibraryEntry[]>("get_library", { kind });
+}
+
 export async function getAccount(): Promise<Account> {
-  if (!inTauri) return { clientConfigured: true, viewer: null, lastSynced: null };
+  if (!inTauri) return { clientConfigured: true, viewer: { id: 0, name: "Preview", avatar: null }, lastSynced: null };
   return call<Account>("get_account");
 }
 

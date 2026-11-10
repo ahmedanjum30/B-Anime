@@ -8,7 +8,7 @@ import { homeStore } from "../lib/store";
 type Busy = null | "login" | "sync" | "logout";
 
 export default function Settings() {
-  const { account, setAccount, notify } = homeStore;
+  const { account, setAccount, notify, now } = homeStore;
   const [busy, setBusy] = createSignal<Busy>(null);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -94,7 +94,7 @@ export default function Settings() {
                     <p class="setting-title">{viewer().name}</p>
                     <p class="setting-desc">
                       <Show when={account()?.lastSynced} fallback="Not synced yet">
-                        {(t) => <>Last synced {fmtAgo(t())}</>}
+                        {(t) => <>Last synced {fmtAgo(t(), now())}</>}
                       </Show>
                     </p>
                   </div>

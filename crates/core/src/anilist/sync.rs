@@ -21,7 +21,7 @@ query ($userId: Int, $type: MediaType) {
           id
           type
           title { userPreferred english }
-          coverImage { extraLarge color }
+          coverImage { extraLarge large color }
           bannerImage
           format
           status
@@ -110,6 +110,7 @@ struct Title {
 #[serde(rename_all = "camelCase")]
 struct Cover {
     extra_large: Option<String>,
+    large: Option<String>,
     color: Option<String>,
 }
 
@@ -205,18 +206,19 @@ pub async fn sync_all(client: &Client, db: &Db, viewer: &Viewer) -> Result<SyncR
         for e in entries {
             let m = &e.media;
             let title = m.title.user_preferred.clone().or_else(|| m.title.english.clone()).unwrap_or_else(|| format!("#{}", m.id));
-            let (cover, color) = m
+            let (cover, thumb, color) = m
                 .cover_image
                 .as_ref()
-                .map(|c| (c.extra_large.clone(), c.color.clone()))
-                .unwrap_or((None, None));
+                .map(|c| (c.extra_large.clone(), c.large.clone(), c.color.clone()))
+                .unwrap_or((None, None, None));
             sqlx::query(
-                r#"INSERT INTO media (id, kind, title, title_english, cover_url, banner_url, color, format, status,
+                r#"INSERT INTO media (id, kind, title, title_english, cover_url, cover_thumb, banner_url, color, format, status,
                                       episodes, chapters, duration_min, next_episode, next_airing_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                    ON CONFLICT(id) DO UPDATE SET
                      kind = excluded.kind, title = excluded.title, title_english = excluded.title_english,
-                     cover_url = excluded.cover_url, banner_url = excluded.banner_url, color = excluded.color,
+                     cover_url = excluded.cover_url, cover_thumb = excluded.cover_thumb,
+                     banner_url = excluded.banner_url, color = excluded.color,
                      format = excluded.format, status = excluded.status, episodes = excluded.episodes,
                      chapters = excluded.chapters, duration_min = excluded.duration_min,
                      next_episode = excluded.next_episode, next_airing_at = excluded.next_airing_at,
@@ -227,6 +229,7 @@ pub async fn sync_all(client: &Client, db: &Db, viewer: &Viewer) -> Result<SyncR
             .bind(&title)
             .bind(&m.title.english)
             .bind(cover)
+            .bind(thumb)
             .bind(&m.banner_image)
             .bind(color)
             .bind(&m.format)

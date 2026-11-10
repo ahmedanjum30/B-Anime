@@ -5,6 +5,7 @@ pub mod anilist;
 pub mod db;
 pub mod error;
 pub mod home;
+pub mod library;
 pub mod paths;
 
 pub use error::{Error, Result};

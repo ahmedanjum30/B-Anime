@@ -1,6 +1,45 @@
 // Browser-preview data for working on the UI without the Tauri shell.
 // Mirrors banime_core::home::sample(); loaded lazily, only outside Tauri.
-import type { AiringSlot, HomeData, UpNext } from "./types";
+import type { AiringSlot, HomeData, LibraryEntry, LibraryKind, ListStatus, UpNext } from "./types";
+
+/** A large synthetic list (2,400 anime / 400 manga) for checking the grid at archivist scale. */
+export function browserPreviewLibrary(kind: LibraryKind): LibraryEntry[] {
+  const syl = ["ka", "mi", "to", "ra", "shi", "no", "yu", "ki", "ha", "ru", "se", "n", "ai", "ko", "re", "zu"];
+  const words = ["Sky", "Blade", "Night", "Garden", "Signal", "Tide", "Ember", "Orbit", "Lantern", "Echo"];
+  const statuses: ListStatus[] = ["COMPLETED", "COMPLETED", "COMPLETED", "PLANNING", "PLANNING", "CURRENT", "PAUSED", "DROPPED", "REPEATING"];
+  const formats = kind === "ANIME" ? ["TV", "TV", "TV", "MOVIE", "OVA", "ONA", "SPECIAL", "TV_SHORT"] : ["MANGA", "MANGA", "NOVEL", "ONE_SHOT"];
+  const colors = ["#3d5a6e", "#6e3d3d", "#4a4a6e", "#3d6e55", "#6e5d3d", "#5a3d6e", "#3d6a6e", "#6e4a3d"];
+  let seed = kind === "ANIME" ? 7 : 11;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
+  const n = kind === "ANIME" ? 2400 : 400;
+
+  return Array.from({ length: n }, (_, i) => {
+    const name = Array.from({ length: 2 + Math.floor(rnd() * 3) }, () => pick(syl)).join("");
+    const title = `${name[0].toUpperCase()}${name.slice(1)} ${rnd() > 0.5 ? pick(words) : ""}`.trim();
+    const total = kind === "ANIME" ? pick([12, 12, 13, 24, 25, 1, 6]) : pick([40, 120, 250, 8]);
+    const status = pick(statuses);
+    const airing = status === "CURRENT" && rnd() > 0.5;
+    const released = airing ? Math.max(1, Math.floor(total * rnd())) : null;
+    const progress =
+      status === "COMPLETED" ? total : status === "PLANNING" ? 0 : Math.floor((released ?? total) * rnd());
+    return {
+      mediaId: 100000 + i,
+      title,
+      titleEnglish: null,
+      coverUrl: null,
+      color: pick(colors),
+      format: pick(formats),
+      mediaStatus: airing ? "RELEASING" : "FINISHED",
+      total,
+      released,
+      status,
+      progress,
+      score: rnd() > 0.4 ? Math.round(50 + rnd() * 50) : null,
+      updatedAt: new Date(Date.now() - i * 3_600_000).toISOString(),
+    };
+  });
+}
 
 export function browserPreviewHome(now = new Date()): HomeData {
   // Authored in local time, like real listings.
