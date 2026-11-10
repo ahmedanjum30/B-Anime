@@ -1,0 +1,26 @@
+{
+  "name": "B-Anime examples",
+  "description": "Example extensions for trying B-Anime: public test videos and placeholder pages. Not real sources.",
+  "extensions": [
+    {
+      "manifestUrl": "examples/demo-streams/manifest.json",
+      "id": "demo-streams",
+      "name": "Demo streams",
+      "version": "1.2.0",
+      "kind": "anime",
+      "author": "B-Anime",
+      "language": "en",
+      "description": "Public test videos (Big Buck Bunny, Apple's HLS examples) for trying the player."
+    },
+    {
+      "manifestUrl": "examples/demo-manga/manifest.json",
+      "id": "demo-manga",
+      "name": "Demo manga",
+      "version": "1.0.0",
+      "kind": "manga",
+      "author": "B-Anime",
+      "language": "en",
+      "description": "Placeholder pages from picsum.photos for trying the reader."
+    }
+  ]
+}
