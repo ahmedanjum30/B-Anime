@@ -2,8 +2,12 @@
 //!
 //! An extension is a manifest (JSON) plus one script defining `class Provider`. B-Anime ships
 //! none; users install them from a URL or from repositories they add. See docs/extensions.md.
+//! Extensions in the single-manifest format (online-stream and manga providers) convert on
+//! install; see convert.rs.
 
+pub mod host;
 pub mod runtime;
+pub mod convert;
 
 use std::path::{Path, PathBuf};
 
@@ -16,8 +20,9 @@ use crate::{Error, Result};
 pub use runtime::{CallOutput, Limits};
 
 pub const API_VERSION: u32 = 1;
-const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_CODE_BYTES: usize = 4 * 1024 * 1024;
+/// Single-file manifests can carry their code inline.
+const MAX_MANIFEST_BYTES: usize = MAX_CODE_BYTES + 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -54,6 +59,9 @@ pub struct Manifest {
     /// Where the script lives; relative URLs resolve against the manifest's URL.
     pub code_url: String,
     pub api_version: u32,
+    /// "converted" for extensions converted from the single-manifest format; absent for ours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,22 +114,28 @@ async fn download(url: &reqwest::Url, cap: usize, limits: Limits) -> Result<Stri
 pub async fn fetch(manifest_url: &str, limits: Limits) -> Result<(Manifest, String)> {
     let url = reqwest::Url::parse(manifest_url.trim()).map_err(|e| Error::Extension(format!("not a valid URL: {e}")))?;
     let text = download(&url, MAX_MANIFEST_BYTES, limits).await?;
-    let manifest: Manifest =
-        serde_json::from_str(&text).map_err(|e| Error::Extension(format!("the manifest isn't valid: {e}")))?;
+    let raw: Value = serde_json::from_str(&text).map_err(|e| Error::Extension(format!("the manifest isn't valid JSON: {e}")))?;
 
+    let (manifest, code) = if convert::is_manifest(&raw) {
+        convert::convert(&raw, &url, limits).await?
+    } else {
+        let mut manifest: Manifest =
+            serde_json::from_value(raw).map_err(|e| Error::Extension(format!("the manifest isn't valid: {e}")))?;
+        manifest.origin = None;
+        if manifest.api_version != API_VERSION {
+            return Err(Error::Extension(format!(
+                "made for extension API v{}, this version of B-Anime supports v{API_VERSION}",
+                manifest.api_version
+            )));
+        }
+        let code_url = url
+            .join(&manifest.code_url)
+            .map_err(|e| Error::Extension(format!("bad codeUrl: {e}")))?;
+        (manifest, download(&code_url, MAX_CODE_BYTES, limits).await?)
+    };
     if !valid_id(&manifest.id) {
         return Err(Error::Extension(format!("invalid id {:?}: use lowercase letters, digits and dashes", manifest.id)));
     }
-    if manifest.api_version != API_VERSION {
-        return Err(Error::Extension(format!(
-            "made for extension API v{}, this version of B-Anime supports v{API_VERSION}",
-            manifest.api_version
-        )));
-    }
-    let code_url = url
-        .join(&manifest.code_url)
-        .map_err(|e| Error::Extension(format!("bad codeUrl: {e}")))?;
-    let code = download(&code_url, MAX_CODE_BYTES, limits).await?;
 
     // Load it in the sandbox and check it has what its kind needs.
     let probe = Limits { call_timeout: std::time::Duration::from_secs(10), ..limits };
@@ -218,8 +232,10 @@ pub async fn remove(db: &Db, dir: &Path, id: &str) -> Result<()> {
 pub async fn available_update(ext: &Installed, limits: Limits) -> Result<Option<String>> {
     let url = reqwest::Url::parse(&ext.source_url).map_err(|e| Error::Extension(e.to_string()))?;
     let text = download(&url, MAX_MANIFEST_BYTES, limits).await?;
-    let latest: Manifest = serde_json::from_str(&text).map_err(|e| Error::Extension(e.to_string()))?;
-    Ok(newer(&latest.version, &ext.manifest.version).then_some(latest.version))
+    // Both manifest formats carry a top-level "version".
+    let latest: Value = serde_json::from_str(&text).map_err(|e| Error::Extension(e.to_string()))?;
+    let version = latest.get("version").and_then(Value::as_str).ok_or_else(|| Error::Extension("the manifest has no version".into()))?;
+    Ok(newer(version, &ext.manifest.version).then(|| version.to_owned()))
 }
 
 /// Runs a method of an installed, enabled extension.
@@ -249,10 +265,16 @@ pub struct RepoEntry {
     pub description: Option<String>,
     pub icon: Option<String>,
     pub language: Option<String>,
+    /// "converted" when the listing is in the single-manifest format (it converts on install).
+    pub origin: Option<String>,
 }
 
 /// A repository: `{ "name", "description", "extensions": [...] }`, or just the array. Each item
 /// is a manifest URL or an object with a `manifestUrl` plus listing details.
+///
+/// Single-manifest repositories work too: a marketplace (an array of manifests with `manifestURI`)
+/// and `{ "urls": [...] }`. Types B-Anime can't run (torrent providers, plugins) are left
+/// out of the listing.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repo {
@@ -267,12 +289,19 @@ pub async fn read_repo(url: &str, limits: Limits) -> Result<Repo> {
     let text = download(&base, 1024 * 1024, limits).await?;
     let doc: Value = serde_json::from_str(&text).map_err(|e| Error::Extension(format!("not a repository: {e}")))?;
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
-    let (name, description, items) = match &doc {
-        Value::Array(items) => (None, None, items.clone()),
+    let (name, description, items, url_list) = match &doc {
+        Value::Array(items) => (None, None, items.clone(), false),
+        Value::Object(_) if doc.get("urls").is_some_and(Value::is_array) => (
+            s(&doc, "name"),
+            s(&doc, "description"),
+            doc["urls"].as_array().cloned().unwrap_or_default(),
+            true,
+        ),
         Value::Object(_) => (
             s(&doc, "name"),
             s(&doc, "description"),
             doc.get("extensions").and_then(Value::as_array).cloned().unwrap_or_default(),
+            false,
         ),
         _ => return Err(Error::Extension("not a repository: expected a list or an object".into())),
     };
@@ -280,17 +309,25 @@ pub async fn read_repo(url: &str, limits: Limits) -> Result<Repo> {
     let extensions = items
         .into_iter()
         .filter_map(|v| {
-            let raw = v.as_str().map(str::to_owned).or_else(|| s(&v, "manifestUrl"))?;
+            let raw = v.as_str().map(str::to_owned).or_else(|| s(&v, "manifestUrl")).or_else(|| s(&v, "manifestURI"))?;
             let manifest_url = absolute(&raw)?;
+            // Those entries name their type; its `language` is the programming language and
+            // `lang` the content's.
+            let foreign_type = s(&v, "type");
+            let (kind, language) = match &foreign_type {
+                Some(t) => (Some(convert::kind(t).ok()?), Some(s(&v, "lang").filter(|l| !l.is_empty()).unwrap_or_else(|| "en".into()))),
+                None => (v.get("kind").and_then(|k| serde_json::from_value(k.clone()).ok()), s(&v, "language")),
+            };
             Some(RepoEntry {
-                id: s(&v, "id"),
+                id: s(&v, "id").map(|id| if foreign_type.is_some() { convert::convert_id(&id) } else { id }),
                 name: s(&v, "name").unwrap_or_else(|| manifest_url.clone()),
                 version: s(&v, "version"),
-                kind: v.get("kind").and_then(|k| serde_json::from_value(k.clone()).ok()),
+                kind,
                 author: s(&v, "author"),
                 description: s(&v, "description"),
-                icon: s(&v, "icon").and_then(|i| absolute(&i)),
-                language: s(&v, "language"),
+                icon: s(&v, "icon").filter(|i| !i.is_empty()).and_then(|i| absolute(&i)),
+                language,
+                origin: (foreign_type.is_some() || url_list).then(|| convert::ORIGIN.to_owned()),
                 manifest_url,
             })
         })
@@ -426,6 +463,68 @@ mod tests {
 
         remove(&db, &dir, "test-source").await.unwrap();
         assert!(list(&db).await.unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn converted_repositories_and_manifests_install() {
+        const TS: &str = r#"class Provider {
+            getSettings(): Settings { return { episodeServers: ["one"], supportsDub: false } }
+            async search(opts: SearchOptions): Promise<SearchResult[]> { return [{ id: "s", title: opts.query, url: "", subOrDub: "sub" }] }
+            async findEpisodes(id: string): Promise<EpisodeDetails[]> { return [{ id: "e1", number: 1, url: "" }] }
+            async findEpisodeServer(ep: EpisodeDetails, server: string): Promise<EpisodeServer> {
+                return { server, headers: {}, videoSources: [{ url: "https://example.com/" + ep.id + ".mp4", type: "mp4", quality: "720p", subtitles: [] }] }
+            }
+        }"#;
+        let base = serve(
+            Router::new()
+                .route("/inline.json", route(|| async {
+                    serde_json::json!({
+                        "id": "My_Stream", "name": "My stream", "version": "2.1.0", "type": "onlinestream-provider",
+                        "language": "typescript", "lang": "en", "author": "someone", "manifestURI": "inline.json", "payload": TS,
+                    }).to_string()
+                }))
+                .route("/remote.json", route(|| async {
+                    r#"{"id":"remote-manga","name":"Remote manga","version":"1.0.0","type":"manga-provider","language":"javascript","payloadURI":"remote.js"}"#
+                }))
+                .route("/remote.js", route(|| async {
+                    "class Provider { async search(){return []} async findChapters(){return []} async findChapterPages(){return []} getSettings(){return {}} }"
+                }))
+                .route("/marketplace.json", route(|| async {
+                    r#"[
+                        {"id":"My_Stream","name":"My stream","version":"2.1.0","type":"onlinestream-provider","language":"typescript","lang":"","manifestURI":"inline.json"},
+                        {"id":"torrents","name":"Torrents","version":"1","type":"anime-torrent-provider","language":"go","manifestURI":"t.json"},
+                        {"id":"remote-manga","name":"Remote manga","version":"1.0.0","type":"manga-provider","language":"javascript","lang":"multi","manifestURI":"remote.json"}
+                    ]"#
+                }))
+                .route("/urls.json", route(|| async { r#"{"urls":["inline.json","remote.json"]}"# })),
+        )
+        .await;
+
+        let market = read_repo(&format!("{base}/marketplace.json"), test_limits()).await.unwrap();
+        assert_eq!(market.extensions.len(), 2, "torrent providers are left out");
+        assert_eq!(market.extensions[0].id.as_deref(), Some("my-stream"));
+        assert_eq!(market.extensions[0].kind, Some(ExtKind::Anime));
+        assert_eq!(market.extensions[0].language.as_deref(), Some("en"));
+        assert_eq!(market.extensions[1].language.as_deref(), Some("multi"));
+        assert_eq!(market.extensions[1].origin.as_deref(), Some("converted"));
+        let urls = read_repo(&format!("{base}/urls.json"), test_limits()).await.unwrap();
+        assert_eq!(urls.extensions.len(), 2);
+        assert_eq!(urls.extensions[1].manifest_url, format!("{base}/remote.json"));
+
+        let db = crate::db::open_memory().await.unwrap();
+        let dir = std::env::temp_dir().join(format!("banime-converted-test-{}", std::process::id()));
+        let ext = install(&db, &dir, &format!("{base}/inline.json"), test_limits()).await.unwrap();
+        assert_eq!((ext.manifest.id.as_str(), ext.manifest.version.as_str()), ("my-stream", "2.1.0"));
+        assert_eq!(ext.manifest.origin.as_deref(), Some("converted"));
+        let eps = call(&db, &dir, "my-stream", "episodes", &serde_json::json!(["s"]), test_limits()).await.unwrap().value;
+        let src = call(&db, &dir, "my-stream", "sources", &serde_json::json!([eps[0]["id"]]), test_limits()).await.unwrap().value;
+        assert_eq!(src["sources"][0], serde_json::json!({ "url": "https://example.com/e1.mp4", "type": "mp4", "label": "720p" }));
+        assert_eq!(available_update(&ext, test_limits()).await.unwrap(), None);
+
+        let manga = install(&db, &dir, &format!("{base}/remote.json"), test_limits()).await.unwrap();
+        assert_eq!(manga.manifest.kind, ExtKind::Manga);
+        assert_eq!(manga.manifest.code_url, format!("{base}/remote.js"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

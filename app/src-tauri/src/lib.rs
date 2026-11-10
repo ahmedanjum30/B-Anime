@@ -115,7 +115,7 @@ async fn search_source(
     query: String,
     dub: Option<bool>,
 ) -> Result<Vec<streaming::SourceResult>, String> {
-    streaming::search(&state.db, &state.paths.extensions, &ext, &query, dub.unwrap_or(false)).await.map_err(msg)
+    streaming::search(&state.db, &state.paths.extensions, &ext, &query, dub.unwrap_or(false), None).await.map_err(msg)
 }
 
 #[tauri::command]

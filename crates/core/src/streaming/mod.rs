@@ -234,8 +234,16 @@ async fn call(db: &Db, dir: &Path, ext: &str, method: &str, args: Value) -> Resu
 }
 
 /// `dub` asks the source for its English-dubbed version (sources without one ignore it).
-pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str, dub: bool) -> Result<Vec<SourceResult>> {
-    parse(call(db, dir, ext, "search", json!([{ "query": query, "dub": dub }])).await?, "search results")
+/// `media` describes the show when known: `{ id, titles, year }` (AniList id, titles best first).
+pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str, dub: bool, media: Option<Value>) -> Result<Vec<SourceResult>> {
+    let mut q = json!({ "query": query, "dub": dub });
+    if let Some(media) = media {
+        if let Some(year) = media.get("year").filter(|y| !y.is_null()) {
+            q["year"] = year.clone();
+        }
+        q["media"] = media;
+    }
+    parse(call(db, dir, ext, "search", json!([q])).await?, "search results")
 }
 
 /// The saved match for this show on this source (sub or dub), or the best automatic one
@@ -262,11 +270,13 @@ pub async fn find_match(
     }
 
     let mut scored: Vec<(f64, SourceResult)> = Vec::new();
-    for query in titles.iter().filter(|t| !t.trim().is_empty()).take(2) {
-        for r in search(db, dir, ext, query, dub).await? {
+    let media = json!({ "id": media_id, "titles": titles, "year": year });
+    let (queries, compare) = match_titles(titles);
+    for query in &queries {
+        for r in search(db, dir, ext, query, dub, Some(media.clone())).await? {
             // "(Dub)" / "(English Dub)" suffixes on dub entries shouldn't cost them the match.
             let candidate = strip_dub_marker(&r.title);
-            let mut score = titles.iter().map(|t| similarity(t, &candidate)).fold(0.0, f64::max);
+            let mut score = compare.iter().map(|t| similarity(t, &candidate)).fold(0.0, f64::max);
             if let (Some(a), Some(b)) = (year, r.year) {
                 if a == b {
                     score += 0.05;
@@ -316,6 +326,51 @@ pub async fn clear_match(db: &Db, media_id: i64, ext: &str, dub: bool) -> Result
         .execute(db)
         .await?;
     Ok(())
+}
+
+/// Titles past this length are searched by their short form: light-novel titles run to whole
+/// sentences, which sites list (and search engines match) only by their opening clause.
+const LONG_TITLE: usize = 60;
+/// At most this many searches per match attempt.
+const MAX_QUERIES: usize = 3;
+
+/// The opening clause of a title, cut at the first ":", ". ", "? ", "! " or " - " that leaves
+/// at least 12 characters ("Dr. STONE: Science Future" → "Dr. STONE").
+pub fn short_title(title: &str) -> Option<String> {
+    let t = title.trim();
+    let mut cuts: Vec<usize> = [":", ". ", "? ", "! ", " - ", " – "].iter().flat_map(|sep| t.match_indices(sep).map(|(i, _)| i)).collect();
+    cuts.sort_unstable();
+    cuts.into_iter().find_map(|i| {
+        let s = t[..i].trim_end_matches(['.', ' ', ',']).trim();
+        (s.chars().count() >= 12).then(|| s.to_owned())
+    })
+}
+
+/// What to search a source for (best first, at most [`MAX_QUERIES`]) and what to score its
+/// results against (every title plus its short form).
+fn match_titles(titles: &[String]) -> (Vec<String>, Vec<String>) {
+    let titles: Vec<&str> = titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    let shorts: Vec<Option<String>> = titles.iter().map(|t| short_title(t)).collect();
+    let mut queries: Vec<String> = Vec::new();
+    let mut add = |q: &str, queries: &mut Vec<String>| {
+        if !queries.iter().any(|x| x.eq_ignore_ascii_case(q)) {
+            queries.push(q.to_owned());
+        }
+    };
+    // Each title, long ones by their short form; then the short forms of the rest.
+    for (t, short) in titles.iter().zip(&shorts).take(2) {
+        match short {
+            Some(s) if t.chars().count() > LONG_TITLE => add(s, &mut queries),
+            _ => add(t, &mut queries),
+        }
+    }
+    for s in shorts.iter().take(2).flatten() {
+        add(s, &mut queries);
+    }
+    queries.truncate(MAX_QUERIES);
+    let mut compare: Vec<String> = titles.iter().map(|t| t.to_string()).collect();
+    compare.extend(shorts.into_iter().flatten());
+    (queries, compare)
 }
 
 /// "Frieren (Dub)" → "Frieren", for scoring dub entries against AniList titles.
@@ -510,6 +565,29 @@ mod tests {
         assert_eq!(best("Gintama°"), "Gintama°");
         assert_eq!(best("Gintama_"), "Gintama.");
         assert_eq!(best("Gintama' Enchōsen"), "Gintama': Enchousen");
+    }
+
+    #[test]
+    fn long_titles_search_by_their_opening_clause() {
+        let romaji = "Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life wo Ouka Suru.: Ore wa Buki dake ja Naku, Arayuru Mono ni \"Kyouka Point\" wo Fuyo Dekiru shi";
+        let english = "The Laid-Off Cheat-Granting Mage Enjoys a Second Lease on Life";
+        assert_eq!(short_title(romaji).as_deref(), Some("Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life wo Ouka Suru"));
+        assert_eq!(short_title("Dr. STONE: SCIENCE FUTURE Part 3"), None, "too short to stand alone");
+        assert_eq!(short_title("Kusuriya no Hitorigoto: Season 2").as_deref(), Some("Kusuriya no Hitorigoto"));
+        assert_eq!(short_title("Frieren"), None);
+
+        let (queries, compare) = match_titles(&[romaji.into(), english.into()]);
+        assert_eq!(queries, [short_title(romaji).unwrap(), english.to_owned()]);
+        assert!(compare.contains(&short_title(romaji).unwrap()));
+        // A site listing the short romaji title now clears the auto-match bar.
+        let best = compare.iter().map(|t| similarity(t, "Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life wo Ouka Suru")).fold(0.0, f64::max);
+        assert!(best >= AUTO_MATCH, "{best}");
+
+        // Ordinary titles search as before, then try their short form.
+        let (queries, _) = match_titles(&["Kusuriya no Hitorigoto 2nd Season".into(), "The Apothecary Diaries Season 2".into()]);
+        assert_eq!(queries, ["Kusuriya no Hitorigoto 2nd Season", "The Apothecary Diaries Season 2"]);
+        let (queries, _) = match_titles(&["Sousou no Frieren: Season 2".into(), "Frieren: Beyond Journey's End Season 2".into()]);
+        assert_eq!(queries, ["Sousou no Frieren: Season 2", "Frieren: Beyond Journey's End Season 2", "Sousou no Frieren"]);
     }
 
     #[test]

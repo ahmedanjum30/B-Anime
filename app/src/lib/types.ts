@@ -183,6 +183,8 @@ export interface ExtManifest {
   icon: string | null;
   codeUrl: string;
   apiVersion: number;
+  /** "converted" for extensions converted from the single-manifest format. */
+  origin?: string;
 }
 
 export interface InstalledExtension extends ExtManifest {
@@ -207,6 +209,8 @@ export interface RepoEntry {
   description: string | null;
   icon: string | null;
   language: string | null;
+  /** "converted" when listed in the single-manifest format (converted on install). */
+  origin: string | null;
 }
 
 export interface Repo {

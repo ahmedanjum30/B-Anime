@@ -1,4 +1,5 @@
-//! The extension sandbox: QuickJS with nothing but `fetch` and `console`.
+//! The extension sandbox: QuickJS with `fetch`, `console`, a few web APIs (see prelude.js) and
+//! pure helpers (HTML parsing, crypto, URLs; see host.rs).
 //!
 //! Every call gets a fresh runtime, so extensions keep no state between calls and can't see each
 //! other. Limits: a wall-clock deadline (also enforced inside JS through the interrupt handler, so
@@ -13,6 +14,7 @@ use rquickjs::prelude::{Async, Func};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Function, Promise};
 use serde_json::{Value, json};
 
+use super::host;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, Copy)]
@@ -45,69 +47,15 @@ pub struct CallOutput {
     pub logs: Vec<String>,
 }
 
-const PRELUDE: &str = r#"
-(() => {
-  const hostFetch = globalThis.__host_fetch;
-  const hostLog = globalThis.__host_log;
-  delete globalThis.__host_fetch;
-  delete globalThis.__host_log;
+const PRELUDE: &str = include_str!("prelude.js");
 
-  const show = (v) => {
-    if (typeof v === "string") return v;
-    try { return JSON.stringify(v); } catch { return String(v); }
-  };
-  const log = (level) => (...args) => hostLog(level, args.map(show).join(" "));
-  globalThis.console = { log: log("info"), info: log("info"), debug: log("debug"), warn: log("warn"), error: log("error") };
-
-  globalThis.fetch = async (url, options = {}) => {
-    const body = options.body == null ? null : typeof options.body === "string" ? options.body : JSON.stringify(options.body);
-    const r = JSON.parse(await hostFetch(String(url), JSON.stringify({
-      method: options.method || "GET",
-      headers: options.headers || {},
-      body,
-    })));
-    if (r.error) throw new Error(r.error);
-    const headers = {
-      get: (name) => r.headers[String(name).toLowerCase()] ?? null,
-      has: (name) => String(name).toLowerCase() in r.headers,
-      entries: () => Object.entries(r.headers),
-    };
-    return {
-      ok: r.status >= 200 && r.status < 300,
-      status: r.status,
-      url: r.url,
-      headers,
-      text: async () => r.body,
-      json: async () => JSON.parse(r.body),
-    };
-  };
-
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  globalThis.btoa = (input) => {
-    const s = String(input);
-    let out = "";
-    for (let i = 0; i < s.length; i += 3) {
-      const a = s.charCodeAt(i), b = s.charCodeAt(i + 1), c = s.charCodeAt(i + 2);
-      if (a > 255 || b > 255 || c > 255) throw new Error("btoa: character out of range");
-      const n = (a << 16) | ((b || 0) << 8) | (c || 0);
-      out += chars[(n >> 18) & 63] + chars[(n >> 12) & 63] + (i + 1 < s.length ? chars[(n >> 6) & 63] : "=") + (i + 2 < s.length ? chars[n & 63] : "=");
+/// `{"value": v}` or `{"error": message}`, the shape host helpers hand back to JS.
+fn reply(r: std::result::Result<Value, String>) -> String {
+    match r {
+        Ok(v) => json!({ "value": v }).to_string(),
+        Err(e) => json!({ "error": e }).to_string(),
     }
-    return out;
-  };
-  globalThis.atob = (input) => {
-    const s = String(input).replace(/[\s=]+/g, "");
-    let out = "", buffer = 0, bits = 0;
-    for (const ch of s) {
-      const v = chars.indexOf(ch);
-      if (v < 0) throw new Error("atob: invalid character");
-      buffer = (buffer << 6) | v;
-      bits += 6;
-      if (bits >= 8) { bits -= 8; out += String.fromCharCode((buffer >> bits) & 255); }
-    }
-    return out;
-  };
-})();
-"#;
+}
 
 /// Calls `method` on a fresh `new Provider()` with JSON `args` (an array of arguments).
 /// `__methods` returns the provider's method names, for validation at install time.
@@ -170,6 +118,9 @@ struct FetchOptions {
     #[serde(default)]
     headers: serde_json::Map<String, Value>,
     body: Option<String>,
+    /// "follow" (default), "manual" (hand back the 3xx) or "error".
+    #[serde(default)]
+    redirect: Option<String>,
 }
 
 fn get() -> String {
@@ -189,6 +140,8 @@ async fn host_fetch_inner(url: String, options: String, limits: Limits) -> std::
     let method = reqwest::Method::from_bytes(opts.method.to_ascii_uppercase().as_bytes())
         .map_err(|_| format!("unknown method {}", opts.method))?;
     let mut url = reqwest::Url::parse(&url).map_err(|e| format!("bad URL {url}: {e}"))?;
+    let original = url.clone();
+    let redirect = opts.redirect.as_deref().unwrap_or("follow");
 
     for _ in 0..=5 {
         check_url(&url, limits.allow_private_hosts)?;
@@ -203,20 +156,28 @@ async fn host_fetch_inner(url: String, options: String, limits: Limits) -> std::
         }
         let mut res = req.send().await.map_err(|e| format!("request to {url} failed: {e}"))?;
 
-        if res.status().is_redirection() {
+        if res.status().is_redirection() && redirect != "manual" {
             if let Some(loc) = res.headers().get(reqwest::header::LOCATION).and_then(|l| l.to_str().ok()) {
+                if redirect == "error" {
+                    return Err(format!("{url} redirected to {loc}"));
+                }
                 url = url.join(loc).map_err(|e| format!("bad redirect: {e}"))?;
                 continue;
             }
         }
 
         let status = res.status().as_u16();
+        let status_text = res.status().canonical_reason().unwrap_or_default();
         let final_url = res.url().to_string();
-        let headers: serde_json::Map<String, Value> = res
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_ascii_lowercase(), Value::from(v))))
-            .collect();
+        let mut headers = serde_json::Map::new();
+        let mut set_cookies = Vec::new();
+        for (k, v) in res.headers() {
+            let Ok(v) = v.to_str() else { continue };
+            if k == reqwest::header::SET_COOKIE {
+                set_cookies.push(Value::from(v));
+            }
+            headers.entry(k.as_str().to_ascii_lowercase()).or_insert_with(|| Value::from(v));
+        }
         let mut body = Vec::new();
         while let Some(chunk) = res.chunk().await.map_err(|e| format!("reading {url} failed: {e}"))? {
             if body.len() + chunk.len() > limits.max_response_bytes {
@@ -226,8 +187,11 @@ async fn host_fetch_inner(url: String, options: String, limits: Limits) -> std::
         }
         return Ok(json!({
             "status": status,
+            "statusText": status_text,
             "url": final_url,
+            "redirected": url != original,
             "headers": headers,
+            "setCookies": set_cookies,
             "body": String::from_utf8_lossy(&body),
         }));
     }
@@ -289,6 +253,46 @@ pub async fn call(code: &str, method: &str, args: &Value, limits: Limits) -> Res
                         }
                         Ok(host_fetch(url, options, limits).await.to_string())
                     }
+                })),
+            )
+            .map_err(|e| e.to_string())?;
+
+        let docs = Arc::new(Mutex::new(host::Docs::default()));
+        let parse_docs = docs.clone();
+        globals
+            .set(
+                "__host_html_parse",
+                Func::from(move |html: String| {
+                    reply(parse_docs.lock().map_err(|e| e.to_string()).and_then(|mut d| d.parse(&html)).map(Value::from))
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+        globals
+            .set(
+                "__host_html",
+                Func::from(move |doc: u32, op: String, ids: String, arg: String| {
+                    let ids: Vec<u32> = serde_json::from_str(&ids).unwrap_or_default();
+                    reply(docs.lock().map_err(|e| e.to_string()).and_then(|mut d| d.op(doc, &op, &ids, &arg)))
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+        globals
+            .set(
+                "__host_crypto",
+                Func::from(|op: String, a: String, b: String, c: String| reply(host::crypto(&op, &a, &b, &c).map(Value::from))),
+            )
+            .map_err(|e| e.to_string())?;
+        globals
+            .set("__host_url", Func::from(|input: String, base: String| reply(host::parse_url(&input, &base))))
+            .map_err(|e| e.to_string())?;
+        globals
+            .set(
+                "__host_sleep",
+                Func::from(Async(move |ms: f64| async move {
+                    // Never past the call's own deadline.
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    tokio::time::sleep(Duration::from_millis(ms.clamp(0.0, 60_000.0) as u64).min(left)).await;
+                    Ok::<(), rquickjs::Error>(())
                 })),
             )
             .map_err(|e| e.to_string())?;

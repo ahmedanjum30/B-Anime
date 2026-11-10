@@ -80,13 +80,16 @@ class Provider {
 Each call runs in a fresh, isolated JavaScript engine (QuickJS, modern ES2023 syntax). Nothing
 carries over between calls. Available:
 
-- `fetch(url, { method, headers, body })` → `{ ok, status, url, headers.get(name), text(), json() }`.
+- `fetch(url, { method, headers, body, redirect })` →
+  `{ ok, status, statusText, url, redirected, headers.get(name), headers.getSetCookie(), text(), json() }`.
   http and https only. Requests to this computer or private networks are refused. Bodies are text
-  and capped at 8 MB. Redirects are followed (up to 5). At most 60 requests per call.
+  and capped at 8 MB. Redirects are followed (up to 5) unless `redirect` is `"manual"` or
+  `"error"`. At most 60 requests per call.
 - `console.log / info / warn / error`: shown in the Extensions screen's tester.
-- `atob`, `btoa`, plus the standard library (`JSON`, `RegExp`, `Map`, `Promise`, …).
+- `atob`, `btoa`, `URL`, `URLSearchParams`, `TextEncoder`, `TextDecoder`, `setTimeout`,
+  `clearTimeout`, plus the standard library (`JSON`, `RegExp`, `Map`, `Promise`, …).
 
-Not available: the DOM, Node.js APIs, timers, file access. Bundle any libraries you need (an HTML
+Not available: the DOM, Node.js APIs, file access. Bundle any libraries you need (an HTML
 parser, crypto) into your script, e.g. with esbuild: `esbuild src.js --bundle --format=iife`.
 Make sure `class Provider` ends up at the top level of the output.
 
@@ -105,6 +108,32 @@ A repository is a JSON array of manifest URLs, or of objects with a `manifestUrl
 ```
 
 Users add repositories in **Extensions → Repositories**.
+
+## Converted extensions
+
+B-Anime also installs extensions written in a second format and converts them when they're
+installed. In that format, an extension is a single JSON manifest with a `type` and its code in
+`payload` (or at `payloadURI`). Paste such a manifest URL to install it, or add a repository of
+them: a marketplace list of manifests (each with a `manifestURI`) or `{ "urls": [...] }`. The
+Extensions screen marks them as converted.
+
+- **Supported:** `onlinestream-provider` (shows up as an anime source) and `manga-provider`, in
+  JavaScript or TypeScript. TypeScript is compiled to JavaScript on install.
+- **Not supported:** `anime-torrent-provider`, `plugin`, `custom-source`, and extensions written in
+  Go. Repositories leave these out of their listing, and installing one directly says why.
+- **What the converted code gets:** a `fetch` with that format's response shape (synchronous
+  `text()` and `json()`, `headers`, `cookies`), `LoadDoc` and `Doc` (goquery-style selections),
+  `CryptoJS` (AES-CBC and the `enc` encoders, including OpenSSL `Salted__` passphrases), `Buffer`,
+  `FormData`, `$store`, `$toString`, `$clone`, `$replace`, `$unmarshalJSON` and
+  `$getUserPreference`. `$getUserPreference` returns the default from `userConfig`.
+- **Limitations:**
+  - Every call runs in a fresh sandbox, so `$store` doesn't survive between calls.
+  - `ChromeDP`, `$habari`, `$sleep` and `$await` aren't available.
+  - `fetch` doesn't impersonate a browser.
+  - The same sandbox limits apply: no local-network requests, 30 seconds and 60 requests per call.
+- **Episodes and servers:** episode ids carry the provider's whole episode object, because
+  `findEpisodeServer` needs it. For video, servers are tried in the order `getSettings()` lists
+  them, and the first that returns video wins.
 
 ## Example
 

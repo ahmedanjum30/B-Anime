@@ -118,6 +118,10 @@ export default function SourcePanel(props: {
                     </>
                   )}
                 </Match>
+                <Match when={s().match()?.status === "unmatched" && s().isDub() && candidates().length === 0 && !picking()}>
+                  <span class="source-status">No dub of this show on {extName()}.</span>
+                  <button type="button" class="link-btn" onClick={openPicker}>Search anyway</button>
+                </Match>
                 <Match when={s().match()?.status === "unmatched" && props.quiet && !picking()}>
                   <span class="source-status">Not found on this source yet.</span>
                   <button type="button" class="link-btn" onClick={openPicker}>Find it</button>
@@ -128,7 +132,7 @@ export default function SourcePanel(props: {
               </Switch>
             </div>
 
-            <Show when={picking() || (s().match()?.status === "unmatched" && !props.quiet)}>
+            <Show when={picking() || (s().match()?.status === "unmatched" && !props.quiet && !(s().isDub() && candidates().length === 0))}>
               <div class="source-picker">
                 <form class="install-row" onSubmit={runSearch}>
                   <label class="search search-grow">

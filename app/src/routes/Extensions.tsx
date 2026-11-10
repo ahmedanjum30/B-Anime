@@ -266,7 +266,12 @@ function Browse(props: {
                           {c.name} <Show when={c.version}><span class="ext-version num">{c.version}</span></Show>
                         </p>
                         <p class="ext-meta">
-                          {[c.kind ? KIND_LABEL[c.kind] : null, c.language?.toUpperCase(), c.author ? `by ${c.author}` : null]
+                          {[
+                            c.kind ? KIND_LABEL[c.kind] : null,
+                            c.language?.toUpperCase(),
+                            c.author ? `by ${c.author}` : null,
+                            c.origin === "converted" ? "Converted on install" : null,
+                          ]
                             .filter(Boolean)
                             .join(" · ")}
                         </p>
@@ -505,6 +510,7 @@ function ExtIdentity(props: { ext: ExtManifest }) {
           {KIND_LABEL[props.ext.kind]}
           {props.ext.language ? ` · ${props.ext.language.toUpperCase()}` : ""}
           {props.ext.author ? ` · by ${props.ext.author}` : ""}
+          {props.ext.origin === "converted" ? " · Converted extension" : ""}
         </p>
       </div>
     </div>
