@@ -4,17 +4,20 @@ A fast desktop home for your anime and manga: it scans your local library, match
 
 Built with a Rust backend and a Tauri 2 shell, so it starts instantly, uses a fraction of the memory of Electron apps, and stays smooth with libraries of thousands of shows.
 
-> Status: early development (Phase 1). The Home screen runs on labelled sample data until AniList login and the library scanner land.
+## Features
 
-## Features (planned)
+- **AniList:** sign in once; lists, progress and the airing schedule sync automatically.
+- **Library:** pick folders; files are found, matched to AniList (release-group names, SxxEyy,
+  season folders, split seasons and absolute numbering), and new files are picked up as they
+  arrive. Wrong or missing matches are fixed in Settings.
+- **Watch:** library episodes in the built-in player, MPV (progress tracked) or VLC; online
+  episodes through extensions, with subtitles, skip intro/outro, resume and auto-next.
+- **Read:** manga through extensions, in single page, two pages or long strip.
+- **Browse:** Home (Up next, this week), Library, show pages with list editing, Discover and
+  search, Schedule.
+- **Updates:** installed copies update themselves from GitHub Releases (verified downloads).
 
-| Phase | Scope |
-|---|---|
-| 1 | AniList login and sync, local library scan and match, Home, playback in MPV/VLC/MPC-HC with progress sync |
-| 2 | In-app playback: ffmpeg transcoding (HLS) and direct play |
-| 3 | Extension runtime (JS), online streaming sources |
-| 4 | Manga reader (local and extension sources) |
-| 5 | Schedule, Discord Rich Presence, offline mode, playlists, themes, optional LAN server |
+Still to come: Discord Rich Presence, themes, offline mode.
 
 Out of scope: torrents, auto-downloaders, debrid services.
 
@@ -78,3 +81,6 @@ installer\build.ps1 -Bi C:\tools\bi.exe          # shipping: fully optimised (LT
 ```
 
 Output goes to `dist\` (`B-Anime-Setup-<version>-quick.exe` for quick builds).
+
+To publish a release (which installed copies then update to), and for code signing, see
+[docs/releasing.md](docs/releasing.md).

@@ -1,0 +1,88 @@
+# Builds the Windows installer and publishes a GitHub release when a version tag is pushed:
+#
+#   1. Bump the version in app/src-tauri/tauri.conf.json (and Cargo.toml's workspace version).
+#   2. git tag v0.2.0 && git push origin v0.2.0
+#
+# Installed copies of B-Anime find the release, download the setup, check it against
+# SHA256SUMS.txt, and offer "Restart to update".
+#
+# Optional code signing: add the repository secrets WINDOWS_CERT_PFX (the .pfx file,
+# base64-encoded) and WINDOWS_CERT_PASSWORD. Without them, builds are unsigned.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      BI_VERSION: v0.1.1
+      HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $conf = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $conf) { throw "Tag v$tag doesn't match tauri.conf.json version $conf" }
+          "VERSION=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust (MSVC, from rust-toolchain.toml)
+        shell: pwsh
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Download B-Installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory tools | Out-Null
+          gh release download $env:BI_VERSION -R ahmedanjum30/B-installer -D tools -p "bi.exe" -p "bi-setup.exe" -p "SHA256SUMS.txt"
+          Push-Location tools
+          foreach ($line in Get-Content SHA256SUMS.txt) {
+            $hash, $name = $line -split '\s+', 2
+            $name = $name.TrimStart('*')
+            $actual = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $hash.ToLower()) { throw "B-Installer $name checksum mismatch" }
+          }
+          Pop-Location
+
+      - name: Prepare signing certificate
+        if: ${{ env.HAS_CERT == 'true' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String("${{ secrets.WINDOWS_CERT_PFX }}"))
+          "BANIME_SIGN_PFX=$env:RUNNER_TEMP\cert.pfx" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build app and installer
+        shell: pwsh
+        env:
+          BANIME_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: ./installer/build.ps1 -Bi "$env:GITHUB_WORKSPACE\tools\bi.exe" -Version $env:VERSION
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$env:VERSION" "dist/B-Anime-Setup-$env:VERSION.exe" dist/SHA256SUMS.txt `
+            --title "B-Anime $env:VERSION" --generate-notes

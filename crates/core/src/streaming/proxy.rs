@@ -39,6 +39,8 @@ pub struct Proxy {
     port: u16,
     secret: String,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// Local library files the player may load, by random token.
+    files: Arc<Mutex<HashMap<String, std::path::PathBuf>>>,
     allow_private: bool,
 }
 
@@ -46,6 +48,7 @@ pub struct Proxy {
 struct Shared {
     secret: String,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    files: Arc<Mutex<HashMap<String, std::path::PathBuf>>>,
     client: reqwest::Client,
     allow_private: bool,
 }
@@ -82,15 +85,26 @@ impl Proxy {
             .redirect(redirect)
             .build()
             .map_err(|e| Error::Network(e.to_string()))?;
-        let shared = Shared { secret: secret.clone(), sessions: sessions.clone(), client, allow_private };
-        let app = Router::new().route("/m/{secret}/{session}", get(handle)).with_state(shared);
+        let files = Arc::new(Mutex::new(HashMap::new()));
+        let shared = Shared { secret: secret.clone(), sessions: sessions.clone(), files: files.clone(), client, allow_private };
+        let app = Router::new()
+            .route("/m/{secret}/{session}", get(handle))
+            .route("/f/{secret}/{token}", get(serve_file))
+            .with_state(shared);
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, app).await {
                 tracing::error!(error = %e, "media proxy stopped");
             }
         });
         tracing::info!(port, "media proxy listening");
-        Ok(Self { port, secret, sessions, allow_private })
+        Ok(Self { port, secret, sessions, files, allow_private })
+    }
+
+    /// A URL the player can stream a library file from (with Range support for seeking).
+    pub fn file_url(&self, path: &std::path::Path) -> String {
+        let token = token();
+        self.files.lock().expect("proxy files").insert(token.clone(), path.to_path_buf());
+        format!("http://127.0.0.1:{}/f/{}/{token}", self.port, self.secret)
     }
 
     /// Registers the headers one source needs; returns a session id for [`Proxy::url`].
@@ -211,6 +225,81 @@ async fn handle(
     out_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
     let stream = res.bytes_stream().map_err(std::io::Error::other);
     (status, out_headers, Body::from_stream(stream)).into_response()
+}
+
+fn video_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        // Chromium plays many Matroska files when they're announced as WebM.
+        Some("mkv" | "webm") => "video/webm",
+        Some("mp4" | "m4v" | "mov") => "video/mp4",
+        Some("ts" | "m2ts") => "video/mp2t",
+        Some("avi") => "video/x-msvideo",
+        _ => "application/octet-stream",
+    }
+}
+
+/// `bytes=a-b`, `bytes=a-` or `bytes=-n` against a file of `len` bytes.
+fn parse_range(header: &str, len: u64) -> Option<(u64, u64)> {
+    let spec = header.strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (a, b) = spec.split_once('-')?;
+    let (start, end) = match (a.trim(), b.trim()) {
+        ("", n) => {
+            let n: u64 = n.parse().ok()?;
+            (len.saturating_sub(n), len.checked_sub(1)?)
+        }
+        (a, "") => (a.parse().ok()?, len.checked_sub(1)?),
+        (a, b) => (a.parse().ok()?, b.parse::<u64>().ok()?.min(len.checked_sub(1)?)),
+    };
+    (start <= end && end < len).then_some((start, end))
+}
+
+async fn serve_file(
+    State(s): State<Shared>,
+    Path((secret, token)): Path<(String, String)>,
+    req_headers: HeaderMap,
+) -> Response {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if secret != s.secret {
+        return fail(StatusCode::FORBIDDEN, "forbidden");
+    }
+    let Some(path) = s.files.lock().ok().and_then(|m| m.get(&token).cloned()) else {
+        return fail(StatusCode::GONE, "this file link expired");
+    };
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(e) => return fail(StatusCode::NOT_FOUND, format!("can't open the file: {e}")),
+    };
+    let len = match file.metadata().await {
+        Ok(m) => m.len(),
+        Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let range = req_headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|r| parse_range(r, len));
+    let (status, start, end) = match range {
+        Some((a, b)) => (StatusCode::PARTIAL_CONTENT, a, b),
+        None if req_headers.contains_key(header::RANGE) && len > 0 => {
+            let mut r = fail(StatusCode::RANGE_NOT_SATISFIABLE, "bad range");
+            r.headers_mut().insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes */{len}")).expect("hv"));
+            return r;
+        }
+        None => (StatusCode::OK, 0, len.saturating_sub(1)),
+    };
+    if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+        return fail(StatusCode::INTERNAL_SERVER_ERROR, "seek failed");
+    }
+    let count = if len == 0 { 0 } else { end - start + 1 };
+    let body = Body::from_stream(tokio_util::io::ReaderStream::new(file.take(count)));
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(video_type(&path)));
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(count));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    if status == StatusCode::PARTIAL_CONTENT {
+        headers.insert(
+            header::CONTENT_RANGE,
+            HeaderValue::from_str(&format!("bytes {start}-{end}/{len}")).expect("header value"),
+        );
+    }
+    (status, headers, body).into_response()
 }
 
 async fn read_capped(mut res: reqwest::Response, cap: usize) -> std::result::Result<Vec<u8>, String> {
@@ -361,6 +450,30 @@ mod tests {
         assert!(out.contains("\nP[https://cdn.example.com/show/ep1/seg-1.ts]\n"));
         assert!(out.contains("\nP[https://other.example.com/seg-2.ts]\n"));
         assert!(out.starts_with("#EXTM3U\n"));
+    }
+
+    #[test]
+    fn ranges_parse() {
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_range("bytes=900-", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=0-5000", 1000), Some((0, 999)));
+        assert_eq!(parse_range("bytes=1200-", 1000), None);
+    }
+
+    #[tokio::test]
+    async fn serves_local_files_with_ranges() {
+        let path = std::env::temp_dir().join(format!("banime-file-{}.mkv", std::process::id()));
+        std::fs::write(&path, b"0123456789").unwrap();
+        let proxy = Proxy::start().await.unwrap();
+        let url = proxy.file_url(&path);
+        let client = reqwest::Client::new();
+        let part = client.get(&url).header("range", "bytes=2-5").send().await.unwrap();
+        assert_eq!(part.status(), 206);
+        assert_eq!(part.headers()["content-range"], "bytes 2-5/10");
+        assert_eq!(part.text().await.unwrap(), "2345");
+        assert_eq!(client.get(&url).send().await.unwrap().text().await.unwrap(), "0123456789");
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

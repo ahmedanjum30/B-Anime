@@ -1,3 +1,7 @@
+mod library;
+mod playback;
+mod updates;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,11 +14,14 @@ use tokio::sync::{Mutex, Notify};
 use tracing_subscriber::EnvFilter;
 
 /// Tells the UI to refetch anything built from the library or lists.
-const LIBRARY_CHANGED: &str = "library-changed";
+pub(crate) const LIBRARY_CHANGED: &str = "library-changed";
 
-struct AppState {
+pub(crate) struct AppState {
     db: db::Db,
     paths: AppPaths,
+    /// Library folders: scans, the watcher, scan progress.
+    library: library::Library,
+    updates: updates::Updates,
     /// Held while a sync runs; a second sync request waits for the first instead of racing it.
     sync_lock: Mutex<()>,
     /// Wakes a sign-in that's waiting on the browser, to cancel it.
@@ -43,7 +50,7 @@ struct Account {
     sync_error: Option<String>,
 }
 
-fn msg(e: Error) -> String {
+pub(crate) fn msg(e: Error) -> String {
     e.to_string()
 }
 
@@ -175,70 +182,6 @@ async fn save_position(
 #[tauri::command]
 async fn get_position(state: tauri::State<'_, AppState>, media_id: i64, episode: i64) -> Result<Option<i64>, String> {
     streaming::position(&state.db, media_id, episode).await.map_err(msg)
-}
-
-/// MPV or VLC, from PATH or their usual install folders.
-fn find_player(name: &str) -> Option<std::path::PathBuf> {
-    let exe = format!("{name}.exe");
-    let mut candidates: Vec<std::path::PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join(&exe)).collect())
-        .unwrap_or_default();
-    let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
-    match name {
-        "mpv" => {
-            for base in [env("ProgramFiles"), env("LOCALAPPDATA").map(|p| p.join("Programs"))].into_iter().flatten() {
-                candidates.push(base.join("mpv").join(&exe));
-            }
-            if let Some(home) = env("USERPROFILE") {
-                candidates.push(home.join("scoop").join("apps").join("mpv").join("current").join(&exe));
-            }
-        }
-        "vlc" => {
-            for base in [env("ProgramFiles"), env("ProgramFiles(x86)")].into_iter().flatten() {
-                candidates.push(base.join("VideoLAN").join("VLC").join(&exe));
-            }
-        }
-        _ => return None,
-    }
-    candidates.into_iter().find(|p| p.is_file())
-}
-
-#[tauri::command]
-fn external_players() -> Vec<String> {
-    ["mpv", "vlc"].into_iter().filter(|p| find_player(p).is_some()).map(str::to_owned).collect()
-}
-
-/// Opens a proxied stream URL in MPV or VLC. Only the local proxy's URLs are accepted.
-#[tauri::command]
-fn open_external_player(
-    state: tauri::State<'_, AppState>,
-    player: String,
-    url: String,
-    title: String,
-    subtitle: Option<String>,
-) -> Result<(), String> {
-    let origin = state.proxy.origin();
-    if !url.starts_with(&origin) || subtitle.as_deref().is_some_and(|s| !s.starts_with(&origin)) {
-        return Err("Only B-Anime streams can be opened externally.".into());
-    }
-    let exe = find_player(&player).ok_or_else(|| format!("{player} isn't installed."))?;
-    let mut cmd = std::process::Command::new(exe);
-    cmd.arg(&url);
-    match player.as_str() {
-        "mpv" => {
-            cmd.arg(format!("--force-media-title={title}"));
-            if let Some(s) = subtitle {
-                cmd.arg(format!("--sub-file={s}"));
-            }
-        }
-        _ => {
-            cmd.arg(format!("--meta-title={title}"));
-            if let Some(s) = subtitle {
-                cmd.arg(format!("--input-slave={s}"));
-            }
-        }
-    }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start {player}: {e}"))
 }
 
 // ── Extensions ───────────────────────────────────────────────────────────────
@@ -494,10 +437,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let paths = AppPaths::resolve(None)?;
             paths.ensure()?;
-            tracing::info!(data_dir = %paths.root.display(), "starting B-Anime");
+            tracing::info!(data_dir = %paths.root.display(), version = %app.package_info().version, "starting B-Anime");
             let db = tauri::async_runtime::block_on(db::open(&paths.db))?;
             let proxy = tauri::async_runtime::block_on(streaming::Proxy::start())?;
             app.manage(AppState {
@@ -508,7 +452,10 @@ pub fn run() {
                 sync_lock: Mutex::new(()),
                 cancel_login: Arc::new(Notify::new()),
                 sync_error: std::sync::Mutex::new(None),
+                library: library::Library::start(app.handle()),
+                updates: updates::Updates::default(),
             });
+            updates::start(app.handle());
 
             // Open maximized. The config flag alone doesn't stick on every Windows setup.
             if let Some(window) = app.get_webview_window("main") {
@@ -521,6 +468,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<AppState>();
                 auto_sync(&handle, &state, Duration::ZERO).await;
+                // Then the library: catch up on files changed while closed, and watch from now on.
+                library::rewatch(&handle).await;
+                library::run_scan(&handle).await;
                 loop {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     auto_sync(&handle, &state, PERIODIC_SYNC).await;
@@ -545,8 +495,23 @@ pub fn run() {
             get_skip_times,
             save_position,
             get_position,
-            external_players,
-            open_external_player,
+            playback::external_players,
+            playback::open_external_player,
+            playback::get_player_prefs,
+            playback::set_player_pref,
+            playback::local_episodes,
+            playback::local_stream,
+            playback::play_local,
+            library::library_status,
+            library::pick_folder,
+            library::add_library_root,
+            library::remove_library_root,
+            library::unmatched_files,
+            library::assign_files,
+            library::ignore_files,
+            updates::update_status,
+            updates::check_for_update,
+            updates::install_update,
             list_extensions,
             preview_extension,
             install_extension,

@@ -1,7 +1,7 @@
 import type {
   Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
-  LibraryEntry, LibraryKind, ListEntry, MatchState, MediaPage, RepoEntry, ScheduleItem, ScheduleScope, SkipTime,
-  SourceItem, SourceResult, Stream,
+  LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, RepoEntry,
+  ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus,
 } from "./types";
 
 // ── Streaming & reading (desktop only) ──
@@ -21,8 +21,61 @@ export const savePosition = (mediaId: number, episode: number, position: number,
   call<void>("save_position", { mediaId, episode, position, duration });
 export const getPosition = (mediaId: number, episode: number) => call<number | null>("get_position", { mediaId, episode });
 export const externalPlayers = () => (inTauri ? call<string[]>("external_players") : Promise.resolve([]));
-export const openExternalPlayer = (player: string, url: string, title: string, subtitle?: string) =>
-  call<void>("open_external_player", { player, url, title, subtitle: subtitle ?? null });
+/** `track` lets MPV report progress back (marks the episode watched at 80%). */
+export const openExternalPlayer = (
+  player: string,
+  url: string,
+  title: string,
+  subtitle?: string,
+  track?: { mediaId: number; episode: number },
+) =>
+  call<void>("open_external_player", {
+    player,
+    url,
+    title,
+    subtitle: subtitle ?? null,
+    mediaId: track?.mediaId ?? null,
+    episode: track?.episode ?? null,
+  });
+
+// ── Library folders (desktop only) ──
+export const libraryStatus = () =>
+  inTauri
+    ? call<LibraryStatus>("library_status")
+    : Promise.resolve<LibraryStatus>({ roots: [], scan: { running: false, phase: null, done: 0, total: 0 }, last: null });
+export const addLibraryRoot = (path: string) => call<string>("add_library_root", { path });
+export const removeLibraryRoot = (path: string) => call<void>("remove_library_root", { path });
+export const unmatchedFiles = () => (inTauri ? call<UnmatchedGroup[]>("unmatched_files") : Promise.resolve([]));
+export const assignFiles = (paths: string[], mediaId: number) => call<void>("assign_files", { paths, mediaId });
+export const ignoreFiles = (paths: string[]) => call<void>("ignore_files", { paths });
+
+/** Opens the system folder picker; null when cancelled. */
+export const pickFolder = () => call<string | null>("pick_folder");
+
+// ── Playback of library files ──
+export const getPlayerPrefs = () =>
+  inTauri ? call<PlayerPrefs>("get_player_prefs") : Promise.resolve<PlayerPrefs>({ player: "builtin", available: [] });
+export const setPlayerPref = (player: PlayerChoice) => call<void>("set_player_pref", { player });
+export const localEpisodes = (mediaId: number) => call<number[]>("local_episodes", { mediaId });
+export const localStream = (mediaId: number, episode: number) => call<Stream>("local_stream", { mediaId, episode });
+/** Plays with the preferred player; "builtin" means the caller opens the in-app player. */
+export const playLocal = (mediaId: number, episode: number) =>
+  call<{ mode: PlayerChoice }>("play_local", { mediaId, episode });
+
+// ── Updates ──
+export const updateStatus = () =>
+  inTauri
+    ? call<UpdateStatus>("update_status")
+    : Promise.resolve<UpdateStatus>({ current: "dev", enabled: false, available: null, ready: false, error: null });
+export const checkForUpdate = () => call<UpdateStatus>("check_for_update");
+export const installUpdate = () => call<void>("install_update");
+
+/** Listens to a backend event; returns an unsubscribe. */
+export async function onEvent<T>(name: string, fn: (payload: T) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(name, (e) => fn(e.payload));
+}
 
 // ── Extensions (desktop only; the browser preview shows an empty list) ──
 export const listExtensions = () => (inTauri ? call<InstalledExtension[]>("list_extensions") : Promise.resolve([]));

@@ -1,11 +1,13 @@
 import { createResource, createRoot, createSignal } from "solid-js";
-import { getAccount, getHome, onLibraryChanged, syncIfStale } from "./api";
+import { getAccount, getHome, onEvent, onLibraryChanged, syncIfStale, updateStatus } from "./api";
+import type { ScanStatus } from "./types";
 
 // App-wide state. Home data and the AniList account are fetched once and refreshed whenever
-// the backend says lists or library changed (sign-in, sync, sign-out).
+// the backend says lists or library changed (sign-in, sync, sign-out, a scan).
 export const homeStore = createRoot(() => {
   const [home, { refetch }] = createResource(getHome);
   const [account, { refetch: refetchAccount, mutate: setAccount }] = createResource(getAccount);
+  const [update, { refetch: refetchUpdate }] = createResource(updateStatus);
 
   const refresh = () => {
     void refetch();
@@ -38,5 +40,17 @@ export const homeStore = createRoot(() => {
     clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => setToast(null), 3600);
   };
-  return { home, refetch, account, refetchAccount, setAccount, now, hoverMedia, setHoverMedia, toast, notify };
+
+  /** Library scan progress, pushed by the backend. */
+  const [scan, setScan] = createSignal<ScanStatus>({ running: false, phase: null, done: 0, total: 0 });
+  void onEvent<ScanStatus>("scan-progress", setScan);
+  void onEvent("update-ready", () => void refetchUpdate());
+  void onEvent<{ episode: number; title: string }>("player-watched", (w) =>
+    notify(`Episode ${w.episode} of ${w.title} marked watched on AniList.`),
+  );
+
+  return {
+    home, refetch, account, refetchAccount, setAccount, update, refetchUpdate, scan, now,
+    hoverMedia, setHoverMedia, toast, notify,
+  };
 });

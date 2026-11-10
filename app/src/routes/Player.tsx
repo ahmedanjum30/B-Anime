@@ -7,9 +7,10 @@ import {
   SkipForward, Volume2, VolumeX,
 } from "../lib/icons";
 import {
-  errorText, externalPlayers, getMedia, getPosition, getSkipTimes, getStream, inTauri, openExternalPlayer, saveEntry,
-  savePosition,
+  errorText, externalPlayers, getMedia, getPosition, getSkipTimes, getStream, inTauri, localEpisodes, localStream,
+  openExternalPlayer, saveEntry, savePosition,
 } from "../lib/api";
+import type { Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { createSource } from "../lib/source";
@@ -52,23 +53,37 @@ export default function Player() {
   const episode = () => Number(params.ep);
   const extParam = () => (typeof search.ext === "string" ? search.ext : undefined);
 
+  /** Playing a file from the library instead of an extension's stream. */
+  const local = () => search.local === "1";
+
   const [page] = createResource(mediaId, getMedia);
   const media = () => page()?.media;
-  const source = createSource(media, extParam);
+  const source = createSource(() => (local() ? undefined : media()), extParam);
   const item = () => source.byNumber().get(episode());
-  const [stream] = createResource(
-    () => (item() && source.ext() ? { ext: source.ext()!, id: item()!.id } : null),
-    (k) => getStream(k.ext, k.id),
+  const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
+  type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
+  const [stream] = createResource<Stream, Key>(
+    (): Key | null => {
+      if (local()) return { local: true, id: mediaId(), ep: episode() };
+      return item() && source.ext() ? { local: false, ext: source.ext()!, id: item()!.id } : null;
+    },
+    (k) => (k.local ? localStream(k.id, k.ep) : getStream(k.ext, k.id)),
   );
   const [players] = createResource(externalPlayers);
 
-  const hasNext = () => source.byNumber().has(episode() + 1);
-  const hasPrev = () => source.byNumber().has(episode() - 1);
-  const goTo = (ep: number) => navigate(`/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}`, { replace: true });
+  const has = (ep: number) => (local() ? !!localEps()?.includes(ep) : source.byNumber().has(ep));
+  const hasNext = () => has(episode() + 1);
+  const hasPrev = () => has(episode() - 1);
+  const goTo = (ep: number) =>
+    navigate(
+      local() ? `/watch/${mediaId()}/${ep}?local=1` : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}`,
+      { replace: true },
+    );
   const back = () => navigate(`/show/${mediaId()}`);
 
   const failure = () => {
     if (page.error) return `Couldn't load the show: ${errorText(page.error)}`;
+    if (local()) return stream.error ? errorText(stream.error) : null;
     if (source.exts() && !source.usable().length) return "No streaming extension is installed or turned on.";
     if (source.match.error) return errorText(source.match.error);
     if (source.match()?.status === "unmatched") return "This show isn't matched to a source yet. Pick one on the show page.";
@@ -294,8 +309,15 @@ export default function Player() {
     video.pause();
     setMenu(null);
     try {
-      await openExternalPlayer(player, src.url, `${media()?.title.userPreferred ?? ""} · Episode ${episode()}`, sub);
-      notify(`Opened in ${player === "mpv" ? "MPV" : "VLC"}. Progress there isn't tracked yet.`);
+      await openExternalPlayer(player, src.url, `${media()?.title.userPreferred ?? ""} · Episode ${episode()}`, sub, {
+        mediaId: mediaId(),
+        episode: episode(),
+      });
+      notify(
+        player === "mpv"
+          ? "Opened in MPV. Progress syncs to AniList when you're 80% through."
+          : "Opened in VLC. Progress isn't tracked there.",
+      );
     } catch (e) {
       notify(errorText(e));
     }
@@ -379,7 +401,14 @@ export default function Player() {
         onPlaying={() => setWaiting(false)}
         onCanPlay={() => setWaiting(false)}
         onEnded={onEnded}
-        onError={() => !hls && setVideoError("This video couldn't be played.")}
+        onError={() =>
+          !hls &&
+          setVideoError(
+            local()
+              ? "The built-in player can't play this file's format (common with MKV)."
+              : "This video couldn't be played.",
+          )
+        }
         onClick={toggle}
         onDblClick={() => void toggleFullscreen()}
       >
@@ -396,6 +425,13 @@ export default function Player() {
               <Show when={videoError() && (stream()?.sources.length ?? 0) > sourceIndex() + 1}>
                 <button type="button" class="btn btn-primary" onClick={() => setSourceIndex(sourceIndex() + 1)}>Try next source</button>
               </Show>
+              <For each={videoError() && stream() ? players() ?? [] : []}>
+                {(p) => (
+                  <button type="button" class="btn btn-primary" onClick={() => void openExternal(p)}>
+                    Open in {p === "mpv" ? "MPV" : "VLC"}
+                  </button>
+                )}
+              </For>
               <button type="button" class="btn" onClick={back}>Back to the show</button>
             </div>
           </div>

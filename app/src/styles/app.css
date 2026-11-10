@@ -2191,6 +2191,134 @@ a.slot:focus-visible {
   color: var(--z8);
 }
 
+/* ───────── Library folders & updates (settings, rail) ───────── */
+.roots {
+  list-style: none;
+  padding: 0;
+}
+.root-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 2);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--z3);
+}
+.root-path {
+  font: 13px/18px ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--z10);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scan-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u);
+  color: var(--z10);
+}
+.spin-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--z4);
+  border-top-color: var(--red);
+  animation: spin 800ms linear infinite;
+}
+.unmatched {
+  margin-top: calc(var(--u) * 3);
+}
+.subhead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--u);
+  margin-bottom: var(--u);
+  font: 700 12px/16px var(--font-head);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.unmatched-list {
+  list-style: none;
+  padding: 0;
+}
+.unmatched-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--z3);
+}
+.unmatched-group .source-picker {
+  margin-top: 12px;
+}
+.unmatched-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 2);
+}
+.unmatched-head .setting-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 64ch;
+}
+.candidate-media {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+}
+.candidate-media .candidate-title {
+  flex: 1;
+  min-width: 0;
+}
+.candidate-cover {
+  flex: none;
+  width: 32px;
+  aspect-ratio: 2 / 3;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.candidate-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rail-update {
+  display: grid;
+  gap: var(--u);
+  margin-top: auto;
+  margin-bottom: calc(var(--u) * 2);
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--z2);
+}
+.rail-update + .sync {
+  margin-top: 0;
+}
+.rail-update-text {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--z10);
+}
+.rail-update .btn {
+  justify-content: center;
+}
+.rail-update-icon {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .rail-update {
+    padding: 6px;
+  }
+  .rail-update-text,
+  .rail-update-label {
+    display: none;
+  }
+  .rail-update-icon {
+    display: block;
+  }
+}
+
 /* ───────── Loading ───────── */
 .sk-line {
   height: 26px;

@@ -227,7 +227,8 @@ export type MatchState =
   | { status: "unmatched"; candidates: SourceResult[] };
 
 export interface Stream {
-  sources: { url: string; kind: "hls" | "mp4"; label: string }[];
+  /** "file" is a library file served by the local proxy. */
+  sources: { url: string; kind: "hls" | "mp4" | "file"; label: string }[];
   subtitles: { url: string; lang: string; label: string }[];
 }
 
@@ -235,6 +236,58 @@ export interface SkipTime {
   kind: string;
   start: number;
   end: number;
+}
+
+// ── Library folders, playback, updates ──
+export interface ScanReport {
+  files: number;
+  matched: number;
+  unmatched: number;
+  added: number;
+  removed: number;
+  millis: number;
+  finishedAt: string | null;
+}
+
+export interface ScanStatus {
+  running: boolean;
+  phase: "walking" | "matching" | "saving" | null;
+  done: number;
+  total: number;
+}
+
+export interface LibraryStatus {
+  roots: string[];
+  scan: ScanStatus;
+  last: ScanReport | null;
+}
+
+export interface UnmatchedGroup {
+  title: string;
+  season: number | null;
+  files: { path: string; fileName: string; episode: number | null }[];
+}
+
+export type PlayerChoice = "builtin" | "mpv" | "vlc";
+
+export interface PlayerPrefs {
+  player: PlayerChoice;
+  available: string[];
+}
+
+export interface UpdateInfo {
+  version: string;
+  notes: string;
+  publishedAt: string | null;
+  pageUrl: string;
+}
+
+export interface UpdateStatus {
+  current: string;
+  enabled: boolean;
+  available: UpdateInfo | null;
+  ready: boolean;
+  error: string | null;
 }
 
 export interface Viewer {

@@ -155,6 +155,35 @@ fn normalize(s: &str) -> String {
     out.join(" ")
 }
 
+/// Titles that differ only in spacing, colons, dashes, case or long-vowel spelling (ō / ou),
+/// with `_` in either standing for a character Windows forbids in file names ("Gintama_" for
+/// "Gintama."). Punctuation that tells seasons apart (Gintama' vs Gintama°) still counts.
+pub fn same_title(a: &str, b: &str) -> bool {
+    fn canon(s: &str) -> Vec<char> {
+        let mut out = Vec::new();
+        for c in s.trim().to_lowercase().chars() {
+            match c {
+                'ō' | 'ô' => out.extend(['o', 'u']),
+                'ū' | 'û' => out.extend(['u', 'u']),
+                'ā' | 'â' => out.extend(['a', 'a']),
+                'ī' | 'î' => out.extend(['i', 'i']),
+                'ē' | 'ê' => out.extend(['e', 'e']),
+                c if c.is_whitespace() || c == ':' || c == '-' || c == '–' => {}
+                c => out.push(c),
+            }
+        }
+        out
+    }
+    let (a, b) = (canon(a), canon(b));
+    a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| x == y || ((*x == '_') ^ (*y == '_') && !(x.is_alphanumeric() && y.is_alphanumeric())))
+}
+
+/// Similarity plus a bonus for an exact title, so near-identical franchise entries
+/// (Gintama, Gintama', Gintama°) resolve to the one actually named.
+pub fn title_score(query: &str, candidate: &str) -> f64 {
+    similarity(query, candidate) + if same_title(query, candidate) { 0.25 } else { 0.0 }
+}
+
 /// Dice coefficient over character bigrams of the normalised titles, 0..=1.
 pub fn similarity(a: &str, b: &str) -> f64 {
     let (a, b) = (normalize(a), normalize(b));
@@ -412,6 +441,22 @@ mod tests {
         assert!(similarity("Kusuriya no Hitorigoto", "Kusuriya no Hitorigoto (TV)") >= AUTO_MATCH);
         assert!(similarity("Sousou no Frieren", "Big Buck Bunny") < 0.3);
         assert!(similarity("Dandadan", "Dandadan 2nd Season") < AUTO_MATCH);
+    }
+
+    #[test]
+    fn exact_titles_beat_franchise_siblings() {
+        assert!(same_title("Gintama°", "Gintama°"));
+        assert!(same_title("Gintama_", "Gintama."));
+        assert!(same_title("Gintama' Enchōsen", "Gintama': Enchousen"));
+        assert!(same_title("Gintama. Porori-hen", "Gintama.: Porori-hen"));
+        assert!(!same_title("Gintama'", "Gintama°"));
+        assert!(!same_title("Gintama. Shirogane no Tamashii-hen", "Gintama.: Shirogane no Tamashii-hen 2"));
+        assert!(!same_title("Gintama_", "Gintama"));
+        let candidates = ["Gintama", "Gintama'", "Gintama°", "Gintama.", "Gintama': Enchousen"];
+        let best = |q: &str| *candidates.iter().max_by(|a, b| title_score(q, a).total_cmp(&title_score(q, b))).unwrap();
+        assert_eq!(best("Gintama°"), "Gintama°");
+        assert_eq!(best("Gintama_"), "Gintama.");
+        assert_eq!(best("Gintama' Enchōsen"), "Gintama': Enchousen");
     }
 
     #[test]

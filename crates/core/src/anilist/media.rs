@@ -215,8 +215,37 @@ pub async fn save_entry(client: &Client, db: &Db, media_id: i64, change: EntryCh
     Ok(entry)
 }
 
+/// The change that records `episode` as watched (or chapter as read), with the usual list rules:
+/// reaching the last one completes the show, starting a planned one moves it to Watching.
+/// `None` when the user is already at or past it.
+pub fn progress_change(entry: Option<&ListEntry>, episode: i64, total: Option<i64>) -> Option<EntryChange> {
+    if entry.is_some_and(|e| e.progress >= episode) {
+        return None;
+    }
+    let status = match (entry.map(|e| e.status.as_str()), total) {
+        (_, Some(t)) if episode >= t => Some("COMPLETED".to_owned()),
+        (None | Some("PLANNING"), _) => Some("CURRENT".to_owned()),
+        _ => None,
+    };
+    Some(EntryChange { status, progress: Some(episode), score: None })
+}
+
+/// A show's title and episode count from the local cache.
+pub async fn title_and_total(db: &Db, id: i64) -> Result<(Option<String>, Option<i64>)> {
+    let row: Option<(String, Option<i64>)> = sqlx::query_as("SELECT title, episodes FROM media WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.map(|(t, e)| (Some(t), e)).unwrap_or((None, None)))
+}
+
+/// The user's local list entry for a show.
+pub async fn local_entry(db: &Db, id: i64) -> Result<Option<ListEntry>> {
+    list_entry(db, id).await
+}
+
 /// A show added from its page may not be in `media` yet; fill it from the cached detail.
-async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
+pub async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
     let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media WHERE id = ?)")
         .bind(id)
         .fetch_one(db)
@@ -258,6 +287,19 @@ async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_rules() {
+        let at = |status: &str, progress| ListEntry { status: status.into(), progress, score: None, updated_at: Utc::now() };
+        assert!(progress_change(Some(&at("CURRENT", 5)), 5, Some(12)).is_none());
+        let c = progress_change(Some(&at("CURRENT", 4)), 5, Some(12)).unwrap();
+        assert_eq!((c.status, c.progress), (None, Some(5)));
+        let c = progress_change(Some(&at("CURRENT", 11)), 12, Some(12)).unwrap();
+        assert_eq!(c.status.as_deref(), Some("COMPLETED"));
+        let c = progress_change(Some(&at("PLANNING", 0)), 1, None).unwrap();
+        assert_eq!(c.status.as_deref(), Some("CURRENT"));
+        assert_eq!(progress_change(None, 1, Some(24)).unwrap().status.as_deref(), Some("CURRENT"));
+    }
 
     #[tokio::test]
     async fn media_row_is_filled_from_cached_detail() {

@@ -8,6 +8,9 @@ pub mod extensions;
 pub mod home;
 pub mod library;
 pub mod paths;
+pub mod player;
+pub mod scanner;
+pub mod updater;
 pub mod streaming;
 
 pub use error::{Error, Result};

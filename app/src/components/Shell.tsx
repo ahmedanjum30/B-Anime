@@ -1,7 +1,8 @@
 import type { ParentProps } from "solid-js";
-import { Show } from "solid-js";
+import { Show, createSignal } from "solid-js";
+import { installUpdate } from "../lib/api";
 import { A } from "@solidjs/router";
-import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, Settings } from "../lib/icons";
+import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, RefreshCw, Settings } from "../lib/icons";
 
 import { homeStore } from "../lib/store";
 import { fmtAgo, fmtCount } from "../lib/format";
@@ -44,6 +45,7 @@ export default function Shell(props: ParentProps) {
             </li>
           ))}
         </ul>
+        <UpdateNotice />
         <SyncFoot />
       </nav>
       <main class="main">{props.children}</main>
@@ -51,6 +53,36 @@ export default function Shell(props: ParentProps) {
         {toast()}
       </div>
     </div>
+  );
+}
+
+/** Appears once a new version is downloaded and verified. */
+function UpdateNotice() {
+  const { update } = homeStore;
+  const [restarting, setRestarting] = createSignal(false);
+  return (
+    <Show when={update()?.ready && update()?.available}>
+      {(u) => (
+        <div class="rail-update" role="status">
+          <p class="rail-update-text">
+            Version <span class="num">{u().version}</span> is ready
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            aria-label={`Restart to update to version ${u().version}`}
+            disabled={restarting()}
+            onClick={() => {
+              setRestarting(true);
+              void installUpdate().catch(() => setRestarting(false));
+            }}
+          >
+            <RefreshCw size={14} stroke-width={2} aria-hidden="true" class="rail-update-icon" />
+            <span class="rail-update-label">{restarting() ? "Restarting…" : "Restart to update"}</span>
+          </button>
+        </div>
+      )}
+    </Show>
   );
 }
 

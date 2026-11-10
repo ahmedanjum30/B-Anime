@@ -6,7 +6,12 @@ import { searchTitles, type SourceState } from "../lib/source";
 import type { Media, SourceResult } from "../lib/types";
 
 /** Which online source this show uses and what it matched to, with a way to fix the match. */
-export default function SourcePanel(props: { media: Media; source: SourceState }) {
+export default function SourcePanel(props: {
+  media: Media;
+  source: SourceState;
+  /** The library already has episodes: keep an unmatched source to one quiet line. */
+  quiet?: boolean;
+}) {
   const s = () => props.source;
   const verb = () => (s().kind() === "anime" ? "watch" : "read");
   const extName = () => s().usable().find((e) => e.id === s().ext())?.name ?? "";
@@ -100,13 +105,17 @@ export default function SourcePanel(props: { media: Media; source: SourceState }
                     </>
                   )}
                 </Match>
+                <Match when={s().match()?.status === "unmatched" && props.quiet && !picking()}>
+                  <span class="source-status">Not found on this source yet.</span>
+                  <button type="button" class="link-btn" onClick={openPicker}>Find it</button>
+                </Match>
                 <Match when={s().match()?.status === "unmatched"}>
                   <span class="source-status is-warn">No confident match. Pick the right one:</span>
                 </Match>
               </Switch>
             </div>
 
-            <Show when={picking() || s().match()?.status === "unmatched"}>
+            <Show when={picking() || (s().match()?.status === "unmatched" && !props.quiet)}>
               <div class="source-picker">
                 <form class="install-row" onSubmit={runSearch}>
                   <label class="search search-grow">

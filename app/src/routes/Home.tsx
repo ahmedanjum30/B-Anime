@@ -7,6 +7,7 @@ import WeekListings from "../components/WeekListings";
 import { homeStore } from "../lib/store";
 import { fmtDateLine } from "../lib/format";
 import type { UpNext } from "../lib/types";
+import { playLibraryEpisode } from "../lib/play";
 
 export default function Home() {
   const { home, refetch, notify } = homeStore;
@@ -23,11 +24,11 @@ export default function Home() {
       return;
     }
     if (!item.source) {
-      notify(`Episode ${item.episode} of ${item.title} isn't in your library yet.`);
+      // Not on disk: the show page can stream it if an extension is installed.
+      navigate(`/show/${item.mediaId}`);
       return;
     }
-    // TODO(phase 1): hand off to MPV/VLC via the player module.
-    notify(`Playback isn't connected yet. MPV support is next on the build list.`);
+    void playLibraryEpisode(item.mediaId, item.episode, navigate, notify);
   };
 
   return (

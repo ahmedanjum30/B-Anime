@@ -6,6 +6,7 @@ import EpisodeList from "../components/EpisodeList";
 import ChapterList from "../components/ChapterList";
 import SourcePanel from "../components/SourcePanel";
 import { createSource } from "../lib/source";
+import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
 import { ArrowLeft, ExternalLink } from "../lib/icons";
 import { errorText, getMedia, inTauri, openAniList } from "../lib/api";
@@ -175,9 +176,13 @@ export default function Show() {
                         media={m()}
                         saver={saver}
                         localFiles={p().localFiles}
-                        panel={<SourcePanel media={m()} source={source} />}
-                        playable={(ep) => source.byNumber().has(ep)}
-                        onPlay={(ep) => navigate(`/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}`)}
+                        panel={<SourcePanel media={m()} source={source} quiet={p().localFiles.length > 0} />}
+                        playable={(ep) => p().localFiles.some((f) => f.episode === ep) || source.byNumber().has(ep)}
+                        onPlay={(ep) =>
+                          p().localFiles.some((f) => f.episode === ep)
+                            ? void playLibraryEpisode(m().id, ep, navigate, notify)
+                            : navigate(`/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}`)
+                        }
                       />
                     </When>
 

@@ -52,3 +52,11 @@ task = "desktopicon"
 file = '{app}\B-Anime.exe'
 launch = true
 as_user = true
+
+# Self-updates run this setup with /VERYSILENT /UPDATE=1 (see crates/core/src/updater.rs): the
+# setup closes B-Anime, replaces it, and this brings it back.
+[[run]]
+file = '{app}\B-Anime.exe'
+if_param = "UPDATE=1"
+wait = false
+as_user = true
