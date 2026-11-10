@@ -352,7 +352,7 @@ fn match_titles(titles: &[String]) -> (Vec<String>, Vec<String>) {
     let titles: Vec<&str> = titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
     let shorts: Vec<Option<String>> = titles.iter().map(|t| short_title(t)).collect();
     let mut queries: Vec<String> = Vec::new();
-    let mut add = |q: &str, queries: &mut Vec<String>| {
+    let add = |q: &str, queries: &mut Vec<String>| {
         if !queries.iter().any(|x| x.eq_ignore_ascii_case(q)) {
             queries.push(q.to_owned());
         }
