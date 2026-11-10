@@ -1,7 +1,7 @@
 import type { ParentProps } from "solid-js";
 import { Show } from "solid-js";
 import { A } from "@solidjs/router";
-import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, Settings } from "lucide-solid";
+import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, Settings } from "../lib/icons";
 
 import { homeStore } from "../lib/store";
 import { fmtAgo, fmtCount } from "../lib/format";

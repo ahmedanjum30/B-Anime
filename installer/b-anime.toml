@@ -11,6 +11,7 @@
 
 [defines]
 version = "0.0.0"
+label = "${version}"              # the file name's version; build.ps1 -Quick sets "<version>-quick"
 root = ".."
 bindir = "..\\target\\release"
 
@@ -26,7 +27,7 @@ dir = '{pf}\B-Anime'
 scope = "ask"
 uninstall_icon = '{app}\B-Anime.exe'
 icon = '${root}\app\src-tauri\icons\icon.ico'
-output = '${root}\dist\B-Anime-Setup-${version}.exe'
+output = '${root}\dist\B-Anime-Setup-${label}.exe'
 
 [[task]]
 name = "desktopicon"

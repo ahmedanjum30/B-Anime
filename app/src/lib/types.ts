@@ -6,6 +6,7 @@ export interface UpNext {
   mediaId: number;
   title: string;
   coverUrl: string | null;
+  bannerUrl: string | null;
   color: string | null;
   episode: number;
   totalEpisodes: number | null;
@@ -13,7 +14,8 @@ export interface UpNext {
   resumeS: number | null;
   progress: number;
   mark: Mark | null;
-  source: string;
+  /** File name in the library, or null when the episode isn't in the library. */
+  source: string | null;
 }
 
 export interface AiringSlot {
@@ -30,6 +32,25 @@ export interface SyncStatus {
   anilistConnected: boolean;
   lastSynced: string | null;
   filesMatched: number;
+}
+
+export interface Viewer {
+  id: number;
+  name: string;
+  avatar: { medium: string | null } | null;
+}
+
+export interface Account {
+  clientConfigured: boolean;
+  viewer: Viewer | null;
+  lastSynced: string | null;
+}
+
+export interface SyncReport {
+  anime: number;
+  manga: number;
+  airing: number;
+  syncedAt: string;
 }
 
 export interface HomeData {

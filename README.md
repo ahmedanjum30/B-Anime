@@ -52,9 +52,29 @@ Requirements: Rust (MSVC toolchain on Windows; pinned by `rust-toolchain.toml`),
 ```sh
 cd app
 npm install
-npm run tauri dev      # desktop app with hot reload
+npm run tauri dev      # day-to-day: the desktop app with instant UI reload, no installer needed
 npm run dev            # UI only, in a browser, with preview data
-npm run tauri build    # release installer
 ```
 
 Run backend tests with `cargo test -p banime-core`.
+
+### AniList sign-in
+
+Sign-in needs an AniList API client: create one at <https://anilist.co/settings/developer> with the
+redirect URL `http://127.0.0.1:43211/callback`, then set its id before building or running:
+
+```powershell
+$env:BANIME_ANILIST_CLIENT_ID = "12345"
+```
+
+### Installers
+
+Built with [B-Installer](https://github.com/ahmedanjum30/B-installer); download `bi.exe` and
+`bi-setup.exe` from its releases.
+
+```powershell
+installer\build.ps1 -Bi C:\tools\bi.exe -Quick   # local testing: ~25 s after the first build
+installer\build.ps1 -Bi C:\tools\bi.exe          # shipping: fully optimised (LTO), ~5 min
+```
+
+Output goes to `dist\` (`B-Anime-Setup-<version>-quick.exe` for quick builds).

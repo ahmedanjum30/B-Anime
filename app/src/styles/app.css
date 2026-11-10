@@ -506,6 +506,108 @@
   text-transform: uppercase;
 }
 
+.upnext-source[data-missing] {
+  font-style: italic;
+}
+
+/* ───────── Pages & settings ───────── */
+.page {
+  max-width: 960px;
+  padding: calc(var(--u) * 3) calc(var(--u) * 5) calc(var(--u) * 6);
+}
+.page-title {
+  font: 700 24px/32px var(--font-head);
+  letter-spacing: 0.02em;
+  margin: var(--u) 0 calc(var(--u) * 4);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 3);
+  padding: calc(var(--u) * 2) 0;
+}
+.setting-text {
+  min-width: 0;
+}
+.setting-title {
+  font-weight: 600;
+  color: var(--z10);
+}
+.setting-desc {
+  margin-top: 2px;
+  color: var(--z6);
+  max-width: 60ch;
+}
+.setting-actions {
+  display: flex;
+  gap: var(--u);
+  flex: none;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  min-width: 0;
+}
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  flex: none;
+}
+.avatar-empty {
+  display: grid;
+  place-items: center;
+  background: var(--z3);
+  font: 700 18px var(--font-head);
+  text-transform: uppercase;
+}
+
+.inline-error {
+  color: var(--red);
+  padding: var(--u) 0;
+  font-weight: 500;
+}
+
+code {
+  font: 12px/16px ui-monospace, "Cascadia Code", Consolas, monospace;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--z2);
+  color: var(--z10);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-quiet {
+  background: transparent;
+  color: var(--z8);
+}
+.btn-quiet:hover:not(:disabled) {
+  background: var(--z2);
+  color: var(--z10);
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ───────── Loading ───────── */
 .sk-line {
   height: 26px;

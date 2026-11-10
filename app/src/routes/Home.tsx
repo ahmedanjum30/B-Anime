@@ -1,6 +1,6 @@
 import { For, Match, Show, Switch, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { Search } from "lucide-solid";
+import { Search } from "../lib/icons";
 
 import UpNextCard from "../components/UpNextCard";
 import WeekListings from "../components/WeekListings";
@@ -20,6 +20,10 @@ export default function Home() {
   const play = (item: UpNext) => {
     if (home()?.isSample) {
       notify(`"${item.title}" is a sample show. Add a library folder to play your own episodes.`);
+      return;
+    }
+    if (!item.source) {
+      notify(`Episode ${item.episode} of ${item.title} isn't in your library yet.`);
       return;
     }
     // TODO(phase 1): hand off to MPV/VLC via the player module.

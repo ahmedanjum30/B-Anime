@@ -1,6 +1,7 @@
 //! B-Anime core: everything that isn't UI. The Tauri app (and a future
 //! headless server) are thin shells over this crate.
 
+pub mod anilist;
 pub mod db;
 pub mod error;
 pub mod home;

@@ -14,7 +14,7 @@ export function browserPreviewHome(now = new Date()): HomeData {
     resumeS: number | null, mark: UpNext["mark"], source: string,
   ): UpNext => ({
     mediaId, title, color, episode, totalEpisodes, resumeS, mark, source,
-    coverUrl: null, durationMin: 24, progress: (episode - 1) / totalEpisodes,
+    coverUrl: null, bannerUrl: null, durationMin: 24, progress: (episode - 1) / totalEpisodes,
   });
   const slot = (
     mediaId: number, title: string, color: string, episode: number, airsAt: string,

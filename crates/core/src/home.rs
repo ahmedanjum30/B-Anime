@@ -22,6 +22,8 @@ pub struct UpNext {
     pub media_id: i64,
     pub title: String,
     pub cover_url: Option<String>,
+    /// Wide art for the card; falls back to the cover.
+    pub banner_url: Option<String>,
     pub color: Option<String>,
     pub episode: i64,
     pub total_episodes: Option<i64>,
@@ -31,8 +33,8 @@ pub struct UpNext {
     /// Episodes watched / total, 0..=1.
     pub progress: f64,
     pub mark: Option<Mark>,
-    /// Evidence of where the episode comes from (file name).
-    pub source: String,
+    /// Evidence of where the episode comes from: the file name, or none when it isn't in the library.
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,11 +75,12 @@ struct UpNextRow {
     media_id: i64,
     title: String,
     cover_url: Option<String>,
+    banner_url: Option<String>,
     color: Option<String>,
     episodes: Option<i64>,
     duration_min: Option<i64>,
     progress: i64,
-    path: String,
+    path: Option<String>,
     position_s: Option<i64>,
     aired_at: Option<DateTime<Utc>>,
 }
@@ -97,23 +100,33 @@ pub async fn load(db: &Db) -> Result<HomeData> {
     let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM list_entry")
         .fetch_one(db)
         .await?;
-    if entries == 0 {
+    let connected: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM setting WHERE key = 'anilist.viewer')")
+            .fetch_one(db)
+            .await?;
+    if entries == 0 && !connected {
         return Ok(sample(Utc::now()));
     }
 
     let now = Utc::now();
+    // The next episode of each show being watched, as long as it has aired. Episodes in the
+    // library come first.
     let rows: Vec<UpNextRow> = sqlx::query_as(
         r#"
-        SELECT m.id AS media_id, m.title, m.cover_url, m.color, m.episodes, m.duration_min,
-               e.progress, f.path, p.position_s, a.airs_at AS aired_at
+        SELECT m.id AS media_id, m.title, m.cover_url, m.banner_url, m.color, m.episodes, m.duration_min,
+               e.progress, MIN(f.path) AS path, p.position_s, a.airs_at AS aired_at
         FROM list_entry e
-        JOIN media m       ON m.id = e.media_id
-        JOIN local_file f  ON f.media_id = e.media_id AND f.episode = e.progress + 1
-        LEFT JOIN playback p ON p.media_id = e.media_id AND p.episode = e.progress + 1
-        LEFT JOIN airing a   ON a.media_id = e.media_id AND a.episode = e.progress + 1
-        WHERE e.status IN ('CURRENT', 'REPEATING')
+        JOIN media m          ON m.id = e.media_id
+        LEFT JOIN local_file f ON f.media_id = e.media_id AND f.episode = e.progress + 1
+        LEFT JOIN playback p   ON p.media_id = e.media_id AND p.episode = e.progress + 1
+        LEFT JOIN airing a     ON a.media_id = e.media_id AND a.episode = e.progress + 1
+        WHERE m.kind = 'ANIME'
+          AND e.status IN ('CURRENT', 'REPEATING')
+          AND (m.episodes IS NULL OR e.progress < m.episodes)
+          AND (m.next_episode IS NULL OR e.progress + 1 < m.next_episode)
+          AND (m.status IS NULL OR m.status <> 'NOT_YET_RELEASED')
         GROUP BY e.media_id
-        ORDER BY e.updated_at DESC
+        ORDER BY (MIN(f.path) IS NULL), e.updated_at DESC
         LIMIT 12
         "#,
     )
@@ -130,6 +143,7 @@ pub async fn load(db: &Db) -> Result<HomeData> {
                 media_id: r.media_id,
                 title: r.title,
                 cover_url: r.cover_url,
+                banner_url: r.banner_url,
                 color: r.color,
                 episode,
                 total_episodes: r.episodes,
@@ -137,7 +151,7 @@ pub async fn load(db: &Db) -> Result<HomeData> {
                 resume_s: r.position_s.filter(|s| *s > 0),
                 progress: ratio(r.progress, r.episodes),
                 mark: pick_mark(is_new, is_final),
-                source: file_name(&r.path),
+                source: r.path.as_deref().map(file_name),
             }
         })
         .collect();
@@ -190,7 +204,7 @@ pub async fn load(db: &Db) -> Result<HomeData> {
         up_next,
         week,
         sync: SyncStatus {
-            anilist_connected: last_synced.is_some(),
+            anilist_connected: connected,
             last_synced: last_synced.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()).map(|t| t.with_timezone(&Utc)),
             files_matched,
         },
@@ -248,6 +262,7 @@ pub fn sample(now: DateTime<Utc>) -> HomeData {
         media_id: id,
         title: title.into(),
         cover_url: None,
+        banner_url: None,
         color: Some(color.into()),
         episode: ep,
         total_episodes: total,
@@ -255,7 +270,7 @@ pub fn sample(now: DateTime<Utc>) -> HomeData {
         resume_s: resume,
         progress: ratio(ep - 1, total),
         mark,
-        source: file.into(),
+        source: Some(file.into()),
     };
     let slot = |id, title: &str, color: &str, ep, airs_at: DateTime<Utc>, watched, mark| AiringSlot {
         media_id: id,
@@ -322,7 +337,30 @@ mod tests {
         let u = &home.up_next[0];
         assert_eq!(u.episode, 12);
         assert_eq!(u.mark, Some(Mark::Final));
-        assert_eq!(u.source, "Test Show - 12.mkv");
+        assert_eq!(u.source.as_deref(), Some("Test Show - 12.mkv"));
+    }
+
+    #[tokio::test]
+    async fn up_next_skips_unaired_and_lists_missing_files_last() {
+        let db = crate::db::open_memory().await.unwrap();
+        for sql in [
+            // Airing: next to air is ep 5, user is at 4 -> nothing aired to watch.
+            "INSERT INTO media (id, kind, title, status, next_episode) VALUES (1, 'ANIME', 'Caught Up', 'RELEASING', 5)",
+            "INSERT INTO list_entry (media_id, status, progress, updated_at) VALUES (1, 'CURRENT', 4, '2026-01-03')",
+            // Finished show, ep 3 not in library.
+            "INSERT INTO media (id, kind, title, status, episodes) VALUES (2, 'ANIME', 'No File', 'FINISHED', 12)",
+            "INSERT INTO list_entry (media_id, status, progress, updated_at) VALUES (2, 'CURRENT', 2, '2026-01-02')",
+            // Finished show, ep 6 in library (older update, still first).
+            "INSERT INTO media (id, kind, title, status, episodes) VALUES (3, 'ANIME', 'Has File', 'FINISHED', 12)",
+            "INSERT INTO list_entry (media_id, status, progress, updated_at) VALUES (3, 'CURRENT', 5, '2026-01-01')",
+            "INSERT INTO local_file (path, media_id, episode, size_bytes, modified_at) VALUES ('D:/a/Has File - 06.mkv', 3, 6, 1, '2026-01-01')",
+        ] {
+            sqlx::query(sql).execute(&db).await.unwrap();
+        }
+        let home = load(&db).await.unwrap();
+        let titles: Vec<_> = home.up_next.iter().map(|u| u.title.as_str()).collect();
+        assert_eq!(titles, ["Has File", "No File"]);
+        assert_eq!(home.up_next[1].source, None);
     }
 
     #[test]

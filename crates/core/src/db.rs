@@ -31,6 +31,11 @@ pub async fn open(path: &Path) -> Result<Db> {
     Ok(pool)
 }
 
+/// A single optional text value, e.g. a setting.
+pub async fn scalar_text(db: &Db, sql: &'static str) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar(sql).fetch_optional(db).await?)
+}
+
 /// In-memory database for tests.
 pub async fn open_memory() -> Result<Db> {
     let options = SqliteConnectOptions::new()

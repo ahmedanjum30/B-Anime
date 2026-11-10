@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { Play } from "lucide-solid";
+import { Play } from "../lib/icons";
 
 import Mark from "./Mark";
 import type { UpNext } from "../lib/types";
@@ -31,7 +31,7 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
       aria-label={`Play ${it().title}, ${meta()}`}
     >
       <div class="upnext-art" style={{ "background-color": it().color ?? "var(--z3)" }}>
-        <Show when={it().coverUrl}>
+        <Show when={it().bannerUrl ?? it().coverUrl}>
           {(src) => <img src={src()} alt="" loading="lazy" decoding="async" />}
         </Show>
         <span class="ep-chip num">EP {it().episode}</span>
@@ -45,7 +45,9 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
           <span class="upnext-name">{it().title}</span>
         </h3>
         <p class="upnext-line num">{meta()}</p>
-        <p class="upnext-source" title={it().source}>{it().source}</p>
+        <p class="upnext-source" data-missing={it().source ? undefined : ""} title={it().source ?? undefined}>
+          {it().source ?? "Not in your library"}
+        </p>
         <div class="progress" aria-hidden="true">
           <i style={{ "--p": it().progress }} />
         </div>

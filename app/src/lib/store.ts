@@ -1,10 +1,17 @@
 import { createResource, createRoot, createSignal } from "solid-js";
-import { getHome } from "./api";
+import { getAccount, getHome, onLibraryChanged } from "./api";
 
-// App-wide state. One resource for Home data; the rail reads counts and
-// sync evidence from it too, so there's a single fetch.
+// App-wide state. Home data and the AniList account are fetched once and refreshed whenever
+// the backend says lists or library changed (sign-in, sync, sign-out).
 export const homeStore = createRoot(() => {
   const [home, { refetch }] = createResource(getHome);
+  const [account, { refetch: refetchAccount, mutate: setAccount }] = createResource(getAccount);
+
+  void onLibraryChanged(() => {
+    void refetch();
+    void refetchAccount();
+  });
+
   /** Show under the pointer/focus; links Up next cards and listings slots. */
   const [hoverMedia, setHoverMedia] = createSignal<number | null>(null);
   const [toast, setToast] = createSignal<string | null>(null);
@@ -12,7 +19,7 @@ export const homeStore = createRoot(() => {
   const notify = (msg: string) => {
     setToast(msg);
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => setToast(null), 3200);
+    toastTimer = window.setTimeout(() => setToast(null), 3600);
   };
-  return { home, refetch, hoverMedia, setHoverMedia, toast, notify };
+  return { home, refetch, account, refetchAccount, setAccount, hoverMedia, setHoverMedia, toast, notify };
 });

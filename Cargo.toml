@@ -14,5 +14,14 @@ panic = "abort"
 strip = true
 opt-level = 3
 
+# Local test installers: release behaviour (no console, embedded UI) at a fraction of the
+# compile time. No LTO, parallel codegen, incremental. Output: target\quick.
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 256
+incremental = true
+opt-level = 2
+
 [profile.dev.package."*"]
 opt-level = 2

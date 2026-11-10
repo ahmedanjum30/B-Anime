@@ -14,6 +14,7 @@ import "./styles/app.css";
 import Shell from "./components/Shell";
 import Home from "./routes/Home";
 import Pending from "./routes/Pending";
+import Settings from "./routes/Settings";
 
 render(
   () => (
@@ -24,7 +25,7 @@ render(
       <Route path="/manga" component={() => <Pending title="Manga" />} />
       <Route path="/discover" component={() => <Pending title="Discover" />} />
       <Route path="/extensions" component={() => <Pending title="Extensions" />} />
-      <Route path="/settings" component={() => <Pending title="Settings" />} />
+      <Route path="/settings" component={Settings} />
     </Router>
   ),
   document.getElementById("root")!,
