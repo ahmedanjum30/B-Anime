@@ -4,6 +4,7 @@
 pub mod anilist;
 pub mod db;
 pub mod error;
+pub mod extensions;
 pub mod home;
 pub mod library;
 pub mod paths;

@@ -20,6 +20,8 @@ pub enum Error {
     Login(String),
     #[error("couldn't access the system credential store: {0}")]
     Credentials(String),
+    #[error("extension error: {0}")]
+    Extension(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

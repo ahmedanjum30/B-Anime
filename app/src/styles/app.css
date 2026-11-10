@@ -1489,6 +1489,211 @@ a.slot:focus-visible {
   }
 }
 
+/* ───────── Extensions ───────── */
+.page-lede {
+  max-width: 68ch;
+  margin: calc(var(--u) * -2) 0 calc(var(--u) * 4);
+  color: var(--z8);
+}
+.install-row {
+  display: flex;
+  gap: var(--u);
+  align-items: center;
+}
+.search-grow {
+  flex: 1;
+  width: auto;
+  max-width: 640px;
+}
+.install-row .btn {
+  height: 40px;
+}
+.ext-preview {
+  display: grid;
+  gap: 12px;
+  margin-top: calc(var(--u) * 2);
+  padding: calc(var(--u) * 2);
+  background: var(--z2);
+  border-radius: var(--radius);
+  max-width: 720px;
+}
+.ext-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ext-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  object-fit: cover;
+}
+.ext-icon-empty {
+  display: grid;
+  place-items: center;
+  background: var(--z3);
+  font: 700 18px var(--font-head);
+  text-transform: uppercase;
+  color: var(--z10);
+}
+.ext-version {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--z6);
+}
+.ext-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--z6);
+}
+.ext-list {
+  list-style: none;
+  padding: 0;
+}
+.ext-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--u) calc(var(--u) * 3);
+  padding: calc(var(--u) * 2) 0;
+  border-bottom: 1px solid var(--z3);
+}
+.ext-row[data-disabled] .ext-identity,
+.ext-row[data-disabled] .setting-desc {
+  opacity: 0.55;
+}
+.ext-main {
+  display: grid;
+  gap: var(--u);
+  min-width: 0;
+}
+.ext-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  align-self: start;
+}
+.btn-danger {
+  background: var(--red);
+  color: #fff;
+}
+
+/* Switch: a real checkbox, drawn. */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  margin-left: var(--u);
+  flex: none;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  background: var(--z4);
+  transition: background-color var(--t-fast) var(--ease-out);
+  pointer-events: none;
+}
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--z10);
+  transition: transform var(--t-med) var(--ease-out);
+}
+.switch input:checked + span {
+  background: var(--teal);
+}
+.switch input:checked + span::after {
+  transform: translateX(18px);
+}
+.switch input:focus-visible + span {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+.ext-try {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  padding: calc(var(--u) * 2);
+  background: var(--z0);
+  border-radius: var(--radius);
+}
+.try-count {
+  font-size: 12px;
+  color: var(--z6);
+}
+.try-list {
+  margin: 4px 0 0;
+  padding-left: 24px;
+  color: var(--z10);
+  line-height: 22px;
+}
+.try-pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  background: var(--z1);
+  border-radius: var(--radius);
+  font: 12px/18px ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--z8);
+  white-space: pre-wrap;
+}
+.try-logs summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--z8);
+  margin-bottom: var(--u);
+}
+
+.repo {
+  margin-top: calc(var(--u) * 3);
+}
+.repo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u);
+  padding-bottom: var(--u);
+  border-bottom: 1px solid var(--z4);
+}
+.repo-url {
+  font: 12px/16px ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--z8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-list {
+  list-style: none;
+  padding: 0;
+}
+.repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 2);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--z3);
+}
+
 /* ───────── Loading ───────── */
 .sk-line {
   height: 26px;

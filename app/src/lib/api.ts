@@ -1,7 +1,21 @@
 import type {
-  Account, BrowseFilter, BrowsePage, EntryChange, HomeData, LibraryEntry, LibraryKind, ListEntry, MediaPage,
-  ScheduleItem, ScheduleScope,
+  Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
+  LibraryEntry, LibraryKind, ListEntry, MediaPage, RepoEntry, ScheduleItem, ScheduleScope,
 } from "./types";
+
+// ── Extensions (desktop only; the browser preview shows an empty list) ──
+export const listExtensions = () => (inTauri ? call<InstalledExtension[]>("list_extensions") : Promise.resolve([]));
+export const previewExtension = (url: string) => call<ExtManifest>("preview_extension", { url });
+export const installExtension = (url: string) => call<InstalledExtension>("install_extension", { url });
+export const updateExtension = (id: string) => call<InstalledExtension>("update_extension", { id });
+export const checkExtensionUpdates = () =>
+  inTauri ? call<{ id: string; version: string }[]>("check_extension_updates") : Promise.resolve([]);
+export const setExtensionEnabled = (id: string, enabled: boolean) => call<void>("set_extension_enabled", { id, enabled });
+export const removeExtension = (id: string) => call<void>("remove_extension", { id });
+export const tryExtension = (id: string, query: string) => call<ExtCallOutput>("try_extension", { id, query });
+export const getExtensionRepos = () => (inTauri ? call<string[]>("get_extension_repos") : Promise.resolve([]));
+export const setExtensionRepos = (repos: string[]) => call<void>("set_extension_repos", { repos });
+export const readExtensionRepo = (url: string) => call<RepoEntry[]>("read_extension_repo", { url });
 
 export async function browse(filter: BrowseFilter): Promise<BrowsePage> {
   if (!inTauri) {

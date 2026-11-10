@@ -169,6 +169,43 @@ export interface ScheduleItem {
   progress: number | null;
 }
 
+export type ExtKind = "anime" | "manga";
+
+export interface ExtManifest {
+  id: string;
+  name: string;
+  version: string;
+  kind: ExtKind;
+  author: string;
+  description: string;
+  language: string | null;
+  icon: string | null;
+  codeUrl: string;
+  apiVersion: number;
+}
+
+export interface InstalledExtension extends ExtManifest {
+  sourceUrl: string;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+}
+
+export interface ExtCallOutput {
+  value: unknown;
+  logs: string[];
+}
+
+export interface RepoEntry {
+  manifestUrl: string;
+  id: string | null;
+  name: string;
+  version: string | null;
+  kind: ExtKind | null;
+  author: string | null;
+  description: string | null;
+}
+
 export interface Viewer {
   id: number;
   name: string;

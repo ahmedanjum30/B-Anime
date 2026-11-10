@@ -17,7 +17,7 @@ import Library from "./routes/Library";
 import Show from "./routes/Show";
 import Schedule from "./routes/Schedule";
 import Discover from "./routes/Discover";
-import Pending from "./routes/Pending";
+import Extensions from "./routes/Extensions";
 import Settings from "./routes/Settings";
 
 render(
@@ -29,7 +29,7 @@ render(
       <Route path="/schedule" component={Schedule} />
       <Route path="/manga" component={() => <Library kind="MANGA" />} />
       <Route path="/discover" component={Discover} />
-      <Route path="/extensions" component={() => <Pending title="Extensions" />} />
+      <Route path="/extensions" component={Extensions} />
       <Route path="/settings" component={Settings} />
     </Router>
   ),

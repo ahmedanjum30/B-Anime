@@ -36,6 +36,15 @@ pub async fn scalar_text(db: &Db, sql: &'static str) -> Result<Option<String>> {
     Ok(sqlx::query_scalar(sql).fetch_optional(db).await?)
 }
 
+pub async fn set_setting(db: &Db, key: &str, value: &str) -> Result<()> {
+    sqlx::query("INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind(key)
+        .bind(value)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// In-memory database for tests.
 pub async fn open_memory() -> Result<Db> {
     let options = SqliteConnectOptions::new()

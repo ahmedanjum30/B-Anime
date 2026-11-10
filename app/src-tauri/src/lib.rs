@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use banime_core::anilist::{self, Viewer, auth, browse, media, sync::SyncReport};
-use banime_core::{AppPaths, Error, db, home};
+use banime_core::{AppPaths, Error, db, extensions, home};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -14,7 +14,6 @@ const LIBRARY_CHANGED: &str = "library-changed";
 
 struct AppState {
     db: db::Db,
-    #[allow(dead_code)]
     paths: AppPaths,
     /// Held while a sync runs; a second sync request waits for the first instead of racing it.
     sync_lock: Mutex<()>,
@@ -79,6 +78,98 @@ async fn get_schedule(
 ) -> Result<Vec<browse::ScheduleItem>, String> {
     let client = anilist::Client::new(auth::load_token().ok().flatten()).map_err(msg)?;
     browse::schedule(&client, &state.db, scope, from, to).await.map_err(msg)
+}
+
+// ── Extensions ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn list_extensions(state: tauri::State<'_, AppState>) -> Result<Vec<extensions::Installed>, String> {
+    extensions::list(&state.db).await.map_err(msg)
+}
+
+/// Downloads and checks an extension so the UI can show what it is before installing.
+#[tauri::command]
+async fn preview_extension(url: String) -> Result<extensions::Manifest, String> {
+    extensions::fetch(&url, extensions::Limits::default()).await.map(|(m, _)| m).map_err(msg)
+}
+
+#[tauri::command]
+async fn install_extension(state: tauri::State<'_, AppState>, url: String) -> Result<extensions::Installed, String> {
+    extensions::install(&state.db, &state.paths.extensions, &url, extensions::Limits::default())
+        .await
+        .map_err(msg)
+}
+
+#[tauri::command]
+async fn update_extension(state: tauri::State<'_, AppState>, id: String) -> Result<extensions::Installed, String> {
+    let ext = extensions::get(&state.db, &id).await.map_err(msg)?.ok_or("Not installed.")?;
+    extensions::install(&state.db, &state.paths.extensions, &ext.source_url, extensions::Limits::default())
+        .await
+        .map_err(msg)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionUpdate {
+    id: String,
+    version: String,
+}
+
+/// Checks every installed extension's source for a newer version. Unreachable sources are skipped.
+#[tauri::command]
+async fn check_extension_updates(state: tauri::State<'_, AppState>) -> Result<Vec<ExtensionUpdate>, String> {
+    let mut updates = Vec::new();
+    for ext in extensions::list(&state.db).await.map_err(msg)? {
+        if let Ok(Some(version)) = extensions::available_update(&ext, extensions::Limits::default()).await {
+            updates.push(ExtensionUpdate { id: ext.manifest.id, version });
+        }
+    }
+    Ok(updates)
+}
+
+#[tauri::command]
+async fn set_extension_enabled(state: tauri::State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+    extensions::set_enabled(&state.db, &id, enabled).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn remove_extension(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    extensions::remove(&state.db, &state.paths.extensions, &id).await.map_err(msg)
+}
+
+/// The Extensions screen's tester: runs `search` and returns the result with the logs.
+#[tauri::command]
+async fn try_extension(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    query: String,
+) -> Result<extensions::CallOutput, String> {
+    let args = serde_json::json!([{ "query": query }]);
+    extensions::call(&state.db, &state.paths.extensions, &id, "search", &args, extensions::Limits::default())
+        .await
+        .map_err(msg)
+}
+
+const REPOS_KEY: &str = "extensions.repos";
+
+#[tauri::command]
+async fn get_extension_repos(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let raw = sqlx_scalar(&state.db, "SELECT value FROM setting WHERE key = 'extensions.repos'").await.map_err(msg)?;
+    Ok(raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default())
+}
+
+#[tauri::command]
+async fn set_extension_repos(state: tauri::State<'_, AppState>, repos: Vec<String>) -> Result<(), String> {
+    let mut clean: Vec<String> = repos.into_iter().map(|r| r.trim().to_owned()).filter(|r| !r.is_empty()).collect();
+    clean.dedup();
+    banime_core::db::set_setting(&state.db, REPOS_KEY, &serde_json::to_string(&clean).map_err(|e| e.to_string())?)
+        .await
+        .map_err(msg)
+}
+
+#[tauri::command]
+async fn read_extension_repo(url: String) -> Result<Vec<extensions::RepoEntry>, String> {
+    extensions::read_repo(&url, extensions::Limits::default()).await.map_err(msg)
 }
 
 /// Opens a show on anilist.co. Takes an id, not a URL, so the UI can't open arbitrary links.
@@ -280,6 +371,17 @@ pub fn run() {
             save_entry,
             browse,
             get_schedule,
+            list_extensions,
+            preview_extension,
+            install_extension,
+            update_extension,
+            check_extension_updates,
+            set_extension_enabled,
+            remove_extension,
+            try_extension,
+            get_extension_repos,
+            set_extension_repos,
+            read_extension_repo,
             open_anilist,
             get_account,
             anilist_login,
