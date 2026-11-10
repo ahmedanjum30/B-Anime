@@ -19,9 +19,10 @@ use tokio::sync::{Mutex, oneshot};
 
 use crate::{Error, Result};
 
-/// Must match the redirect URL registered for the AniList API client.
-pub const CALLBACK_PORT: u16 = 43211;
-pub const REDIRECT_URI: &str = "http://127.0.0.1:43211/callback";
+/// Must match the redirect URL registered for the AniList API client. Not 43211: another
+/// anime app uses that port by default, and people switching from it often still run it.
+pub const CALLBACK_PORT: u16 = 48731;
+pub const REDIRECT_URI: &str = "http://127.0.0.1:48731/callback";
 
 const KEYRING_SERVICE: &str = "B-Anime";
 const KEYRING_USER: &str = "anilist-token";

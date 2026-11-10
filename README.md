@@ -60,7 +60,7 @@ Run backend tests with `cargo test -p banime-core`.
 
 ### AniList sign-in
 
-B-Anime's AniList API client (id 56545, redirect URL `http://127.0.0.1:43211/callback`) is built
+B-Anime's AniList API client (id 56545, redirect URL `http://127.0.0.1:48731/callback`) is built
 in; nothing to configure. A fork can use its own client by setting `BANIME_ANILIST_CLIENT_ID`.
 No client secret is used or needed.
 
