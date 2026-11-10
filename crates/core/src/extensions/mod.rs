@@ -250,7 +250,7 @@ pub async fn call(db: &Db, dir: &Path, id: &str, method: &str, args: &Value, lim
 
 /// The repository B-Anime starts with: its own examples (public test videos and placeholder
 /// pages). Users can remove it and add others.
-pub const DEFAULT_REPO: &str = "https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/repository.json";
+pub const DEFAULT_REPO: &str = "https://raw.githubusercontent.com/Bas1874/Seanime-Marketplace/refs/heads/main/Marketplace/Main.json";
 
 /// One extension listed in a repository.
 #[derive(Debug, Clone, Serialize)]
