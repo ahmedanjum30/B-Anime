@@ -1,6 +1,7 @@
 //! AniList GraphQL client. AniList is the source of truth for lists and progress.
 
 pub mod auth;
+pub mod media;
 pub mod sync;
 
 use std::time::Duration;

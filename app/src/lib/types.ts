@@ -56,6 +56,67 @@ export interface LibraryEntry {
   updatedAt: string;
 }
 
+export interface MediaRef {
+  id: number;
+  type: LibraryKind;
+  format: string | null;
+  status?: string | null;
+  title: { userPreferred: string };
+  coverImage: { large: string | null; color: string | null };
+}
+
+/** AniList's Media object as the show page query returns it. */
+export interface Media {
+  id: number;
+  type: LibraryKind;
+  format: string | null;
+  status: string | null;
+  episodes: number | null;
+  chapters: number | null;
+  volumes: number | null;
+  duration: number | null;
+  source: string | null;
+  season: string | null;
+  seasonYear: number | null;
+  startDate: { year: number | null; month: number | null; day: number | null };
+  endDate: { year: number | null; month: number | null; day: number | null };
+  title: { userPreferred: string; romaji: string | null; english: string | null; native: string | null };
+  description: string | null;
+  coverImage: { extraLarge: string | null; large: string | null; color: string | null };
+  bannerImage: string | null;
+  genres: string[];
+  averageScore: number | null;
+  popularity: number | null;
+  siteUrl: string;
+  studios: { nodes: { id: number; name: string }[] };
+  nextAiringEpisode: { episode: number; airingAt: number } | null;
+  streamingEpisodes: { title: string | null; thumbnail: string | null }[];
+  relations: { edges: { relationType: string; node: MediaRef }[] };
+  recommendations: { nodes: { mediaRecommendation: MediaRef | null }[] };
+}
+
+export interface ListEntry {
+  status: ListStatus;
+  progress: number;
+  score: number | null;
+  updatedAt: string;
+}
+
+export interface MediaPage {
+  media: Media;
+  listEntry: ListEntry | null;
+  localFiles: { episode: number; fileName: string }[];
+  fromCache: boolean;
+  fetchedAt: string;
+}
+
+export interface EntryChange {
+  status?: ListStatus;
+  progress?: number;
+  /** 0–100 */
+  score?: number;
+}
+
 export interface Viewer {
   id: number;
   name: string;
@@ -66,6 +127,8 @@ export interface Account {
   clientConfigured: boolean;
   viewer: Viewer | null;
   lastSynced: string | null;
+  /** Set while automatic syncing is failing; it keeps retrying. */
+  syncError: string | null;
 }
 
 export interface SyncReport {

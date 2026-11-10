@@ -1,6 +1,7 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use banime_core::anilist::{self, Viewer, auth, sync::SyncReport};
+use banime_core::anilist::{self, Viewer, auth, media, sync::SyncReport};
 use banime_core::{AppPaths, Error, db, home};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -19,7 +20,13 @@ struct AppState {
     sync_lock: Mutex<()>,
     /// Wakes a sign-in that's waiting on the browser, to cancel it.
     cancel_login: Arc<Notify>,
+    /// Why the last automatic sync failed, until one succeeds. Shown in the UI.
+    sync_error: std::sync::Mutex<Option<String>>,
 }
+
+/// Syncing is automatic: at launch, on this timer, and from the UI's triggers (window focus
+/// after 5+ minutes away, network back online). A failing sync retries on every trigger.
+const PERIODIC_SYNC: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +35,8 @@ struct Account {
     client_configured: bool,
     viewer: Option<Viewer>,
     last_synced: Option<String>,
+    /// Set while automatic syncing is failing (e.g. offline); it keeps retrying.
+    sync_error: Option<String>,
 }
 
 fn msg(e: Error) -> String {
@@ -48,6 +57,41 @@ async fn get_library(
 }
 
 #[tauri::command]
+async fn get_media(state: tauri::State<'_, AppState>, id: i64) -> Result<media::MediaPage, String> {
+    // Signed-in requests aren't needed for public detail; the token only adds rate headroom.
+    let token = auth::load_token().ok().flatten();
+    let client = anilist::Client::new(token).map_err(msg)?;
+    media::page(&client, &state.db, id).await.map_err(msg)
+}
+
+/// Opens a show on anilist.co. Takes an id, not a URL, so the UI can't open arbitrary links.
+#[tauri::command]
+fn open_anilist(app: AppHandle, id: u64, kind: banime_core::library::Kind) -> Result<(), String> {
+    let path = match kind {
+        banime_core::library::Kind::Anime => "anime",
+        banime_core::library::Kind::Manga => "manga",
+    };
+    app.opener()
+        .open_url(format!("https://anilist.co/{path}/{id}"), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Saves a list change to AniList and the local mirror; the UI refreshes via LIBRARY_CHANGED.
+#[tauri::command]
+async fn save_entry(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    media_id: i64,
+    change: media::EntryChange,
+) -> Result<media::ListEntry, String> {
+    let token = auth::load_token().map_err(msg)?.ok_or_else(|| msg(Error::Unauthorized))?;
+    let client = anilist::Client::new(Some(token)).map_err(msg)?;
+    let entry = media::save_entry(&client, &state.db, media_id, change).await.map_err(msg)?;
+    let _ = app.emit(LIBRARY_CHANGED, ());
+    Ok(entry)
+}
+
+#[tauri::command]
 async fn get_account(state: tauri::State<'_, AppState>) -> Result<Account, String> {
     account(&state).await.map_err(msg)
 }
@@ -56,7 +100,8 @@ async fn account(state: &AppState) -> banime_core::Result<Account> {
     let viewer = anilist::sync::stored_viewer(&state.db).await?;
     let last_synced: Option<String> =
         sqlx_scalar(&state.db, "SELECT value FROM setting WHERE key = 'anilist.last_synced'").await?;
-    Ok(Account { client_configured: auth::client_id().is_some(), viewer, last_synced })
+    let sync_error = state.sync_error.lock().ok().and_then(|e| e.clone());
+    Ok(Account { client_configured: auth::client_id().is_some(), viewer, last_synced, sync_error })
 }
 
 async fn sqlx_scalar(db: &db::Db, sql: &'static str) -> banime_core::Result<Option<String>> {
@@ -82,6 +127,9 @@ async fn anilist_login(app: AppHandle, state: tauri::State<'_, AppState>) -> Res
     let viewer = client.viewer().await.map_err(msg)?;
     auth::save_token(&token).map_err(msg)?;
     run_sync(&app, &state, &client, &viewer).await.map_err(msg)?;
+    if let Ok(mut e) = state.sync_error.lock() {
+        *e = None;
+    }
     account(&state).await.map_err(msg)
 }
 
@@ -95,13 +143,51 @@ async fn anilist_logout(app: AppHandle, state: tauri::State<'_, AppState>) -> Re
     let _guard = state.sync_lock.lock().await;
     auth::delete_token().map_err(msg)?;
     anilist::sync::forget(&state.db).await.map_err(msg)?;
+    if let Ok(mut e) = state.sync_error.lock() {
+        *e = None;
+    }
     let _ = app.emit(LIBRARY_CHANGED, ());
     account(&state).await.map_err(msg)
 }
 
+/// The UI's sync triggers (window focus, network back online). Syncs only when the last sync
+/// is older than `min_age_secs`, and never runs two at once. Returns whether it synced.
 #[tauri::command]
-async fn anilist_sync(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<SyncReport, String> {
-    sync_with_stored_token(&app, &state).await.map_err(msg)
+async fn sync_if_stale(app: AppHandle, state: tauri::State<'_, AppState>, min_age_secs: u64) -> Result<bool, String> {
+    Ok(auto_sync(&app, &state, Duration::from_secs(min_age_secs)).await)
+}
+
+/// Syncs when signed in and the last sync is older than `min_age`. Failures are recorded for
+/// the UI (and retried by the next trigger) rather than returned.
+async fn auto_sync(app: &AppHandle, state: &AppState, min_age: Duration) -> bool {
+    if state.sync_lock.try_lock().is_err() || !matches!(auth::load_token(), Ok(Some(_))) {
+        return false;
+    }
+    let last: Option<String> = sqlx_scalar(&state.db, "SELECT value FROM setting WHERE key = 'anilist.last_synced'")
+        .await
+        .ok()
+        .flatten();
+    let fresh = last
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .is_some_and(|t| chrono::Utc::now().signed_duration_since(t).to_std().unwrap_or_default() < min_age);
+    // A failing sync retries on every trigger, however recent the last success.
+    let failing = state.sync_error.lock().map(|e| e.is_some()).unwrap_or(false);
+    if fresh && !failing {
+        return false;
+    }
+
+    let result = sync_with_stored_token(app, state).await;
+    if let Ok(mut slot) = state.sync_error.lock() {
+        *slot = result.as_ref().err().map(|e| e.to_string());
+    }
+    match result {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(error = %e, "automatic sync failed");
+            let _ = app.emit(LIBRARY_CHANGED, ());
+            false
+        }
+    }
 }
 
 async fn sync_with_stored_token(app: &AppHandle, state: &AppState) -> banime_core::Result<SyncReport> {
@@ -149,6 +235,7 @@ pub fn run() {
                 paths,
                 sync_lock: Mutex::new(()),
                 cancel_login: Arc::new(Notify::new()),
+                sync_error: std::sync::Mutex::new(None),
             });
 
             // Open maximized. The config flag alone doesn't stick on every Windows setup.
@@ -156,14 +243,15 @@ pub fn run() {
                 let _ = window.maximize();
             }
 
-            // Refresh lists in the background on launch; the UI shows the cached copy meanwhile.
+            // Sync at launch, then keep lists fresh while the app is open. The UI shows the
+            // cached copy meanwhile and adds focus / back-online triggers.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<AppState>();
-                if matches!(auth::load_token(), Ok(Some(_))) {
-                    if let Err(e) = sync_with_stored_token(&handle, &state).await {
-                        tracing::warn!(error = %e, "startup sync failed");
-                    }
+                auto_sync(&handle, &state, Duration::ZERO).await;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    auto_sync(&handle, &state, PERIODIC_SYNC).await;
                 }
             });
             Ok(())
@@ -171,11 +259,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_home,
             get_library,
+            get_media,
+            save_entry,
+            open_anilist,
             get_account,
             anilist_login,
             anilist_cancel_login,
             anilist_logout,
-            anilist_sync
+            sync_if_stale
         ])
         .run(tauri::generate_context!())
         .expect("error while running B-Anime");

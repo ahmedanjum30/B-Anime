@@ -54,12 +54,14 @@ export default function Shell(props: ParentProps) {
   );
 }
 
+/** Sync status as evidence. Syncing is automatic; there is nothing to press. */
 function SyncFoot() {
-  const { home, now } = homeStore;
+  const { home, account, now } = homeStore;
+  const synced = () => account()?.lastSynced;
   return (
     <div class="sync">
       <Show
-        when={home()?.sync.anilistConnected}
+        when={account()?.viewer}
         fallback={
           <>
             <span class="sync-state is-off">
@@ -69,14 +71,28 @@ function SyncFoot() {
           </>
         }
       >
-        <span class="sync-state">
-          <i class="dot" aria-hidden="true" /> Synced with AniList
-        </span>
-        <span class="sync-evidence">
-          <Show when={home()?.sync.lastSynced}>{(t) => fmtAgo(t(), now())}</Show>
-          {" · "}
-          <span class="num">{fmtCount(home()?.sync.filesMatched ?? 0)}</span> files matched
-        </span>
+        <Show
+          when={!account()?.syncError}
+          fallback={
+            <>
+              <span class="sync-state is-warn" title={account()?.syncError ?? undefined}>
+                <i class="dot" aria-hidden="true" /> Can't reach AniList
+              </span>
+              <span class="sync-evidence">
+                Retrying automatically{synced() ? <> · last synced {fmtAgo(synced()!, now())}</> : null}
+              </span>
+            </>
+          }
+        >
+          <span class="sync-state">
+            <i class="dot" aria-hidden="true" /> Synced with AniList
+          </span>
+          <span class="sync-evidence">
+            {synced() ? fmtAgo(synced()!, now()) : "Syncing…"}
+            {" · "}
+            <span class="num">{fmtCount(home()?.sync.filesMatched ?? 0)}</span> files matched
+          </span>
+        </Show>
       </Show>
     </div>
   );

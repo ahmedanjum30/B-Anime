@@ -1,6 +1,35 @@
 // Browser-preview data for working on the UI without the Tauri shell.
 // Mirrors banime_core::home::sample(); loaded lazily, only outside Tauri.
-import type { AiringSlot, HomeData, LibraryEntry, LibraryKind, ListStatus, UpNext } from "./types";
+import type { AiringSlot, HomeData, LibraryEntry, LibraryKind, ListStatus, MediaPage, MediaRef, UpNext } from "./types";
+
+/** A made-up airing show for working on the show page in a browser. */
+export function browserPreviewMedia(id: number): MediaPage {
+  const ref = (rid: number, title: string, color: string, format = "TV"): MediaRef => ({
+    id: rid, type: "ANIME", format, status: "FINISHED", title: { userPreferred: title }, coverImage: { large: null, color },
+  });
+  return {
+    media: {
+      id, type: "ANIME", format: "TV", status: "RELEASING", episodes: 24, chapters: null, volumes: null, duration: 24,
+      source: "MANGA", season: "FALL", seasonYear: 2026,
+      startDate: { year: 2026, month: 10, day: 4 }, endDate: { year: null, month: null, day: null },
+      title: { userPreferred: "Lantern Garden", romaji: "Lantern Garden", english: "The Lantern Garden", native: "灯籠の庭" },
+      description: "Sample description for the browser preview.<br><br>A night-market keeper inherits a garden whose lanterns light up only for the people who need them. <i>(Preview data.)</i>",
+      coverImage: { extraLarge: null, large: null, color: "#3d5a6e" },
+      bannerImage: null,
+      genres: ["Drama", "Fantasy", "Slice of Life"],
+      averageScore: 81, popularity: 48210, siteUrl: "https://anilist.co",
+      studios: { nodes: [{ id: 1, name: "Preview Studio" }] },
+      nextAiringEpisode: { episode: 7, airingAt: Math.floor(Date.now() / 1000) + 3 * 86400 },
+      streamingEpisodes: Array.from({ length: 6 }, (_, i) => ({ title: `Episode ${i + 1} - Sample title ${i + 1}`, thumbnail: null })),
+      relations: { edges: [{ relationType: "PREQUEL", node: ref(9001, "Lantern Garden: Prologue", "#6e3d3d", "OVA") }] },
+      recommendations: { nodes: [9002, 9003, 9004].map((r, i) => ({ mediaRecommendation: ref(r, `Sample pick ${i + 1}`, ["#4a4a6e", "#3d6e55", "#6e5d3d"][i]) })) },
+    },
+    listEntry: { status: "CURRENT", progress: 4, score: 80, updatedAt: new Date().toISOString() },
+    localFiles: [{ episode: 5, fileName: "Lantern Garden - 05 [1080p].mkv" }],
+    fromCache: false,
+    fetchedAt: new Date().toISOString(),
+  };
+}
 
 /** A large synthetic list (2,400 anime / 400 manga) for checking the grid at archivist scale. */
 export function browserPreviewLibrary(kind: LibraryKind): LibraryEntry[] {

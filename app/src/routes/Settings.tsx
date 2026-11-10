@@ -1,11 +1,10 @@
 import { Match, Show, Switch, createSignal } from "solid-js";
-import { RefreshCw } from "../lib/icons";
 
-import { cancelLogin, errorText, inTauri, login, logout, syncNow } from "../lib/api";
-import { fmtAgo, fmtCount } from "../lib/format";
+import { cancelLogin, errorText, inTauri, login, logout } from "../lib/api";
+import { fmtAgo } from "../lib/format";
 import { homeStore } from "../lib/store";
 
-type Busy = null | "login" | "sync" | "logout";
+type Busy = null | "login" | "logout";
 
 export default function Settings() {
   const { account, setAccount, notify, now } = homeStore;
@@ -30,12 +29,6 @@ export default function Settings() {
       const acc = await login();
       setAccount(acc);
       notify(`Connected as ${acc.viewer?.name}. Your lists are synced.`);
-    });
-
-  const sync = () =>
-    run("sync", async () => {
-      const r = await syncNow();
-      notify(`Synced ${fmtCount(r.anime)} anime and ${fmtCount(r.manga)} manga.`);
     });
 
   const disconnect = () =>
@@ -93,17 +86,17 @@ export default function Settings() {
                   <div class="setting-text">
                     <p class="setting-title">{viewer().name}</p>
                     <p class="setting-desc">
-                      <Show when={account()?.lastSynced} fallback="Not synced yet">
-                        {(t) => <>Last synced {fmtAgo(t(), now())}</>}
+                      <Show
+                        when={!account()?.syncError}
+                        fallback={<span class="warn-text">Can't reach AniList right now. B-Anime will keep retrying.</span>}
+                      >
+                        Syncs automatically
+                        <Show when={account()?.lastSynced}>{(t) => <> · last synced {fmtAgo(t(), now())}</>}</Show>
                       </Show>
                     </p>
                   </div>
                 </div>
                 <div class="setting-actions">
-                  <button type="button" class="btn" disabled={busy() !== null} onClick={sync}>
-                    <RefreshCw size={14} stroke-width={2} aria-hidden="true" class={busy() === "sync" ? "spin" : ""} />
-                    {busy() === "sync" ? "Syncing…" : "Sync now"}
-                  </button>
                   <button type="button" class="btn btn-quiet" disabled={busy() !== null} onClick={disconnect}>
                     Disconnect
                   </button>
@@ -129,7 +122,7 @@ export default function Settings() {
           Library folders
           <small>Where B-Anime looks for your episodes.</small>
         </h2>
-        <p class="empty">Folder scanning is the next feature being built.</p>
+        <p class="empty">Folder scanning is coming in a later update.</p>
       </section>
     </div>
   );

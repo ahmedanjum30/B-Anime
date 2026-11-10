@@ -319,6 +319,7 @@ name = "banime-app"
 version = "0.1.0"
 dependencies = [
  "banime-core",
+ "chrono",
  "serde",
  "serde_json",
  "tauri",

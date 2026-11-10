@@ -14,6 +14,7 @@ export function fmtDateLine(d: Date): string {
 
 export function fmtAgo(iso: string, now = Date.now()): string {
   const mins = Math.round((new Date(iso).getTime() - now) / 60_000);
+  if (Math.abs(mins) < 1) return "just now";
   if (Math.abs(mins) < 60) return rel.format(mins, "minute");
   const hours = Math.round(mins / 60);
   if (Math.abs(hours) < 24) return rel.format(hours, "hour");
