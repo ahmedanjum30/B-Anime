@@ -337,10 +337,13 @@ name = "banime-core"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "chrono",
  "dirs",
+ "flate2",
  "futures-util",
  "keyring",
+ "png",
  "rand 0.10.3",
  "regex",
  "reqwest",

@@ -7,9 +7,12 @@ pub mod error;
 pub mod extensions;
 pub mod home;
 pub mod library;
+pub mod mkv;
 pub mod paths;
+pub mod pgs;
 pub mod player;
 pub mod scanner;
+pub mod subs;
 pub mod updater;
 pub mod streaming;
 

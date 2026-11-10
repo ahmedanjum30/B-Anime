@@ -181,7 +181,7 @@ pub async fn local_stream(state: tauri::State<'_, AppState>, media_id: i64, epis
     }
     let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // Subtitle files sitting next to the episode come along automatically.
-    let subtitles = scanner::sidecar_subtitles(&path)
+    let mut subtitles: Vec<_> = scanner::sidecar_subtitles(&path)
         .into_iter()
         .map(|(sub, label)| streaming::StreamSubtitle {
             url: state.proxy.subtitle_url(&sub),
@@ -191,8 +191,30 @@ pub async fn local_stream(state: tauri::State<'_, AppState>, media_id: i64, epis
                 _ => "und".into(),
             },
             label,
+            images: false,
         })
         .collect();
+    // Then the subtitle tracks inside the file (the webview can't read MKV subtitles itself).
+    let probe = path.clone();
+    let embedded = tokio::task::spawn_blocking(move || banime_core::mkv::subtitle_tracks(&probe))
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|e| {
+            tracing::debug!(error = %e, "no embedded subtitles");
+            Vec::new()
+        });
+    if !embedded.is_empty() {
+        state.proxy.prefetch_embedded(&path);
+    }
+    // The file's default track first, so it's the one picked when several match the language.
+    let mut embedded = embedded;
+    embedded.sort_by_key(|t| !t.default);
+    subtitles.extend(embedded.iter().map(|t| streaming::StreamSubtitle {
+        url: state.proxy.embedded_url(&path, t.number),
+        lang: t.language.clone(),
+        label: t.label(),
+        images: t.format == banime_core::mkv::Format::Pgs,
+    }));
     Ok(streaming::Stream {
         sources: vec![streaming::StreamSource { url: state.proxy.file_url(&path), kind: "file".into(), label, audio: None }],
         subtitles,

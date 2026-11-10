@@ -19,7 +19,8 @@
         "minWidth": 960,
         "minHeight": 600,
         "backgroundColor": "#191B22",
-        "maximized": true
+        "maximized": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-blink-features=AudioVideoTracks"
       }
     ],
     "security": {

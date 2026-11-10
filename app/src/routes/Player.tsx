@@ -10,7 +10,7 @@ import {
   errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
   localStream, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
-import type { Stream } from "../lib/types";
+import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { createSource } from "../lib/source";
@@ -206,21 +206,58 @@ export default function Player() {
     }),
   );
 
+  // ── Picture subtitles (PGS in library MKVs)
+  // Their <track> carries empty cues (id = event index) for timing; the pictures for the active
+  // cues are drawn in a layer sized like the video's picture.
+  const pictureUrl = new WeakMap<TextTrack, string>();
+  const pictureData = new Map<string, Promise<PictureTrack>>();
+  const [aspect, setAspect] = createSignal(16 / 9);
+  const [pictures, setPictures] = createSignal<{ width: number; height: number; images: PictureTrack["events"][number]["images"] }>(
+    { width: 1920, height: 1080, images: [] },
+  );
+  const updatePictures = async () => {
+    const t = tracks().find((x) => x.mode === "showing");
+    const url = t && pictureUrl.get(t);
+    if (!t || !url) return setPictures((p) => (p.images.length ? { ...p, images: [] } : p));
+    let data = pictureData.get(url);
+    if (!data) {
+      data = fetch(url).then((r) => (r.ok ? (r.json() as Promise<PictureTrack>) : Promise.reject(new Error(`HTTP ${r.status}`))));
+      data.catch(() => pictureData.delete(url));
+      pictureData.set(url, data);
+    }
+    try {
+      const track = await data;
+      if (t.mode !== "showing") return;
+      const images = Array.from(t.activeCues ?? []).flatMap((c) => track.events[Number(c.id)]?.images ?? []);
+      setPictures({ width: track.width, height: track.height, images });
+    } catch (e) {
+      notify(`Couldn't load the subtitles: ${errorText(e)}`);
+    }
+  };
+  createEffect(on(stream, () => setPictures((p) => ({ ...p, images: [] }))));
+
   // External subtitles are <track>s; HLS ones arrive as TextTracks too. Keep one list.
   let autoPicked = false;
   const refreshTracks = () => {
     const list = Array.from(video.textTracks).filter((t) => t.kind === "subtitles" || t.kind === "captions");
     setTracks(list);
-    for (const t of list) t.oncuechange = applyOffset;
+    for (const t of list) {
+      t.oncuechange = () => {
+        applyOffset();
+        if (pictureUrl.has(t)) void updatePictures();
+      };
+    }
     applyOffset();
     const showing = list.findIndex((t) => t.mode === "showing");
     if (showing >= 0) setActiveTrack(showing);
     else if (!autoPicked && list.length) {
-      // The preferred subtitle language (Settings → Playback); "off" shows none.
+      // The preferred subtitle language (Settings → Playback); "off" shows none. Full subtitles
+      // beat forced / signs-only tracks in the same language.
       const want = prefs()?.subtitles ?? "en";
-      const preferred = want === "off" ? -1 : list.findIndex((t) => langMatches(t.language, t.label, want));
-      chooseTrack(preferred, false);
-      autoPicked = preferred >= 0 || want === "off";
+      const matching = want === "off" ? [] : list.filter((t) => langMatches(t.language, t.label, want));
+      const best = matching.find((t) => !/forced|signs|songs/i.test(t.label)) ?? matching[0];
+      chooseTrack(best ? list.indexOf(best) : -1, false);
+      autoPicked = !!best || want === "off";
     }
   };
   /** A track's menu name; tracks sharing a name are numbered so they can be told apart. */
@@ -232,6 +269,7 @@ export default function Player() {
   const chooseTrack = (i: number, close = true) => {
     tracks().forEach((t, j) => (t.mode = j === i ? "showing" : "disabled"));
     setActiveTrack(i);
+    void updatePictures();
     if (close) setMenu(null);
   };
 
@@ -276,10 +314,46 @@ export default function Player() {
     }
   };
 
+  // Audio tracks inside a file (dual-audio MKV/MP4). WebView2 exposes them with the
+  // AudioVideoTracks feature, which the app turns on (tauri.conf.json).
+  type NativeAudioTrack = { enabled: boolean; language: string; label: string };
+  const nativeAudio = () => (video as unknown as { audioTracks?: ArrayLike<NativeAudioTrack> }).audioTracks;
+  const readNativeAudio = () => {
+    const list = nativeAudio();
+    if (hls || !list || list.length < 2) return;
+    const all = Array.from(list);
+    setAudioTracks(all.map((t) => ({ name: t.label, lang: t.language })));
+    const want = prefs()?.audio;
+    const i = want ? all.findIndex((t) => langMatches(t.language, t.label, want)) : -1;
+    if (i >= 0) all.forEach((t, j) => (t.enabled = j === i));
+    setAudioTrack(all.findIndex((t) => t.enabled));
+  };
+
   const chooseAudio = (i: number) => {
     if (hls) hls.audioTrack = i;
+    else {
+      const list = nativeAudio();
+      if (list) Array.from(list).forEach((t, j) => (t.enabled = j === i));
+    }
     setAudioTrack(i);
     setMenu(null);
+  };
+  /** A track's menu name: its own name unless that's generic ("stream_5"), else its language. */
+  const audioLabel = (t: { name: string; lang: string }, i: number) => {
+    const named = (x: { name: string; lang: string }) => {
+      if (x.name && !/^(stream|track|audio)?[\s_-]*\d*$/i.test(x.name)) return x.name;
+      if (x.lang && x.lang !== "und") {
+        try {
+          return new Intl.DisplayNames(["en"], { type: "language" }).of(x.lang) ?? x.lang;
+        } catch {
+          return x.lang;
+        }
+      }
+      return "";
+    };
+    const base = named(t) || `Track ${i + 1}`;
+    const same = audioTracks().filter((x) => named(x) === named(t));
+    return same.length > 1 ? `${base} (${same.indexOf(t) + 1})` : base;
   };
   /** Sources that differ by audio language, for the Audio menu when the stream has no tracks. */
   const audioSources = () => (stream()?.sources ?? []).map((s, i) => ({ ...s, i })).filter((s) => s.audio);
@@ -505,7 +579,11 @@ export default function Player() {
         class="player-video"
         playsinline
         crossorigin="anonymous"
-        onLoadedMetadata={() => void onMeta()}
+        onLoadedMetadata={() => {
+          if (video.videoWidth && video.videoHeight) setAspect(video.videoWidth / video.videoHeight);
+          readNativeAudio();
+          void onMeta();
+        }}
         onTimeUpdate={onTime}
         onDurationChange={() => setDuration(video.duration || 0)}
         onPlay={() => { setPlaying(true); wake(); }}
@@ -526,12 +604,42 @@ export default function Player() {
         onDblClick={() => void toggleFullscreen()}
       >
         <For each={stream()?.subtitles ?? []}>
-          {(s) => <track kind="subtitles" src={s.url} srclang={s.lang} label={s.label} onLoad={refreshTracks} />}
+          {(s) => (
+            <track
+              ref={(el) => s.images && pictureUrl.set(el.track, s.url)}
+              kind="subtitles"
+              src={s.images ? `${s.url}?as=cues` : s.url}
+              srclang={s.lang}
+              label={s.label}
+              onLoad={refreshTracks}
+            />
+          )}
         </For>
         <For each={extraSubs()}>
           {(s) => <track kind="subtitles" src={s.url} label={s.label} onLoad={refreshTracks} />}
         </For>
       </video>
+
+      <Show when={pictures().images.length}>
+        <div class="pgs-layer" aria-hidden="true">
+          <div class="pgs-screen" style={{ "aspect-ratio": String(aspect()), width: `min(100cqw, calc(100cqh * ${aspect()}))` }}>
+            <For each={pictures().images}>
+              {(p) => (
+                <img
+                  src={p.src}
+                  alt=""
+                  classList={{ "pgs-low": p.y > pictures().height / 2 }}
+                  style={{
+                    left: `${(p.x / pictures().width) * 100}%`,
+                    top: `${(p.y / pictures().height) * 100}%`,
+                    width: `${(p.w / pictures().width) * 100}%`,
+                  }}
+                />
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
 
       <Show when={failure() ?? videoError()}>
         {(msg) => (
@@ -675,7 +783,7 @@ export default function Player() {
                       <For each={audioTracks()}>
                         {(t, i) => (
                           <button type="button" role="menuitemradio" aria-checked={audioTrack() === i()} onClick={() => chooseAudio(i())}>
-                            {t.name || audioName(t.lang)}
+                            {audioLabel(t, i())}
                           </button>
                         )}
                       </For>

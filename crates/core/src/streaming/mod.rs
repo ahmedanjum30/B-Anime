@@ -138,10 +138,12 @@ fn audio_code(raw: Option<&str>) -> Option<String> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamSubtitle {
-    /// Always WebVTT by the time it gets here.
+    /// WebVTT, or for `images` a [`crate::pgs::Track`] as JSON.
     pub url: String,
     pub lang: String,
     pub label: String,
+    /// Picture subtitles (PGS from a library MKV) the player draws over the video itself.
+    pub images: bool,
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(v: Value, what: &str) -> Result<T> {
@@ -387,6 +389,7 @@ pub async fn stream(db: &Db, dir: &Path, proxy: &Proxy, ext: &str, episode_id: &
             url: proxy.url(&session, &s.url, Some(format))?,
             label: s.label.clone().unwrap_or_else(|| lang.clone()),
             lang,
+            images: false,
         });
     }
     Ok(Stream { sources, subtitles })

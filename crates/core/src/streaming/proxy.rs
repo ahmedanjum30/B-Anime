@@ -41,6 +41,7 @@ pub struct Proxy {
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     /// Local library files the player may load, by random token.
     files: Arc<Mutex<HashMap<String, std::path::PathBuf>>>,
+    embedded: Embedded,
     allow_private: bool,
 }
 
@@ -49,8 +50,57 @@ struct Shared {
     secret: String,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     files: Arc<Mutex<HashMap<String, std::path::PathBuf>>>,
+    embedded: Embedded,
     client: reqwest::Client,
     allow_private: bool,
+}
+
+type Extracted = std::result::Result<Arc<HashMap<u64, crate::mkv::Extracted>>, String>;
+
+/// Subtitle tracks inside library MKV files: links by token, and the extracted tracks of the
+/// last few files (one pass over a file yields all its tracks).
+#[derive(Clone, Default)]
+struct Embedded {
+    links: Arc<Mutex<HashMap<String, (std::path::PathBuf, u64)>>>,
+    cache: Arc<Mutex<Vec<(std::path::PathBuf, Arc<tokio::sync::OnceCell<Extracted>>)>>>,
+}
+
+impl Embedded {
+    const KEEP: usize = 4;
+
+    fn cell(&self, path: &std::path::Path) -> Arc<tokio::sync::OnceCell<Extracted>> {
+        let mut cache = self.cache.lock().expect("subtitle cache");
+        if let Some(i) = cache.iter().position(|(p, _)| p == path) {
+            let entry = cache.remove(i);
+            let cell = entry.1.clone();
+            cache.push(entry);
+            return cell;
+        }
+        let cell = Arc::new(tokio::sync::OnceCell::new());
+        cache.push((path.to_path_buf(), cell.clone()));
+        if cache.len() > Self::KEEP {
+            cache.remove(0);
+        }
+        cell
+    }
+
+    async fn tracks(&self, path: &std::path::Path) -> Extracted {
+        let cell = self.cell(path);
+        cell.get_or_init(|| {
+            let path = path.to_path_buf();
+            async move {
+                let started = Instant::now();
+                let result = tokio::task::spawn_blocking(move || crate::mkv::extract(&path))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                tracing::debug!(elapsed = ?started.elapsed(), tracks = result.len(), "extracted MKV subtitles");
+                Ok(Arc::new(result))
+            }
+        })
+        .await
+        .clone()
+    }
 }
 
 fn token() -> String {
@@ -86,11 +136,20 @@ impl Proxy {
             .build()
             .map_err(|e| Error::Network(e.to_string()))?;
         let files = Arc::new(Mutex::new(HashMap::new()));
-        let shared = Shared { secret: secret.clone(), sessions: sessions.clone(), files: files.clone(), client, allow_private };
+        let embedded = Embedded::default();
+        let shared = Shared {
+            secret: secret.clone(),
+            sessions: sessions.clone(),
+            files: files.clone(),
+            embedded: embedded.clone(),
+            client,
+            allow_private,
+        };
         let app = Router::new()
             .route("/m/{secret}/{session}", get(handle))
             .route("/f/{secret}/{token}", get(serve_file))
             .route("/s/{secret}/{token}", get(serve_subtitle))
+            .route("/e/{secret}/{token}", get(serve_embedded))
             .with_state(shared);
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, app).await {
@@ -98,7 +157,23 @@ impl Proxy {
             }
         });
         tracing::info!(port, "media proxy listening");
-        Ok(Self { port, secret, sessions, files, allow_private })
+        Ok(Self { port, secret, sessions, files, embedded, allow_private })
+    }
+
+    /// A subtitle track inside an MKV file (see [`crate::mkv`]), served as WebVTT.
+    pub fn embedded_url(&self, path: &std::path::Path, track: u64) -> String {
+        let token = token();
+        self.embedded.links.lock().expect("proxy embedded").insert(token.clone(), (path.to_path_buf(), track));
+        format!("http://127.0.0.1:{}/e/{}/{token}", self.port, self.secret)
+    }
+
+    /// Starts reading a file's embedded subtitles now, so they're ready when the player asks.
+    pub fn prefetch_embedded(&self, path: &std::path::Path) {
+        let embedded = self.embedded.clone();
+        let path = path.to_path_buf();
+        tokio::spawn(async move {
+            let _ = embedded.tracks(&path).await;
+        });
     }
 
     /// A URL the player can stream a library file from (with Range support for seeking).
@@ -330,6 +405,41 @@ async fn serve_subtitle(State(s): State<Shared>, Path((secret, token)): Path<(St
     r
 }
 
+#[derive(Deserialize)]
+struct EmbeddedParams {
+    /// "cues": a picture track's timing as WebVTT instead of its pictures.
+    #[serde(rename = "as")]
+    format: Option<String>,
+}
+
+async fn serve_embedded(
+    State(s): State<Shared>,
+    Path((secret, token)): Path<(String, String)>,
+    Query(q): Query<EmbeddedParams>,
+) -> Response {
+    if secret != s.secret {
+        return fail(StatusCode::FORBIDDEN, "forbidden");
+    }
+    let Some((path, track)) = s.embedded.links.lock().ok().and_then(|m| m.get(&token).cloned()) else {
+        return fail(StatusCode::GONE, "this subtitle link expired");
+    };
+    let (body, kind) = match s.embedded.tracks(&path).await {
+        Ok(all) => match all.get(&track) {
+            Some(crate::mkv::Extracted::Vtt(v)) => (v.clone(), "text/vtt; charset=utf-8"),
+            Some(crate::mkv::Extracted::Images { cues, .. }) if q.format.as_deref() == Some("cues") => {
+                (cues.clone(), "text/vtt; charset=utf-8")
+            }
+            Some(crate::mkv::Extracted::Images { json, .. }) => (json.clone(), "application/json"),
+            None => return fail(StatusCode::NOT_FOUND, "no such subtitle track"),
+        },
+        Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, format!("can't read the subtitles: {e}")),
+    };
+    let mut r = (StatusCode::OK, body).into_response();
+    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
+    r.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    r
+}
+
 async fn read_capped(mut res: reqwest::Response, cap: usize) -> std::result::Result<Vec<u8>, String> {
     let mut body = Vec::new();
     while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
@@ -409,61 +519,7 @@ fn srt_to_vtt(text: &str) -> String {
     out
 }
 
-fn ass_time(t: &str) -> Option<String> {
-    // H:MM:SS.cc -> HH:MM:SS.mmm
-    let (hms, cs) = t.trim().split_once('.')?;
-    let mut parts = hms.split(':');
-    let (h, m, s) = (parts.next()?.parse::<u32>().ok()?, parts.next()?.parse::<u32>().ok()?, parts.next()?.parse::<u32>().ok()?);
-    let cs: u32 = cs.parse().ok()?;
-    Some(format!("{h:02}:{m:02}:{s:02}.{:03}", cs * 10))
-}
-
-fn ass_to_vtt(text: &str) -> String {
-    let mut out = String::from("WEBVTT\n\n");
-    let mut fields: Vec<String> = Vec::new();
-    let mut in_events = false;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_events = line.eq_ignore_ascii_case("[events]");
-            continue;
-        }
-        if !in_events {
-            continue;
-        }
-        if let Some(f) = line.strip_prefix("Format:") {
-            fields = f.split(',').map(|x| x.trim().to_ascii_lowercase()).collect();
-            continue;
-        }
-        let Some(d) = line.strip_prefix("Dialogue:") else { continue };
-        if fields.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = d.splitn(fields.len(), ',').collect();
-        let get = |name: &str| fields.iter().position(|f| f == name).and_then(|i| parts.get(i).copied());
-        let (Some(start), Some(end), Some(raw)) = (get("start").and_then(ass_time), get("end").and_then(ass_time), get("text"))
-        else {
-            continue;
-        };
-        // Drop {\override} blocks; \N and \n are line breaks, \h is a space.
-        let mut cleaned = String::new();
-        let mut depth = 0;
-        for ch in raw.chars() {
-            match ch {
-                '{' => depth += 1,
-                '}' if depth > 0 => depth -= 1,
-                _ if depth == 0 => cleaned.push(ch),
-                _ => {}
-            }
-        }
-        let cleaned = cleaned.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ");
-        if cleaned.trim().is_empty() {
-            continue;
-        }
-        out.push_str(&format!("{start} --> {end}\n{}\n\n", cleaned.trim()));
-    }
-    out
-}
+use crate::subs::ass_to_vtt;
 
 #[cfg(test)]
 mod tests {

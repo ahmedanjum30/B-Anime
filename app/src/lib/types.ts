@@ -238,7 +238,15 @@ export type MatchState =
 export interface Stream {
   /** "file" is a library file served by the local proxy. `audio` is "ja"/"en" when known. */
   sources: { url: string; kind: "hls" | "mp4" | "file"; label: string; audio: string | null }[];
-  subtitles: { url: string; lang: string; label: string }[];
+  /** `images`: picture subtitles (PGS); `url` returns a {@link PictureTrack}, not WebVTT. */
+  subtitles: { url: string; lang: string; label: string; images: boolean }[];
+}
+
+/** Picture subtitles placed on a virtual screen (usually 1920×1080). Times in ms. */
+export interface PictureTrack {
+  width: number;
+  height: number;
+  events: { start: number; end: number; images: { x: number; y: number; w: number; h: number; src: string }[] }[];
 }
 
 export interface SkipTime {

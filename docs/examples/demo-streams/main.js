@@ -17,16 +17,29 @@ const VIDEOS = [
     title: "Apple HLS sample (bipbop)",
     url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
   },
+  {
+    title: "Tears of Steel (Blender open movie, English and Italian audio)",
+    url: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel-multi-lang.ism/.m3u8",
+  },
+  {
+    title: "Angel One (Shaka demo, five audio languages)",
+    url: "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8",
+  },
+  {
+    title: "Dual-audio file (MP4 with Japanese and English tracks)",
+    url: BASE + "dual-audio.mp4",
+    type: "mp4",
+  },
 ];
 
 class Provider {
   // Any search returns one "show"; match it to any AniList entry to try the player.
   async search(query) {
     console.log("demo search for", query.query);
-    return [{ id: "demo", title: "Demo streams (3 test videos)" }];
+    return [{ id: "demo", title: `Demo streams (${VIDEOS.length} test videos)` }];
   }
 
-  // Three "episodes", one per test video.
+  // One "episode" per test video.
   async episodes(id) {
     return VIDEOS.map((v, i) => ({ id: String(i), number: i + 1, title: v.title }));
   }
@@ -35,7 +48,7 @@ class Provider {
     const video = VIDEOS[Number(episodeId)];
     if (!video) throw new Error(`unknown episode ${episodeId}`);
     return {
-      sources: [{ url: video.url, type: "hls", quality: "auto" }],
+      sources: [{ url: video.url, type: video.type ?? "hls", quality: "auto" }],
       subtitles: video.subtitles ?? [],
     };
   }
