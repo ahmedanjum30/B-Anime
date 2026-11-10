@@ -143,6 +143,11 @@ pub fn run() {
                 cancel_login: Arc::new(Notify::new()),
             });
 
+            // Open maximized. The config flag alone doesn't stick on every Windows setup.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.maximize();
+            }
+
             // Refresh lists in the background on launch; the UI shows the cached copy meanwhile.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
