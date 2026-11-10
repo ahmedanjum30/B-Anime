@@ -232,7 +232,11 @@ pub async fn call(db: &Db, dir: &Path, id: &str, method: &str, args: &Value, lim
     runtime::call(&code, method, args, limits).await
 }
 
-/// A repository: a JSON list of manifest URLs, or of manifests that carry a `manifestUrl`.
+/// The repository B-Anime starts with: its own examples (public test videos and placeholder
+/// pages). Users can remove it and add others.
+pub const DEFAULT_REPO: &str = "https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/repository.json";
+
+/// One extension listed in a repository.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoEntry {
@@ -243,18 +247,41 @@ pub struct RepoEntry {
     pub kind: Option<ExtKind>,
     pub author: Option<String>,
     pub description: Option<String>,
+    pub icon: Option<String>,
+    pub language: Option<String>,
 }
 
-pub async fn read_repo(url: &str, limits: Limits) -> Result<Vec<RepoEntry>> {
+/// A repository: `{ "name", "description", "extensions": [...] }`, or just the array. Each item
+/// is a manifest URL or an object with a `manifestUrl` plus listing details.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Repo {
+    pub url: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub extensions: Vec<RepoEntry>,
+}
+
+pub async fn read_repo(url: &str, limits: Limits) -> Result<Repo> {
     let base = reqwest::Url::parse(url.trim()).map_err(|e| Error::Extension(format!("not a valid URL: {e}")))?;
     let text = download(&base, 1024 * 1024, limits).await?;
-    let items: Vec<Value> = serde_json::from_str(&text).map_err(|e| Error::Extension(format!("not a repository list: {e}")))?;
+    let doc: Value = serde_json::from_str(&text).map_err(|e| Error::Extension(format!("not a repository: {e}")))?;
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
-    Ok(items
+    let (name, description, items) = match &doc {
+        Value::Array(items) => (None, None, items.clone()),
+        Value::Object(_) => (
+            s(&doc, "name"),
+            s(&doc, "description"),
+            doc.get("extensions").and_then(Value::as_array).cloned().unwrap_or_default(),
+        ),
+        _ => return Err(Error::Extension("not a repository: expected a list or an object".into())),
+    };
+    let absolute = |raw: &str| base.join(raw).ok().map(|u| u.to_string());
+    let extensions = items
         .into_iter()
         .filter_map(|v| {
             let raw = v.as_str().map(str::to_owned).or_else(|| s(&v, "manifestUrl"))?;
-            let manifest_url = base.join(&raw).ok()?.to_string();
+            let manifest_url = absolute(&raw)?;
             Some(RepoEntry {
                 id: s(&v, "id"),
                 name: s(&v, "name").unwrap_or_else(|| manifest_url.clone()),
@@ -262,10 +289,13 @@ pub async fn read_repo(url: &str, limits: Limits) -> Result<Vec<RepoEntry>> {
                 kind: v.get("kind").and_then(|k| serde_json::from_value(k.clone()).ok()),
                 author: s(&v, "author"),
                 description: s(&v, "description"),
+                icon: s(&v, "icon").and_then(|i| absolute(&i)),
+                language: s(&v, "language"),
                 manifest_url,
             })
         })
-        .collect())
+        .collect();
+    Ok(Repo { url: base.to_string(), name, description, extensions })
 }
 
 #[cfg(test)]
@@ -292,6 +322,30 @@ mod tests {
         let first = chapters.value[0]["id"].as_str().unwrap().to_owned();
         let pages = runtime::call(manga, "pages", &serde_json::json!([first]), limits).await.unwrap();
         assert_eq!(pages.value["pages"].as_array().unwrap().len(), 8);
+    }
+
+    #[tokio::test]
+    async fn the_starter_repository_lists_the_examples() {
+        let base = serve(
+            Router::new()
+                .route("/docs/repository.json", route(|| async { include_str!("../../../../docs/repository.json") }))
+                .route("/docs/examples/demo-streams/manifest.json", route(|| async {
+                    include_str!("../../../../docs/examples/demo-streams/manifest.json")
+                }))
+                .route("/docs/examples/demo-manga/manifest.json", route(|| async {
+                    include_str!("../../../../docs/examples/demo-manga/manifest.json")
+                })),
+        )
+        .await;
+        let repo = read_repo(&format!("{base}/docs/repository.json"), test_limits()).await.unwrap();
+        assert_eq!(repo.extensions.len(), 2);
+        for entry in &repo.extensions {
+            // The listing must agree with the manifest it points at.
+            let manifest: Manifest = serde_json::from_str(&reqwest::get(&entry.manifest_url).await.unwrap().text().await.unwrap()).unwrap();
+            assert_eq!(entry.id.as_deref(), Some(manifest.id.as_str()));
+            assert_eq!(entry.version.as_deref(), Some(manifest.version.as_str()));
+            assert_eq!(entry.kind, Some(manifest.kind));
+        }
     }
 
     #[test]
@@ -335,6 +389,9 @@ mod tests {
                 }))
                 .route("/main.js", route(|| async { CODE }))
                 .route("/repo.json", route(|| async { r#"["m.json", {"manifestUrl":"other.json","name":"Other"}]"# }))
+                .route("/named.json", route(|| async {
+                    r#"{"name":"Named repo","extensions":[{"manifestUrl":"m.json","name":"Test","kind":"anime","icon":"icon.png"}]}"#
+                }))
                 .route("/broken.json", route(|| async {
                     r#"{"id":"broken","name":"Broken","version":"1","kind":"manga","codeUrl":"main.js","apiVersion":1}"#
                 })),
@@ -360,8 +417,12 @@ mod tests {
         assert!(err.to_string().contains("missing chapters(), pages()"), "{err}");
 
         let repo = read_repo(&format!("{base}/repo.json"), test_limits()).await.unwrap();
-        assert_eq!(repo.len(), 2);
-        assert_eq!(repo[1].manifest_url, format!("{base}/other.json"));
+        assert_eq!(repo.extensions.len(), 2);
+        assert_eq!(repo.extensions[1].manifest_url, format!("{base}/other.json"));
+        let named = read_repo(&format!("{base}/named.json"), test_limits()).await.unwrap();
+        assert_eq!(named.name.as_deref(), Some("Named repo"));
+        assert_eq!(named.extensions[0].icon.as_deref(), Some(format!("{base}/icon.png").as_str()));
+        assert_eq!(named.extensions[0].kind, Some(ExtKind::Anime));
 
         remove(&db, &dir, "test-source").await.unwrap();
         assert!(list(&db).await.unwrap().is_empty());

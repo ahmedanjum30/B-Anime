@@ -2191,6 +2191,100 @@ a.slot:focus-visible {
   color: var(--z8);
 }
 
+/* ───────── Extensions marketplace ───────── */
+.ext-tabs {
+  margin-bottom: 0;
+}
+.tab-badge {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--red);
+  color: #fff;
+  font: 700 10px/14px var(--font-head);
+  letter-spacing: 0.06em;
+}
+.ext-grid {
+  list-style: none;
+  padding: 0;
+  margin-top: calc(var(--u) * 3);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: calc(var(--u) * 2);
+}
+.ext-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 188px;
+  padding: calc(var(--u) * 2);
+  background: var(--z2);
+  border-radius: var(--radius);
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.ext-card:hover {
+  background: color-mix(in srgb, var(--z3) 70%, var(--z2));
+}
+.ext-card.sk-card {
+  height: 188px;
+}
+.ext-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ext-card-desc {
+  flex: 1;
+  color: var(--z8);
+  font-size: 13px;
+  line-height: 19px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ext-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u);
+  padding-top: 12px;
+  border-top: 1px solid var(--z3);
+}
+.ext-card-repo {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--z6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-intro {
+  margin: calc(var(--u) * 3) 0 calc(var(--u) * 2);
+}
+.repo-rows {
+  list-style: none;
+  padding: 0;
+  margin-top: calc(var(--u) * 2);
+}
+.repo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 2);
+  padding: 14px 0;
+  border-bottom: 1px solid var(--z3);
+}
+.repo-row .repo-url {
+  margin-top: 2px;
+}
+.install-url {
+  margin-top: calc(var(--u) * 4);
+}
+.subhead-plain {
+  color: var(--z8);
+}
+
 /* ───────── Library folders & updates (settings, rail) ───────── */
 .roots {
   list-style: none;

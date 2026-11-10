@@ -205,6 +205,15 @@ export interface RepoEntry {
   kind: ExtKind | null;
   author: string | null;
   description: string | null;
+  icon: string | null;
+  language: string | null;
+}
+
+export interface Repo {
+  url: string;
+  name: string | null;
+  description: string | null;
+  extensions: RepoEntry[];
 }
 
 // ── Streaming & reading ──

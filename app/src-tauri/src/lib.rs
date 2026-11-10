@@ -256,10 +256,14 @@ async fn try_extension(
 
 const REPOS_KEY: &str = "extensions.repos";
 
+/// The user's repositories. Until they change the list, it holds B-Anime's own examples.
 #[tauri::command]
 async fn get_extension_repos(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     let raw = sqlx_scalar(&state.db, "SELECT value FROM setting WHERE key = 'extensions.repos'").await.map_err(msg)?;
-    Ok(raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default())
+    Ok(match raw.and_then(|r| serde_json::from_str::<Vec<String>>(&r).ok()) {
+        Some(list) => list,
+        None => vec![extensions::DEFAULT_REPO.to_owned()],
+    })
 }
 
 #[tauri::command]
@@ -272,7 +276,7 @@ async fn set_extension_repos(state: tauri::State<'_, AppState>, repos: Vec<Strin
 }
 
 #[tauri::command]
-async fn read_extension_repo(url: String) -> Result<Vec<extensions::RepoEntry>, String> {
+async fn read_extension_repo(url: String) -> Result<extensions::Repo, String> {
     extensions::read_repo(&url, extensions::Limits::default()).await.map_err(msg)
 }
 

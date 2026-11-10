@@ -1,6 +1,6 @@
 import type {
   Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
-  LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, RepoEntry,
+  LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, Repo,
   ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus,
 } from "./types";
 
@@ -89,7 +89,7 @@ export const removeExtension = (id: string) => call<void>("remove_extension", { 
 export const tryExtension = (id: string, query: string) => call<ExtCallOutput>("try_extension", { id, query });
 export const getExtensionRepos = () => (inTauri ? call<string[]>("get_extension_repos") : Promise.resolve([]));
 export const setExtensionRepos = (repos: string[]) => call<void>("set_extension_repos", { repos });
-export const readExtensionRepo = (url: string) => call<RepoEntry[]>("read_extension_repo", { url });
+export const readExtensionRepo = (url: string) => call<Repo>("read_extension_repo", { url });
 
 export async function browse(filter: BrowseFilter): Promise<BrowsePage> {
   if (!inTauri) {
