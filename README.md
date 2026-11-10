@@ -18,6 +18,9 @@ Built with a Rust backend and a Tauri 2 shell, so it starts instantly, uses a fr
 
 Out of scope: torrents, auto-downloaders, debrid services.
 
+Online sources come from extensions, which users install themselves; B-Anime ships with none.
+To write one, see [docs/extensions.md](docs/extensions.md).
+
 ## Stack
 
 - **Desktop shell:** Tauri 2
