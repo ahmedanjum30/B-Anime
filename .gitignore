@@ -13,6 +13,9 @@ node_modules/
 /.impeccable/review/
 /.impeccable/live/
 
+# Claude Code local settings
+/.claude/settings.local.json
+
 # OS / editors
 .DS_Store
 Thumbs.db
