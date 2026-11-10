@@ -1,0 +1,20 @@
+# Rust
+/target/
+
+# Frontend
+node_modules/
+/app/dist/
+
+# Tauri generated
+/app/src-tauri/gen/
+
+# Impeccable: machine-local and review captures
+/.impeccable/config.local.json
+/.impeccable/review/
+/.impeccable/live/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

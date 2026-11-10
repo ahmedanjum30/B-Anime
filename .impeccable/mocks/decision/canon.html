@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>B-Anime — Category standard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--b0:#0B0B0F;--b1:#16161D;--b2:#202029;--b6:#8B8B99;--b10:#FAFAFA;--acc:#7C5CFF}
+*{box-sizing:border-box;margin:0}
+html,body{width:1440px;height:900px;overflow:hidden;background:var(--b0);color:var(--b10);font:14px/20px Inter,sans-serif}
+.app{display:grid;grid-template-columns:72px 1fr;height:900px}
+nav{background:var(--b1);display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:20px}
+nav i{width:36px;height:36px;border-radius:10px;background:var(--b2)}nav i.on{background:var(--acc)}
+main{overflow:hidden}
+.hero{height:380px;background:linear-gradient(90deg,var(--b0) 25%,transparent),linear-gradient(160deg,#4b6f86,#18232c);padding:96px 56px}
+.hero h1{font-size:40px;line-height:46px;font-weight:700;max-width:560px}
+.hero p{color:var(--b6);margin:12px 0 24px;max-width:480px}
+.btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--acc);font-weight:600;margin-right:10px}.btn.g{background:var(--b2)}
+section{padding:24px 56px 0}
+h2{font-size:18px;font-weight:600;margin-bottom:14px}
+.row{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+.card{height:150px;border-radius:12px;position:relative}
+.card span{position:absolute;left:12px;bottom:10px;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(8,1fr);gap:16px}.grid div{height:200px;border-radius:12px}
+</style></head><body><div class="app">
+<nav><i class="on"></i><i></i><i></i><i></i><i></i><i></i></nav>
+<main>
+<div class="hero"><h1>Frieren: Beyond Journey's End</h1><p>Season 2 · Episode 18 is out. Continue from where you left off.</p><span class="btn">▶ Play Ep 18</span><span class="btn g">Details</span></div>
+<section><h2>Continue watching</h2><div class="row">
+<div class="card" style="background:linear-gradient(160deg,#7a3a3a,#241212)"><span>Dandadan · Ep 9</span></div>
+<div class="card" style="background:linear-gradient(160deg,#55507e,#1b1930)"><span>Apothecary Diaries · Ep 12</span></div>
+<div class="card" style="background:linear-gradient(160deg,#43765c,#142619)"><span>Mushishi · Ep 3</span></div>
+<div class="card" style="background:linear-gradient(160deg,#7d6a3a,#2a2210)"><span>Kaiju No. 8 · Ep 7</span></div>
+<div class="card" style="background:linear-gradient(160deg,#3a5a7d,#121e2c)"><span>Blue Lock · Ep 21</span></div>
+</div></section>
+<section><h2>Library</h2><div class="grid">
+<div style="background:#33465a"></div><div style="background:#5a3333"></div><div style="background:#3f3a5c"></div><div style="background:#2f4f3f"></div><div style="background:#5c4f2f"></div><div style="background:#2f3f5c"></div><div style="background:#4f2f4f"></div><div style="background:#3a3a3a"></div>
+</div></section>
+</main></div></body></html>

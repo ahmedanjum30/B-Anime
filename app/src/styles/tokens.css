@@ -1,0 +1,31 @@
+/* B-Anime tokens — "Broadcast Listings".
+   Neutrals are a fixed stepped ramp (z0–z10); never introduce ad-hoc greys. */
+:root {
+  --z0: #121318;
+  --z1: #191b22;
+  --z2: #20232c;
+  --z3: #2a2e3a;
+  --z4: #3a3f4e;
+  --z5: #555b6d;
+  --z6: #878da1; /* secondary text: 5:1 on z1 */
+  --z8: #b9bcc6;
+  --z10: #ece7dc; /* newsprint white */
+
+  /* Listings colours: each does one job. */
+  --red: #e5483b;    /* NEW, now, progress, primary action */
+  --amber: #e2a43b;  /* FINAL */
+  --teal: #3fa79c;   /* synced / healthy */
+  --violet: #8d7be3; /* fourth channel */
+
+  --font-ui: "Archivo", system-ui, sans-serif;
+  --font-head: "Archivo Narrow", "Archivo", system-ui, sans-serif;
+
+  /* 8px cell grid: every size is a multiple. */
+  --u: 8px;
+  --rail-w: 232px;
+  --radius: 4px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms;
+  --t-med: 240ms;
+}

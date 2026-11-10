@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>B-Anime — Broadcast Listings</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--z0:#121318;--z1:#191B22;--z2:#20232C;--z3:#2A2E3A;--z4:#3A3F4E;--z6:#7D8396;--z8:#B9BCC6;--z10:#ECE7DC;
+--red:#E5483B;--teal:#3FA79C;--amber:#E2A43B;--violet:#8D7BE3;--u:8px}
+*{box-sizing:border-box;margin:0}
+html,body{width:1440px;height:900px;overflow:hidden;background:var(--z1);color:var(--z10);font:14px/20px Archivo,sans-serif}
+.app{display:grid;grid-template-columns:232px 1fr;height:900px}
+nav{background:var(--z0);border-right:1px solid var(--z3);padding:24px 16px;display:flex;flex-direction:column;gap:4px}
+.logo{font:700 20px/24px 'Archivo Narrow';letter-spacing:.02em;margin:0 8px 24px}
+.logo b{color:var(--red)}
+nav a{display:flex;justify-content:space-between;padding:8px;border-radius:4px;color:var(--z8);text-decoration:none;font-weight:500}
+nav a.on{background:var(--z2);color:var(--z10);box-shadow:inset 3px 0 var(--red)}
+nav a span{font:600 12px 'Archivo Narrow';color:var(--z6)}
+.sync{margin-top:auto;padding:8px;font-size:12px;color:var(--z6);border-top:1px solid var(--z3);padding-top:16px}
+.sync b{color:var(--teal);font-weight:600}
+main{padding:24px 40px;overflow:hidden}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.search{width:400px;height:40px;border:1px solid var(--z3);background:var(--z2);border-radius:4px;padding:10px 14px;color:var(--z6)}
+.date{font:600 13px 'Archivo Narrow';color:var(--z8);letter-spacing:.08em;text-transform:uppercase}
+h2{font:700 13px 'Archivo Narrow';letter-spacing:.12em;text-transform:uppercase;color:var(--z8);display:flex;gap:16px;align-items:baseline;border-bottom:2px solid var(--z10);padding-bottom:8px;margin-bottom:16px}
+h2 small{font:500 12px Archivo;letter-spacing:0;text-transform:none;color:var(--z6)}
+.upnext{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
+.ep{background:var(--z2);border-radius:4px;overflow:hidden}
+.ep .art{height:152px;position:relative}
+.ep .art i{position:absolute;left:12px;bottom:12px;font:700 12px 'Archivo Narrow';background:var(--z10);color:var(--z0);padding:2px 6px;border-radius:2px}
+.ep .meta{padding:12px 14px 14px}
+.ep h3{font:600 15px/20px Archivo;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ep p{color:var(--z6);font-size:12px;margin-top:2px}
+.bar{height:3px;background:var(--z3);margin-top:12px}.bar b{display:block;height:3px;background:var(--red)}
+.mark{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 4px;border:1.5px solid currentColor;font:700 11px 'Archivo Narrow';border-radius:2px;margin-right:6px;vertical-align:-1px}
+.m-new{color:var(--red)}.m-fin{color:var(--amber)}.m-sub{color:var(--teal)}
+.listings{display:grid;grid-template-columns:72px repeat(7,1fr);border-top:1px solid var(--z4)}
+.listings>div{border-right:1px solid var(--z3);border-bottom:1px solid var(--z3);padding:8px 10px;min-height:56px;font-size:13px}
+.listings .dh{font:700 13px 'Archivo Narrow';letter-spacing:.06em;text-transform:uppercase;color:var(--z8);min-height:36px;border-bottom:1px solid var(--z4)}
+.listings .dh.today{color:var(--z10);box-shadow:inset 0 -3px var(--red)}
+.listings .t{font:600 13px 'Archivo Narrow';color:var(--z6);border-right:1px solid var(--z4)}
+.slot{border-left:3px solid var(--teal);padding-left:8px}
+.slot b{display:block;font-weight:600;color:var(--z10)}.slot span{color:var(--z6);font-size:12px}
+.slot.v{border-color:var(--violet)}.slot.a{border-color:var(--amber)}.slot.r{border-color:var(--red)}
+.slot.done b{color:var(--z6);text-decoration:line-through;text-decoration-color:var(--z4)}
+</style></head><body><div class="app">
+<nav>
+<div class="logo">B<b>·</b>ANIME</div>
+<a class="on" href="#">Home</a>
+<a href="#">Library <span>2,914</span></a>
+<a href="#">Schedule</a>
+<a href="#">Manga <span>412</span></a>
+<a href="#">Discover</a>
+<a href="#">Extensions</a>
+<a href="#">Settings</a>
+<div class="sync"><b>● Synced</b> with AniList · 2 min ago<br>Library scan · 3,108 files matched</div>
+</nav>
+<main>
+<div class="top"><div class="search">Search your library and AniList</div><div class="date">Tue 10 Nov · Evening</div></div>
+<h2>Up next <small>4 shows with unwatched episodes</small></h2>
+<div class="upnext">
+<div class="ep"><div class="art" style="background:linear-gradient(160deg,#3d5a6e,#1e2c38)"><i>EP 18</i></div><div class="meta"><h3><span class="mark m-new">NEW</span>Frieren: Beyond Journey's End</h3><p>S2 · Ep 18 of 28 · 24 min · local file</p><div class="bar"><b style="width:61%"></b></div></div></div>
+<div class="ep"><div class="art" style="background:linear-gradient(160deg,#6e3d3d,#2a1717)"><i>EP 9</i></div><div class="meta"><h3>Dandadan</h3><p>S2 · Ep 9 of 12 · resume at 14:02</p><div class="bar"><b style="width:66%"></b></div></div></div>
+<div class="ep"><div class="art" style="background:linear-gradient(160deg,#4a4a6e,#1d1d33)"><i>EP 12</i></div><div class="meta"><h3><span class="mark m-fin">FINAL</span>Apothecary Diaries</h3><p>S2 · Ep 12 of 12 · 24 min · local file</p><div class="bar"><b style="width:92%"></b></div></div></div>
+<div class="ep"><div class="art" style="background:linear-gradient(160deg,#3d6e55,#17291f)"><i>EP 3</i></div><div class="meta"><h3>Mushishi</h3><p>S1 · Ep 3 of 26 · rewatch</p><div class="bar"><b style="width:8%"></b></div></div></div>
+</div>
+<h2>This week <small>Airing shows on your Watching list · times local</small></h2>
+<div class="listings">
+<div class="dh"></div><div class="dh">Mon 9</div><div class="dh today">Tue 10</div><div class="dh">Wed 11</div><div class="dh">Thu 12</div><div class="dh">Fri 13</div><div class="dh">Sat 14</div><div class="dh">Sun 15</div>
+<div class="t">17:00</div><div></div><div><div class="slot done"><b>Dandadan</b><span>Ep 9 · watched</span></div></div><div></div><div></div><div><div class="slot v"><b>Frieren</b><span><span class="mark m-new">NEW</span>Ep 19</span></div></div><div></div><div></div>
+<div class="t">22:30</div><div><div class="slot a"><b>Kaiju No. 8</b><span>Ep 7</span></div></div><div></div><div><div class="slot r"><b>Apothecary Diaries</b><span><span class="mark m-fin">FINAL</span>Ep 12</span></div></div><div></div><div></div><div><div class="slot"><b>Orb: On the Movements</b><span><span class="mark m-sub">SUB</span>Ep 6</span></div></div><div></div>
+<div class="t">24:00</div><div></div><div></div><div></div><div><div class="slot v"><b>Blue Lock</b><span>Ep 21</span></div></div><div></div><div></div><div><div class="slot a"><b>Sakamoto Days</b><span>Ep 4</span></div></div>
+</div>
+</main></div></body></html>
