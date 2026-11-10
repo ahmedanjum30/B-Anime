@@ -205,6 +205,7 @@ export default function Library(props: { kind: LibraryKind }) {
               placeholder={`Filter ${labels()[v.tab()].toLowerCase()}`}
               value={v.query()}
               onInput={(e) => v.setQuery(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Escape" && v.setQuery("")}
               spellcheck={false}
             />
           </label>

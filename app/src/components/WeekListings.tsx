@@ -1,4 +1,5 @@
 import { For, Show, createMemo } from "solid-js";
+import { A } from "@solidjs/router";
 
 import Mark from "./Mark";
 import type { AiringSlot } from "../lib/types";
@@ -9,12 +10,18 @@ interface Placed extends AiringSlot {
   at: Date;
 }
 
-/** This week's airing shows, set as a listings grid: days across, times down. */
-export default function WeekListings(props: { slots: AiringSlot[]; now: Date }) {
+/** A week of airing episodes, set as a listings grid: days across, times down. */
+export default function WeekListings(props: {
+  slots: AiringSlot[];
+  now: Date;
+  /** Monday of the week to show; defaults to the current week. */
+  weekStart?: Date;
+  caption?: string;
+}) {
   const { hoverMedia, setHoverMedia } = homeStore;
 
   const days = createMemo(() => {
-    const start = startOfWeek(props.now);
+    const start = props.weekStart ?? startOfWeek(props.now);
     return Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
   });
 
@@ -30,12 +37,22 @@ export default function WeekListings(props: { slots: AiringSlot[]; now: Date }) 
     return [...times.entries()].sort((a, b) => a[1] - b[1]).map(([key]) => key);
   });
 
-  const cell = (time: string, day: Date) =>
-    placed().filter((s) => fmtTime(s.at) === time && sameDay(s.at, day));
+  // Bucket once per change instead of filtering per cell.
+  const cells = createMemo(() => {
+    const map = new Map<string, Placed[]>();
+    for (const s of placed()) {
+      const key = `${fmtTime(s.at)}|${s.at.toDateString()}`;
+      const list = map.get(key);
+      if (list) list.push(s);
+      else map.set(key, [s]);
+    }
+    return map;
+  });
+  const cell = (time: string, day: Date) => cells().get(`${time}|${day.toDateString()}`) ?? [];
 
   return (
     <table class="listings">
-      <caption class="sr-only">Episodes airing this week for shows on your Watching list</caption>
+      <caption class="sr-only">{props.caption ?? "Episodes airing this week for shows on your Watching list"}</caption>
       <thead>
         <tr>
           <th scope="col" class="listings-corner">
@@ -60,12 +77,15 @@ export default function WeekListings(props: { slots: AiringSlot[]; now: Date }) 
                   <td data-today={sameDay(d, props.now) ? "" : undefined}>
                     <For each={cell(time, d)}>
                       {(s) => (
-                        <div
+                        <A
+                          href={`/show/${s.mediaId}`}
                           class="slot"
                           data-watched={s.watched ? "" : undefined}
+                          data-offlist={s.onList === false ? "" : undefined}
                           data-linked={hoverMedia() === s.mediaId ? "" : undefined}
                           onPointerEnter={() => setHoverMedia(s.mediaId)}
                           onPointerLeave={() => setHoverMedia(null)}
+                          title={s.title}
                         >
                           <span class="slot-title">
                             <i class="swatch" style={{ "background-color": s.color ?? "var(--z5)" }} aria-hidden="true" />
@@ -78,7 +98,7 @@ export default function WeekListings(props: { slots: AiringSlot[]; now: Date }) 
                               <span class="slot-stamp">watched</span>
                             </Show>
                           </span>
-                        </div>
+                        </A>
                       )}
                     </For>
                   </td>

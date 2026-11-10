@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use banime_core::anilist::{self, Viewer, auth, media, sync::SyncReport};
+use banime_core::anilist::{self, Viewer, auth, browse, media, sync::SyncReport};
 use banime_core::{AppPaths, Error, db, home};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -62,6 +62,23 @@ async fn get_media(state: tauri::State<'_, AppState>, id: i64) -> Result<media::
     let token = auth::load_token().ok().flatten();
     let client = anilist::Client::new(token).map_err(msg)?;
     media::page(&client, &state.db, id).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn browse(state: tauri::State<'_, AppState>, filter: browse::BrowseFilter) -> Result<browse::BrowsePage, String> {
+    let client = anilist::Client::new(auth::load_token().ok().flatten()).map_err(msg)?;
+    browse::browse(&client, &state.db, filter).await.map_err(msg)
+}
+
+#[tauri::command]
+async fn get_schedule(
+    state: tauri::State<'_, AppState>,
+    scope: browse::Scope,
+    from: i64,
+    to: i64,
+) -> Result<Vec<browse::ScheduleItem>, String> {
+    let client = anilist::Client::new(auth::load_token().ok().flatten()).map_err(msg)?;
+    browse::schedule(&client, &state.db, scope, from, to).await.map_err(msg)
 }
 
 /// Opens a show on anilist.co. Takes an id, not a URL, so the UI can't open arbitrary links.
@@ -261,6 +278,8 @@ pub fn run() {
             get_library,
             get_media,
             save_entry,
+            browse,
+            get_schedule,
             open_anilist,
             get_account,
             anilist_login,

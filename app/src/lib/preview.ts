@@ -1,6 +1,49 @@
 // Browser-preview data for working on the UI without the Tauri shell.
 // Mirrors banime_core::home::sample(); loaded lazily, only outside Tauri.
-import type { AiringSlot, HomeData, LibraryEntry, LibraryKind, ListStatus, MediaPage, MediaRef, UpNext } from "./types";
+import type {
+  AiringSlot, BrowseFilter, BrowsePage, HomeData, LibraryEntry, LibraryKind, ListStatus, MediaPage, MediaRef,
+  ScheduleItem, ScheduleScope, UpNext,
+} from "./types";
+
+export function browserPreviewBrowse(f: BrowseFilter): BrowsePage {
+  const lib = browserPreviewLibrary(f.kind ?? "ANIME");
+  const q = f.search?.trim().toLowerCase();
+  const pool = q ? lib.filter((e) => e.title.toLowerCase().includes(q)) : lib.slice((f.page - 1) * 30);
+  const items = pool.slice(0, 30).map((e, i) => ({
+    id: e.mediaId,
+    kind: f.kind ?? "ANIME",
+    title: e.title,
+    coverUrl: null,
+    color: e.color,
+    format: e.format,
+    mediaStatus: e.mediaStatus,
+    total: e.total,
+    seasonYear: 2026 - (i % 8),
+    averageScore: 60 + ((i * 7) % 35),
+    genres: ["Drama", "Fantasy"],
+    nextEpisode: null,
+    nextAiringAt: null,
+    listStatus: i % 4 === 0 ? e.status : null,
+    progress: i % 4 === 0 ? e.progress : null,
+  }));
+  return { items, hasNext: !q && f.page < 3 };
+}
+
+export function browserPreviewSchedule(scope: ScheduleScope, from: number, _to: number): ScheduleItem[] {
+  const week = browserPreviewHome(new Date(from * 1000 + 3 * 86400_000)).week;
+  const mine = week.map((s, i) => ({
+    mediaId: s.mediaId, title: s.title, coverUrl: null, color: s.color, format: "TV", episode: s.episode,
+    totalEpisodes: s.mark === "final" ? s.episode : 24, airsAt: s.airsAt,
+    listStatus: "CURRENT" as const, progress: s.watched ? s.episode : s.episode - 1 - (i % 2),
+  }));
+  if (scope === "mine") return mine;
+  const extra = ["Ember Orbit", "Tide Signal", "Kirarase", "Night Lantern", "Harumi Echo", "Sora no Blade"].map((title, i) => ({
+    mediaId: 7000 + i, title, coverUrl: null, color: ["#6e5d3d", "#3d6a6e", "#5a3d6e"][i % 3], format: "TV",
+    episode: 3 + i, totalEpisodes: 12, airsAt: new Date((from + (i + 1) * 86400 + (18 + (i % 3)) * 3600) * 1000).toISOString(),
+    listStatus: null, progress: null,
+  }));
+  return [...mine, ...extra];
+}
 
 /** A made-up airing show for working on the show page in a browser. */
 export function browserPreviewMedia(id: number): MediaPage {

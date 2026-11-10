@@ -26,6 +26,8 @@ export interface AiringSlot {
   airsAt: string;
   watched: boolean;
   mark: Mark | null;
+  /** False for shows not on the user's list (Schedule, "everything airing"). */
+  onList?: boolean;
 }
 
 export interface SyncStatus {
@@ -115,6 +117,56 @@ export interface EntryChange {
   progress?: number;
   /** 0–100 */
   score?: number;
+}
+
+export interface MediaCard {
+  id: number;
+  kind: LibraryKind;
+  title: string;
+  coverUrl: string | null;
+  color: string | null;
+  format: string | null;
+  mediaStatus: string | null;
+  total: number | null;
+  seasonYear: number | null;
+  averageScore: number | null;
+  genres: string[];
+  nextEpisode: number | null;
+  nextAiringAt: number | null;
+  listStatus: ListStatus | null;
+  progress: number | null;
+}
+
+export type DiscoverSection = "trending" | "this_season" | "next_season" | "all_time";
+
+export interface BrowseFilter {
+  search?: string;
+  section?: DiscoverSection;
+  kind?: LibraryKind;
+  genre?: string;
+  format?: string;
+  year?: number;
+  page: number;
+}
+
+export interface BrowsePage {
+  items: MediaCard[];
+  hasNext: boolean;
+}
+
+export type ScheduleScope = "mine" | "all";
+
+export interface ScheduleItem {
+  mediaId: number;
+  title: string;
+  coverUrl: string | null;
+  color: string | null;
+  format: string | null;
+  episode: number;
+  totalEpisodes: number | null;
+  airsAt: string;
+  listStatus: ListStatus | null;
+  progress: number | null;
 }
 
 export interface Viewer {

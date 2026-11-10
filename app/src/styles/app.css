@@ -1300,6 +1300,195 @@ code {
   }
 }
 
+/* ───────── Schedule ───────── */
+.page-wide {
+  max-width: 1600px;
+}
+.schedule-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: calc(var(--u) * 3);
+  margin-bottom: calc(var(--u) * 3);
+}
+.schedule-controls .tabs {
+  flex: 1;
+}
+.listings-wrap[data-busy] {
+  opacity: 0.6;
+  transition: opacity var(--t-med) var(--ease-out);
+}
+.sk-listings {
+  height: 320px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--z2) 0%, var(--z3) 50%, var(--z2) 100%) 0 0 / 200% 100%;
+  animation: sheen 1.4s linear infinite;
+}
+
+/* Slots are links to the show page. */
+a.slot {
+  color: inherit;
+}
+a.slot:focus-visible {
+  outline-offset: 0;
+}
+.slot[data-offlist] .slot-title {
+  font-weight: 500;
+  color: var(--z8);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--z2);
+  border: 1px solid var(--z3);
+  border-radius: var(--radius);
+  flex: none;
+}
+.segmented button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 2px;
+  color: var(--z8);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.segmented button:hover {
+  color: var(--z10);
+}
+.segmented button[aria-pressed="true"] {
+  background: var(--z4);
+  color: var(--z10);
+}
+
+/* Countdown strip: what airs next, soonest first. */
+.coming-up {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: calc(var(--u) * 2);
+  margin-bottom: calc(var(--u) * 4);
+}
+.coming-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: var(--u);
+  background: var(--z2);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.coming-card:hover {
+  background: var(--z3);
+}
+.coming-cover {
+  flex: none;
+  width: 44px;
+  aspect-ratio: 2 / 3;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.coming-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.coming-text {
+  min-width: 0;
+}
+.coming-when {
+  font: 700 13px/16px var(--font-head);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--red);
+}
+.coming-title {
+  margin-top: 2px;
+  font-weight: 600;
+  color: var(--z10);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.coming-ep {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--z6);
+}
+
+/* ───────── Discover ───────── */
+.search-lg {
+  width: min(640px, 100%);
+  height: 44px;
+  margin-bottom: calc(var(--u) * 2);
+}
+.search-lg input {
+  font-size: 15px;
+}
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+  gap: 32px 24px;
+}
+.discover-card {
+  position: relative;
+  min-width: 0;
+}
+.list-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--z10);
+  color: var(--z0);
+  font: 700 10px/14px var(--font-head);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.quick-add {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius);
+  background: rgb(18 19 24 / 0.85);
+  color: var(--z10);
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity var(--t-fast) var(--ease-out), transform var(--t-med) var(--ease-out), background-color var(--t-fast) var(--ease-out);
+}
+.discover-card:hover .quick-add,
+.quick-add:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.quick-add:hover {
+  background: var(--red);
+}
+.sentinel {
+  height: 1px;
+}
+
+@media (max-width: 1100px) {
+  .coming-up {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .coming-up > :nth-child(n + 4) {
+    display: none;
+  }
+}
+
 /* ───────── Loading ───────── */
 .sk-line {
   height: 26px;

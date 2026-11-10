@@ -15,6 +15,8 @@ import Shell from "./components/Shell";
 import Home from "./routes/Home";
 import Library from "./routes/Library";
 import Show from "./routes/Show";
+import Schedule from "./routes/Schedule";
+import Discover from "./routes/Discover";
 import Pending from "./routes/Pending";
 import Settings from "./routes/Settings";
 
@@ -24,9 +26,9 @@ render(
       <Route path="/" component={Home} />
       <Route path="/library" component={() => <Library kind="ANIME" />} />
       <Route path="/show/:id" component={Show} />
-      <Route path="/schedule" component={() => <Pending title="Schedule" />} />
+      <Route path="/schedule" component={Schedule} />
       <Route path="/manga" component={() => <Library kind="MANGA" />} />
-      <Route path="/discover" component={() => <Pending title="Discover" />} />
+      <Route path="/discover" component={Discover} />
       <Route path="/extensions" component={() => <Pending title="Extensions" />} />
       <Route path="/settings" component={Settings} />
     </Router>

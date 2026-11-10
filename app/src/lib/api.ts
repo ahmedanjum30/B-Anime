@@ -1,4 +1,24 @@
-import type { Account, EntryChange, HomeData, LibraryEntry, LibraryKind, ListEntry, MediaPage } from "./types";
+import type {
+  Account, BrowseFilter, BrowsePage, EntryChange, HomeData, LibraryEntry, LibraryKind, ListEntry, MediaPage,
+  ScheduleItem, ScheduleScope,
+} from "./types";
+
+export async function browse(filter: BrowseFilter): Promise<BrowsePage> {
+  if (!inTauri) {
+    const { browserPreviewBrowse } = await import("./preview");
+    return browserPreviewBrowse(filter);
+  }
+  return call<BrowsePage>("browse", { filter });
+}
+
+/** Airing between two unix timestamps (seconds). */
+export async function getSchedule(scope: ScheduleScope, from: number, to: number): Promise<ScheduleItem[]> {
+  if (!inTauri) {
+    const { browserPreviewSchedule } = await import("./preview");
+    return browserPreviewSchedule(scope, from, to);
+  }
+  return call<ScheduleItem[]>("get_schedule", { scope, from, to });
+}
 
 export async function getMedia(id: number): Promise<MediaPage> {
   if (!inTauri) {

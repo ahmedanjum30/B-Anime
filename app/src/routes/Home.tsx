@@ -36,7 +36,12 @@ export default function Home() {
         <label class="search">
           <Search size={16} stroke-width={1.75} aria-hidden="true" />
           <span class="sr-only">Search</span>
-          <input type="search" placeholder="Search your library and AniList" spellcheck={false} />
+          <input
+            type="search"
+            placeholder="Search AniList"
+            spellcheck={false}
+            onInput={(e) => navigate(`/discover?q=${encodeURIComponent(e.currentTarget.value)}`)}
+          />
         </label>
         <p class="dateline">{fmtDateLine(now())}</p>
       </header>

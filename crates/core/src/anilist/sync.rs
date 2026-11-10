@@ -176,8 +176,9 @@ pub async fn sync_all(client: &Client, db: &Db, viewer: &Viewer) -> Result<SyncR
     }
 
     let now = Utc::now();
+    // Last week through the end of next week, for Home and the Schedule screen.
     let from = now - Duration::days(8);
-    let to = now + Duration::days(8);
+    let to = now + Duration::days(15);
     let mut airing = Vec::new();
     for chunk in airing_ids.chunks(50) {
         let mut page = 1;

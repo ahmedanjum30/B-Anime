@@ -1,6 +1,7 @@
 //! AniList GraphQL client. AniList is the source of truth for lists and progress.
 
 pub mod auth;
+pub mod browse;
 pub mod media;
 pub mod sync;
 
