@@ -12,7 +12,7 @@ export default function SourcePanel(props: { media: Media; source: SourceState }
   const extName = () => s().usable().find((e) => e.id === s().ext())?.name ?? "";
 
   const [picking, setPicking] = createSignal(false);
-  const [query, setQuery] = createSignal("");
+  const [query, setQuery] = createSignal(searchTitles(props.media)[0] ?? "");
   const [results, setResults] = createSignal<SourceResult[] | null>(null);
   const [searching, setSearching] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
