@@ -1,0 +1,53 @@
+# B-Anime's Windows installer, built with B-Installer (https://github.com/ahmedanjum30/B-installer).
+#
+#   installer\build.ps1                       # builds the app, then the setup
+#   bi installer\b-anime.toml -D version=0.1.0
+#
+# Paths, those given with -D too, are relative to this file; bindir defaults to target\release.
+#
+# Installs for the current user by default (no admin prompt), into %LOCALAPPDATA%\Programs\B-Anime,
+# with a checkbox to install for everyone. User data (%APPDATA%\B-Anime) is never touched by
+# install or uninstall.
+
+[defines]
+version = "0.0.0"
+root = ".."
+bindir = "..\\target\\release"
+
+[app]
+# Never change it: Windows finds the existing install by it.
+id = "63C47E40-4EAF-49FD-B40F-DF8A13E8F75B"
+name = "B-Anime"
+version = "${version}"
+publisher = "Ahmad Anjum"
+url = "https://github.com/ahmedanjum30/B-Anime"
+support_url = "https://github.com/ahmedanjum30/B-Anime/issues"
+dir = '{pf}\B-Anime'
+scope = "ask"
+uninstall_icon = '{app}\B-Anime.exe'
+icon = '${root}\app\src-tauri\icons\icon.ico'
+output = '${root}\dist\B-Anime-Setup-${version}.exe'
+
+[[task]]
+name = "desktopicon"
+label = "Create a desktop shortcut"
+checked = false
+
+[[file]]
+source = '${bindir}\banime-app.exe'
+dest = '{app}'
+rename = "B-Anime.exe"
+
+[[shortcut]]
+path = '{programs}\B-Anime'
+target = '{app}\B-Anime.exe'
+
+[[shortcut]]
+path = '{desktop}\B-Anime'
+target = '{app}\B-Anime.exe'
+task = "desktopicon"
+
+[[run]]
+file = '{app}\B-Anime.exe'
+launch = true
+as_user = true

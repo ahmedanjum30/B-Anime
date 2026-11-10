@@ -1,6 +1,9 @@
 # Rust
 /target/
 
+# Installers
+/dist/
+
 # Frontend
 node_modules/
 /app/dist/
