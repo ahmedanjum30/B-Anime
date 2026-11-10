@@ -60,12 +60,9 @@ Run backend tests with `cargo test -p banime-core`.
 
 ### AniList sign-in
 
-Sign-in needs an AniList API client: create one at <https://anilist.co/settings/developer> with the
-redirect URL `http://127.0.0.1:43211/callback`, then set its id before building or running:
-
-```powershell
-$env:BANIME_ANILIST_CLIENT_ID = "12345"
-```
+B-Anime's AniList API client (id 56545, redirect URL `http://127.0.0.1:43211/callback`) is built
+in; nothing to configure. A fork can use its own client by setting `BANIME_ANILIST_CLIENT_ID`.
+No client secret is used or needed.
 
 ### Installers
 

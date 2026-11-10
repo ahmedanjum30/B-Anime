@@ -27,13 +27,18 @@ const KEYRING_SERVICE: &str = "B-Anime";
 const KEYRING_USER: &str = "anilist-token";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// The AniList API client id: set at build time with `BANIME_ANILIST_CLIENT_ID`, or at run time
-/// through the environment variable of the same name.
+/// B-Anime's AniList API client (anilist.co/settings/developer), redirect URL [`REDIRECT_URI`].
+/// Public by design: the implicit grant uses no client secret, and none is ever shipped.
+pub const DEFAULT_CLIENT_ID: &str = "56545";
+
+/// The AniList API client id. `BANIME_ANILIST_CLIENT_ID` (run time, then build time) overrides
+/// the built-in one, e.g. for a fork with its own AniList client.
 pub fn client_id() -> Option<String> {
     std::env::var("BANIME_ANILIST_CLIENT_ID")
         .ok()
         .or_else(|| option_env!("BANIME_ANILIST_CLIENT_ID").map(str::to_owned))
         .filter(|s| !s.trim().is_empty())
+        .or_else(|| Some(DEFAULT_CLIENT_ID.to_owned()))
 }
 
 pub fn authorize_url(client_id: &str) -> String {
