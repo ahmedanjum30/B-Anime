@@ -3,12 +3,12 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import type Hls from "hls.js";
 
 import {
-  ArrowLeft, Captions, ExternalLink, Maximize, Minimize, Pause, PictureInPicture, Play, Settings2, SkipBack,
-  SkipForward, Volume2, VolumeX,
+  ArrowLeft, AudioLines, Captions, ExternalLink, Maximize, Minimize, Pause, PictureInPicture, Play, Settings2,
+  SkipBack, SkipForward, Volume2, VolumeX,
 } from "../lib/icons";
 import {
-  errorText, externalPlayers, getMedia, getPosition, getSkipTimes, getStream, inTauri, localEpisodes, localStream,
-  openExternalPlayer, saveEntry, savePosition,
+  errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
+  localStream, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
@@ -55,10 +55,13 @@ export default function Player() {
 
   /** Playing a file from the library instead of an extension's stream. */
   const local = () => search.local === "1";
+  /** The English-dub version of the source. */
+  const dubParam = () => search.dub === "1";
 
   const [page] = createResource(mediaId, getMedia);
   const media = () => page()?.media;
-  const source = createSource(() => (local() ? undefined : media()), extParam);
+  const [prefs] = createResource(getPlayerPrefs);
+  const source = createSource(() => (local() ? undefined : media()), extParam, dubParam);
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
   type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
@@ -76,7 +79,9 @@ export default function Player() {
   const hasPrev = () => has(episode() - 1);
   const goTo = (ep: number) =>
     navigate(
-      local() ? `/watch/${mediaId()}/${ep}?local=1` : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}`,
+      local()
+        ? `/watch/${mediaId()}/${ep}?local=1`
+        : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}${dubParam() ? "&dub=1" : ""}`,
       { replace: true },
     );
   const back = () => navigate(`/show/${mediaId()}`);
@@ -110,7 +115,21 @@ export default function Player() {
   const [videoError, setVideoError] = createSignal<string | null>(null);
   const [tracks, setTracks] = createSignal<TextTrack[]>([]);
   const [activeTrack, setActiveTrack] = createSignal(-1);
-  const [menu, setMenu] = createSignal<null | "subs" | "quality" | "external">(null);
+  const [menu, setMenu] = createSignal<null | "subs" | "audio" | "quality" | "external">(null);
+  /** Subtitle files the user loaded for this episode. */
+  const [extraSubs, setExtraSubs] = createSignal<{ url: string; label: string }[]>([]);
+  const [subSize, setSubSizeSignal] = createSignal<"s" | "m" | "l">(
+    (["s", "m", "l"] as const)[Math.max(0, Math.min(2, stored("banime.subsize", 1)))],
+  );
+  const setSubSize = (s: "s" | "m" | "l") => {
+    setSubSizeSignal(s);
+    store("banime.subsize", ["s", "m", "l"].indexOf(s));
+  };
+  /** Subtitle timing correction in seconds (positive shows them later). */
+  const [subOffset, setSubOffset] = createSignal(0);
+  /** Alternate audio tracks inside an HLS stream (e.g. Japanese and English). */
+  const [audioTracks, setAudioTracks] = createSignal<{ name: string; lang: string }[]>([]);
+  const [audioTrack, setAudioTrack] = createSignal(-1);
   const [fullscreen, setFullscreen] = createSignal(false);
   const [skips, setSkips] = createSignal<SkipTime[]>([]);
   const [countdown, setCountdown] = createSignal<number | null>(null);
@@ -121,12 +140,32 @@ export default function Player() {
   };
   onCleanup(destroy);
 
+  /** Does a track's language match a preference code ("ja", "en", …)? */
+  const langMatches = (lang: string, label: string, code: string) => {
+    const names: Record<string, RegExp> = { ja: /^(ja|jp|jpn)\b|japanese/i, en: /^(en|eng)\b|english/i };
+    const re = names[code] ?? new RegExp(`^${code}\\b`, "i");
+    return re.test(lang) || re.test(label);
+  };
+
+  // Several sources with known audio: start on the one in the preferred language.
+  createEffect(
+    on(stream, (s) => {
+      const want = prefs()?.audio;
+      const i = s && want ? s.sources.findIndex((x) => x.audio === want) : -1;
+      setSourceIndex(i > 0 ? i : 0);
+      setExtraSubs([]);
+      setSubOffset(0);
+    }),
+  );
+
   createEffect(
     on([stream, sourceIndex], async ([s, idx]) => {
       destroy();
       setVideoError(null);
       setLevels([]);
       setLevel(-1);
+      setAudioTracks([]);
+      setAudioTrack(-1);
       setWaiting(true);
       if (!s || !video) return;
       const src = s.sources[Math.min(idx, s.sources.length - 1)];
@@ -142,6 +181,16 @@ export default function Player() {
         instance.on(HlsLib.Events.MANIFEST_PARSED, (_e, data) => {
           setLevels(data.levels.map((l) => ({ height: l.height, bitrate: l.bitrate })));
         });
+        instance.on(HlsLib.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
+          const list = data.audioTracks.map((t) => ({ name: t.name, lang: t.lang ?? "" }));
+          setAudioTracks(list);
+          // Switch to the preferred audio language when the stream carries it.
+          const want = prefs()?.audio;
+          const i = want ? list.findIndex((t) => langMatches(t.lang, t.name, want)) : -1;
+          if (i >= 0 && i !== instance.audioTrack) instance.audioTrack = i;
+          setAudioTrack(instance.audioTrack);
+        });
+        instance.on(HlsLib.Events.AUDIO_TRACK_SWITCHED, (_e, data) => setAudioTrack(data.id));
         let recovered = 0;
         instance.on(HlsLib.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
@@ -158,22 +207,83 @@ export default function Player() {
   );
 
   // External subtitles are <track>s; HLS ones arrive as TextTracks too. Keep one list.
+  let autoPicked = false;
   const refreshTracks = () => {
     const list = Array.from(video.textTracks).filter((t) => t.kind === "subtitles" || t.kind === "captions");
     setTracks(list);
+    for (const t of list) t.oncuechange = applyOffset;
+    applyOffset();
     const showing = list.findIndex((t) => t.mode === "showing");
     if (showing >= 0) setActiveTrack(showing);
-    else if (activeTrack() === -1 && list.length) {
-      const preferred = stored("banime.subs", 1) === 1 ? list.findIndex((t) => /^en/i.test(t.language) || /english/i.test(t.label)) : -1;
-      chooseTrack(preferred >= 0 ? preferred : -1, false);
+    else if (!autoPicked && list.length) {
+      // The preferred subtitle language (Settings → Playback); "off" shows none.
+      const want = prefs()?.subtitles ?? "en";
+      const preferred = want === "off" ? -1 : list.findIndex((t) => langMatches(t.language, t.label, want));
+      chooseTrack(preferred, false);
+      autoPicked = preferred >= 0 || want === "off";
     }
   };
-  const chooseTrack = (i: number, remember = true) => {
+  /** A track's menu name; tracks sharing a name are numbered so they can be told apart. */
+  const trackName = (t: TextTrack, i: number) => {
+    const base = t.label || t.language || `Track ${i + 1}`;
+    const same = tracks().filter((x) => (x.label || x.language) === (t.label || t.language));
+    return same.length > 1 ? `${base} (${same.indexOf(t) + 1})` : base;
+  };
+  const chooseTrack = (i: number, close = true) => {
     tracks().forEach((t, j) => (t.mode = j === i ? "showing" : "disabled"));
     setActiveTrack(i);
-    if (remember) store("banime.subs", i >= 0 ? 1 : 0);
+    if (close) setMenu(null);
+  };
+
+  // Timing correction: every cue keeps its original times, shifted by the offset.
+  const original = new WeakMap<TextTrackCue, [number, number]>();
+  function applyOffset() {
+    const offset = subOffset();
+    for (const t of tracks()) {
+      for (const cue of Array.from(t.cues ?? [])) {
+        let o = original.get(cue);
+        if (!o) original.set(cue, (o = [cue.startTime, cue.endTime]));
+        const start = Math.max(0, o[0] + offset);
+        if (cue.startTime !== start) {
+          cue.startTime = start;
+          cue.endTime = Math.max(start, o[1] + offset);
+        }
+      }
+    }
+  }
+  createEffect(on(subOffset, applyOffset, { defer: true }));
+  const nudgeSubs = (d: number) => {
+    setSubOffset(Math.round((subOffset() + d) * 10) / 10);
+    notify(`Subtitle timing ${subOffset() >= 0 ? "+" : ""}${subOffset().toFixed(1)} s`);
+  };
+
+  const loadSubtitleFile = async () => {
+    setMenu(null);
+    try {
+      const picked = await pickSubtitleFile();
+      if (!picked) return;
+      setExtraSubs([...extraSubs(), picked]);
+      // Show it as soon as the browser has parsed it.
+      const label = picked.label;
+      const pick = () => {
+        const i = tracks().findIndex((t) => t.label === label);
+        if (i >= 0) chooseTrack(i, false);
+      };
+      setTimeout(pick, 300);
+      setTimeout(pick, 1200);
+    } catch (e) {
+      notify(`Couldn't load the subtitles: ${errorText(e)}`);
+    }
+  };
+
+  const chooseAudio = (i: number) => {
+    if (hls) hls.audioTrack = i;
+    setAudioTrack(i);
     setMenu(null);
   };
+  /** Sources that differ by audio language, for the Audio menu when the stream has no tracks. */
+  const audioSources = () => (stream()?.sources ?? []).map((s, i) => ({ ...s, i })).filter((s) => s.audio);
+  const audioName = (code: string | null) => (code === "ja" ? "Japanese" : code === "en" ? "English" : code ?? "Unknown");
 
   // ── Resume, position saving, watched-at-80%, skip times
   let resumed = false;
@@ -349,6 +459,8 @@ export default function Player() {
         case "f": void toggleFullscreen(); return true;
         case "s": skip(); return true;
         case "c": chooseTrack(tracks().length ? (activeTrack() + 2) % (tracks().length + 1) - 1 : -1); return true;
+        case "z": nudgeSubs(-0.5); return true;
+        case "x": nudgeSubs(0.5); return true;
         case "n": if (hasNext()) goTo(episode() + 1); return true;
         case "p": if (hasPrev()) goTo(episode() - 1); return true;
         case "escape":
@@ -383,7 +495,8 @@ export default function Player() {
     <div
       ref={shell}
       class="player"
-      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() }}
+      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu() }}
+      data-subsize={subSize()}
       onPointerMove={wake}
       onPointerDown={wake}
     >
@@ -414,6 +527,9 @@ export default function Player() {
       >
         <For each={stream()?.subtitles ?? []}>
           {(s) => <track kind="subtitles" src={s.url} srclang={s.lang} label={s.label} onLoad={refreshTracks} />}
+        </For>
+        <For each={extraSubs()}>
+          {(s) => <track kind="subtitles" src={s.url} label={s.label} onLoad={refreshTracks} />}
         </For>
       </video>
 
@@ -536,25 +652,80 @@ export default function Player() {
           </div>
 
           <div class="bar-group">
-            <Show when={tracks().length}>
+            <Show when={audioTracks().length > 1 || audioSources().length > 1}>
               <div class="menu-wrap">
-                <button type="button" class="icon-btn" classList={{ "is-on": activeTrack() >= 0 }} aria-haspopup="menu" aria-expanded={menu() === "subs"} onClick={() => setMenu(menu() === "subs" ? null : "subs")} aria-label="Subtitles (C)">
-                  <Captions size={20} stroke-width={2} />
+                <button type="button" class="icon-btn" aria-haspopup="menu" aria-expanded={menu() === "audio"} onClick={() => setMenu(menu() === "audio" ? null : "audio")} aria-label="Audio language">
+                  <AudioLines size={20} stroke-width={2} />
                 </button>
-                <Show when={menu() === "subs"}>
+                <Show when={menu() === "audio"}>
                   <div class="menu" role="menu">
-                    <button type="button" role="menuitemradio" aria-checked={activeTrack() === -1} onClick={() => chooseTrack(-1)}>Off</button>
-                    <For each={tracks()}>
-                      {(t, i) => (
-                        <button type="button" role="menuitemradio" aria-checked={activeTrack() === i()} onClick={() => chooseTrack(i())}>
-                          {t.label || t.language || `Track ${i() + 1}`}
-                        </button>
-                      )}
-                    </For>
+                    <p class="menu-head">Audio</p>
+                    <Show
+                      when={audioTracks().length > 1}
+                      fallback={
+                        <For each={audioSources()}>
+                          {(s) => (
+                            <button type="button" role="menuitemradio" aria-checked={sourceIndex() === s.i} onClick={() => { setSourceIndex(s.i); setMenu(null); }}>
+                              {audioName(s.audio)}
+                            </button>
+                          )}
+                        </For>
+                      }
+                    >
+                      <For each={audioTracks()}>
+                        {(t, i) => (
+                          <button type="button" role="menuitemradio" aria-checked={audioTrack() === i()} onClick={() => chooseAudio(i())}>
+                            {t.name || audioName(t.lang)}
+                          </button>
+                        )}
+                      </For>
+                    </Show>
                   </div>
                 </Show>
               </div>
             </Show>
+
+            <div class="menu-wrap">
+              <button type="button" class="icon-btn" classList={{ "is-on": activeTrack() >= 0 }} aria-haspopup="menu" aria-expanded={menu() === "subs"} onClick={() => setMenu(menu() === "subs" ? null : "subs")} aria-label="Subtitles (C)">
+                <Captions size={20} stroke-width={2} />
+              </button>
+              <Show when={menu() === "subs"}>
+                <div class="menu menu-wide" role="menu">
+                  <p class="menu-head">Subtitles</p>
+                  <button type="button" role="menuitemradio" aria-checked={activeTrack() === -1} onClick={() => chooseTrack(-1)}>Off</button>
+                  <For each={tracks()}>
+                    {(t, i) => (
+                      <button type="button" role="menuitemradio" aria-checked={activeTrack() === i()} onClick={() => chooseTrack(i())}>
+                        {trackName(t, i())}
+                      </button>
+                    )}
+                  </For>
+                  <Show when={inTauri}>
+                    <button type="button" role="menuitem" class="menu-action" onClick={() => void loadSubtitleFile()}>
+                      Load from file…
+                    </button>
+                  </Show>
+
+                  <p class="menu-head">Size</p>
+                  <div class="menu-row" role="group" aria-label="Subtitle size">
+                    <For each={[["s", "Small"], ["m", "Medium"], ["l", "Large"]] as const}>
+                      {([v, label]) => (
+                        <button type="button" aria-pressed={subSize() === v} onClick={() => setSubSize(v)}>{label}</button>
+                      )}
+                    </For>
+                  </div>
+
+                  <p class="menu-head">Timing <span class="menu-hint">Z / X</span></p>
+                  <div class="menu-row" role="group" aria-label="Subtitle timing">
+                    <button type="button" onClick={() => nudgeSubs(-0.5)} aria-label="Show subtitles 0.5 seconds earlier">−0.5 s</button>
+                    <button type="button" class="menu-value num" onClick={() => setSubOffset(0)} title="Reset">
+                      {subOffset() > 0 ? "+" : ""}{subOffset().toFixed(1)} s
+                    </button>
+                    <button type="button" onClick={() => nudgeSubs(0.5)} aria-label="Show subtitles 0.5 seconds later">+0.5 s</button>
+                  </div>
+                </div>
+              </Show>
+            </div>
 
             <Show when={levels().length > 1 || (stream()?.sources.length ?? 0) > 1}>
               <div class="menu-wrap">

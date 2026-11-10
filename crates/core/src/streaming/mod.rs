@@ -75,6 +75,9 @@ struct RawSource {
     quality: Option<String>,
     #[serde(default)]
     label: Option<String>,
+    /// Audio language of this source: "ja" / "en", or "sub" / "dub".
+    #[serde(default)]
+    audio: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,9 +117,22 @@ pub struct Stream {
 #[serde(rename_all = "camelCase")]
 pub struct StreamSource {
     pub url: String,
-    /// "hls" or "mp4".
+    /// "hls", "mp4", or "file" (a library file).
     pub kind: String,
     pub label: String,
+    /// "ja" or "en" when the source says which audio it carries.
+    pub audio: Option<String>,
+}
+
+/// Normalises a source's audio label to "ja" / "en" (or passes other codes through).
+fn audio_code(raw: Option<&str>) -> Option<String> {
+    let r = raw?.trim().to_ascii_lowercase();
+    Some(match r.as_str() {
+        "sub" | "ja" | "jp" | "jpn" | "japanese" | "raw" => "ja".into(),
+        "dub" | "en" | "eng" | "english" => "en".into(),
+        "" => return None,
+        other => other.to_owned(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -215,26 +231,40 @@ async fn call(db: &Db, dir: &Path, ext: &str, method: &str, args: Value) -> Resu
     Ok(extensions::call(db, dir, ext, method, &args, Limits::default()).await?.value)
 }
 
-pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str) -> Result<Vec<SourceResult>> {
-    parse(call(db, dir, ext, "search", json!([{ "query": query }])).await?, "search results")
+/// `dub` asks the source for its English-dubbed version (sources without one ignore it).
+pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str, dub: bool) -> Result<Vec<SourceResult>> {
+    parse(call(db, dir, ext, "search", json!([{ "query": query, "dub": dub }])).await?, "search results")
 }
 
-/// The saved match for this show on this source, or the best automatic one (saved when confident).
-pub async fn find_match(db: &Db, dir: &Path, media_id: i64, ext: &str, titles: &[String], year: Option<i64>) -> Result<MatchState> {
-    let saved: Option<(String, String, bool)> =
-        sqlx::query_as("SELECT source_id, source_title, auto FROM source_match WHERE media_id = ? AND ext_id = ?")
-            .bind(media_id)
-            .bind(ext)
-            .fetch_optional(db)
-            .await?;
+/// The saved match for this show on this source (sub or dub), or the best automatic one
+/// (saved when confident).
+pub async fn find_match(
+    db: &Db,
+    dir: &Path,
+    media_id: i64,
+    ext: &str,
+    titles: &[String],
+    year: Option<i64>,
+    dub: bool,
+) -> Result<MatchState> {
+    let saved: Option<(String, String, bool)> = sqlx::query_as(
+        "SELECT source_id, source_title, auto FROM source_match WHERE media_id = ? AND ext_id = ? AND dub = ?",
+    )
+    .bind(media_id)
+    .bind(ext)
+    .bind(dub)
+    .fetch_optional(db)
+    .await?;
     if let Some((source_id, title, auto)) = saved {
         return Ok(MatchState::Matched { source_id, title, auto });
     }
 
     let mut scored: Vec<(f64, SourceResult)> = Vec::new();
     for query in titles.iter().filter(|t| !t.trim().is_empty()).take(2) {
-        for r in search(db, dir, ext, query).await? {
-            let mut score = titles.iter().map(|t| similarity(t, &r.title)).fold(0.0, f64::max);
+        for r in search(db, dir, ext, query, dub).await? {
+            // "(Dub)" / "(English Dub)" suffixes on dub entries shouldn't cost them the match.
+            let candidate = strip_dub_marker(&r.title);
+            let mut score = titles.iter().map(|t| similarity(t, &candidate)).fold(0.0, f64::max);
             if let (Some(a), Some(b)) = (year, r.year) {
                 if a == b {
                     score += 0.05;
@@ -252,21 +282,22 @@ pub async fn find_match(db: &Db, dir: &Path, media_id: i64, ext: &str, titles: &
 
     match scored.first() {
         Some((score, best)) if *score >= AUTO_MATCH => {
-            save_match(db, media_id, ext, &best.id, &best.title, true).await?;
+            save_match(db, media_id, ext, dub, &best.id, &best.title, true).await?;
             Ok(MatchState::Matched { source_id: best.id.clone(), title: best.title.clone(), auto: true })
         }
         _ => Ok(MatchState::Unmatched { candidates: scored.into_iter().take(12).map(|(_, r)| r).collect() }),
     }
 }
 
-pub async fn save_match(db: &Db, media_id: i64, ext: &str, source_id: &str, title: &str, auto: bool) -> Result<()> {
+pub async fn save_match(db: &Db, media_id: i64, ext: &str, dub: bool, source_id: &str, title: &str, auto: bool) -> Result<()> {
     sqlx::query(
-        "INSERT INTO source_match (media_id, ext_id, source_id, source_title, auto) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(media_id, ext_id) DO UPDATE SET source_id = excluded.source_id,
+        "INSERT INTO source_match (media_id, ext_id, dub, source_id, source_title, auto) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(media_id, ext_id, dub) DO UPDATE SET source_id = excluded.source_id,
            source_title = excluded.source_title, auto = excluded.auto, updated_at = datetime('now')",
     )
     .bind(media_id)
     .bind(ext)
+    .bind(dub)
     .bind(source_id)
     .bind(title)
     .bind(auto)
@@ -275,9 +306,27 @@ pub async fn save_match(db: &Db, media_id: i64, ext: &str, source_id: &str, titl
     Ok(())
 }
 
-pub async fn clear_match(db: &Db, media_id: i64, ext: &str) -> Result<()> {
-    sqlx::query("DELETE FROM source_match WHERE media_id = ? AND ext_id = ?").bind(media_id).bind(ext).execute(db).await?;
+pub async fn clear_match(db: &Db, media_id: i64, ext: &str, dub: bool) -> Result<()> {
+    sqlx::query("DELETE FROM source_match WHERE media_id = ? AND ext_id = ? AND dub = ?")
+        .bind(media_id)
+        .bind(ext)
+        .bind(dub)
+        .execute(db)
+        .await?;
     Ok(())
+}
+
+/// "Frieren (Dub)" → "Frieren", for scoring dub entries against AniList titles.
+fn strip_dub_marker(title: &str) -> String {
+    let lower = title.to_lowercase();
+    for marker in ["(english dub)", "(dub)", "[dub]", " dub", "(eng dub)"] {
+        if let Some(i) = lower.rfind(marker) {
+            if i + marker.len() >= lower.trim_end().len() {
+                return title[..i].trim_end().to_owned();
+            }
+        }
+    }
+    title.to_owned()
 }
 
 // ── Episodes, chapters, sources, pages ───────────────────────────────────────
@@ -327,6 +376,7 @@ pub async fn stream(db: &Db, dir: &Path, proxy: &Proxy, ext: &str, episode_id: &
             url: proxy.url(&session, &s.url, None)?,
             kind: guess_kind(&s.url, s.kind.as_deref()),
             label: s.label.clone().or_else(|| s.quality.clone()).unwrap_or_else(|| format!("Source {}", i + 1)),
+            audio: audio_code(s.audio.as_deref()),
         });
     }
     let mut subtitles = Vec::new();
@@ -471,15 +521,33 @@ mod tests {
     #[tokio::test]
     async fn manual_match_is_remembered() {
         let db = crate::db::open_memory().await.unwrap();
-        save_match(&db, 7, "demo", "src-1", "Some Title", false).await.unwrap();
+        save_match(&db, 7, "demo", false, "src-1", "Some Title", false).await.unwrap();
+        save_match(&db, 7, "demo", true, "src-1-dub", "Some Title (Dub)", false).await.unwrap();
         let dir = std::env::temp_dir();
-        match find_match(&db, &dir, 7, "demo", &["anything".into()], None).await.unwrap() {
+        let titles = ["anything".to_owned()];
+        match find_match(&db, &dir, 7, "demo", &titles, None, false).await.unwrap() {
             MatchState::Matched { source_id, auto, .. } => assert_eq!((source_id.as_str(), auto), ("src-1", false)),
             other => panic!("{other:?}"),
         }
-        clear_match(&db, 7, "demo").await.unwrap();
+        // Sub and dub are matched separately.
+        match find_match(&db, &dir, 7, "demo", &titles, None, true).await.unwrap() {
+            MatchState::Matched { source_id, .. } => assert_eq!(source_id, "src-1-dub"),
+            other => panic!("{other:?}"),
+        }
+        clear_match(&db, 7, "demo", false).await.unwrap();
         // Not installed, so a fresh lookup fails rather than inventing a match.
-        assert!(find_match(&db, &dir, 7, "demo", &["anything".into()], None).await.is_err());
+        assert!(find_match(&db, &dir, 7, "demo", &titles, None, false).await.is_err());
+    }
+
+    #[test]
+    fn dub_markers_and_audio_codes() {
+        assert_eq!(strip_dub_marker("Frieren (Dub)"), "Frieren");
+        assert_eq!(strip_dub_marker("Frieren (English Dub)"), "Frieren");
+        assert_eq!(strip_dub_marker("Dubbed Life"), "Dubbed Life");
+        assert_eq!(audio_code(Some("Sub")).as_deref(), Some("ja"));
+        assert_eq!(audio_code(Some("DUB")).as_deref(), Some("en"));
+        assert_eq!(audio_code(Some("es")).as_deref(), Some("es"));
+        assert_eq!(audio_code(None), None);
     }
 
     #[tokio::test]

@@ -101,13 +101,21 @@ async fn find_source(
     ext: String,
     titles: Vec<String>,
     year: Option<i64>,
+    dub: Option<bool>,
 ) -> Result<streaming::MatchState, String> {
-    streaming::find_match(&state.db, &state.paths.extensions, media_id, &ext, &titles, year).await.map_err(msg)
+    streaming::find_match(&state.db, &state.paths.extensions, media_id, &ext, &titles, year, dub.unwrap_or(false))
+        .await
+        .map_err(msg)
 }
 
 #[tauri::command]
-async fn search_source(state: tauri::State<'_, AppState>, ext: String, query: String) -> Result<Vec<streaming::SourceResult>, String> {
-    streaming::search(&state.db, &state.paths.extensions, &ext, &query).await.map_err(msg)
+async fn search_source(
+    state: tauri::State<'_, AppState>,
+    ext: String,
+    query: String,
+    dub: Option<bool>,
+) -> Result<Vec<streaming::SourceResult>, String> {
+    streaming::search(&state.db, &state.paths.extensions, &ext, &query, dub.unwrap_or(false)).await.map_err(msg)
 }
 
 #[tauri::command]
@@ -117,13 +125,14 @@ async fn set_source_match(
     ext: String,
     source_id: String,
     title: String,
+    dub: Option<bool>,
 ) -> Result<(), String> {
-    streaming::save_match(&state.db, media_id, &ext, &source_id, &title, false).await.map_err(msg)
+    streaming::save_match(&state.db, media_id, &ext, dub.unwrap_or(false), &source_id, &title, false).await.map_err(msg)
 }
 
 #[tauri::command]
-async fn clear_source_match(state: tauri::State<'_, AppState>, media_id: i64, ext: String) -> Result<(), String> {
-    streaming::clear_match(&state.db, media_id, &ext).await.map_err(msg)
+async fn clear_source_match(state: tauri::State<'_, AppState>, media_id: i64, ext: String, dub: Option<bool>) -> Result<(), String> {
+    streaming::clear_match(&state.db, media_id, &ext, dub.unwrap_or(false)).await.map_err(msg)
 }
 
 /// Episodes or chapters on a source. Cached for 10 minutes: the player and reader ask often.
@@ -503,6 +512,8 @@ pub fn run() {
             playback::open_external_player,
             playback::get_player_prefs,
             playback::set_player_pref,
+            playback::set_languages,
+            playback::pick_subtitle_file,
             playback::local_episodes,
             playback::local_stream,
             playback::play_local,

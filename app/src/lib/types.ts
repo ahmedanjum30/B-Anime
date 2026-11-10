@@ -236,8 +236,8 @@ export type MatchState =
   | { status: "unmatched"; candidates: SourceResult[] };
 
 export interface Stream {
-  /** "file" is a library file served by the local proxy. */
-  sources: { url: string; kind: "hls" | "mp4" | "file"; label: string }[];
+  /** "file" is a library file served by the local proxy. `audio` is "ja"/"en" when known. */
+  sources: { url: string; kind: "hls" | "mp4" | "file"; label: string; audio: string | null }[];
   subtitles: { url: string; lang: string; label: string }[];
 }
 
@@ -282,6 +282,10 @@ export type PlayerChoice = "builtin" | "mpv" | "vlc";
 export interface PlayerPrefs {
   player: PlayerChoice;
   available: string[];
+  /** "ja" (original) or "en" (English dub). */
+  audio: string;
+  /** A language code ("en", "es", …) or "off". */
+  subtitles: string;
 }
 
 export interface UpdateInfo {

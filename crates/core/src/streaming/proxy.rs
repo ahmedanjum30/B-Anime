@@ -90,6 +90,7 @@ impl Proxy {
         let app = Router::new()
             .route("/m/{secret}/{session}", get(handle))
             .route("/f/{secret}/{token}", get(serve_file))
+            .route("/s/{secret}/{token}", get(serve_subtitle))
             .with_state(shared);
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, app).await {
@@ -105,6 +106,13 @@ impl Proxy {
         let token = token();
         self.files.lock().expect("proxy files").insert(token.clone(), path.to_path_buf());
         format!("http://127.0.0.1:{}/f/{}/{token}", self.port, self.secret)
+    }
+
+    /// A local subtitle file (SRT, ASS/SSA or VTT) served as WebVTT.
+    pub fn subtitle_url(&self, path: &std::path::Path) -> String {
+        let token = token();
+        self.files.lock().expect("proxy files").insert(token.clone(), path.to_path_buf());
+        format!("http://127.0.0.1:{}/s/{}/{token}", self.port, self.secret)
     }
 
     /// Registers the headers one source needs; returns a session id for [`Proxy::url`].
@@ -302,6 +310,26 @@ async fn serve_file(
     (status, headers, body).into_response()
 }
 
+async fn serve_subtitle(State(s): State<Shared>, Path((secret, token)): Path<(String, String)>) -> Response {
+    if secret != s.secret {
+        return fail(StatusCode::FORBIDDEN, "forbidden");
+    }
+    let Some(path) = s.files.lock().ok().and_then(|m| m.get(&token).cloned()) else {
+        return fail(StatusCode::GONE, "this subtitle link expired");
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) if b.len() <= MAX_PLAYLIST_BYTES => b,
+        Ok(_) => return fail(StatusCode::PAYLOAD_TOO_LARGE, "subtitle file too large"),
+        Err(e) => return fail(StatusCode::NOT_FOUND, format!("can't open the subtitle file: {e}")),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let kind = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let mut r = (StatusCode::OK, to_vtt(&text, &kind)).into_response();
+    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/vtt; charset=utf-8"));
+    r.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    r
+}
+
 async fn read_capped(mut res: reqwest::Response, cap: usize) -> std::result::Result<Vec<u8>, String> {
     let mut body = Vec::new();
     while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
@@ -474,6 +502,12 @@ mod tests {
         assert_eq!(part.text().await.unwrap(), "2345");
         assert_eq!(client.get(&url).send().await.unwrap().text().await.unwrap(), "0123456789");
         let _ = std::fs::remove_file(path);
+
+        let sub = std::env::temp_dir().join(format!("banime-sub-{}.srt", std::process::id()));
+        std::fs::write(&sub, "1\n00:00:01,000 --> 00:00:02,000\nHi\n").unwrap();
+        let vtt = client.get(proxy.subtitle_url(&sub)).send().await.unwrap().text().await.unwrap();
+        assert!(vtt.starts_with("WEBVTT") && vtt.contains("00:00:01.000 --> 00:00:02.000"), "{vtt}");
+        let _ = std::fs::remove_file(sub);
     }
 
     #[test]

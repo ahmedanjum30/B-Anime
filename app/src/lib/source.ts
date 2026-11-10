@@ -28,7 +28,12 @@ export function searchTitles(m: Media): string[] {
  * The online source for one show: which extension, what it matched to, and its episodes or
  * chapters. Shared by the show page, the player and the reader.
  */
-export function createSource(media: () => Media | undefined, preferred?: () => string | undefined) {
+export function createSource(
+  media: () => Media | undefined,
+  preferred?: () => string | undefined,
+  /** English dub instead of the original audio (anime only; sources without dubs ignore it). */
+  dub: () => boolean = () => false,
+) {
   const kind = (): ExtKind => (media()?.type === "MANGA" ? "manga" : "anime");
   const [exts] = createResource(() => (inTauri ? listExtensions() : Promise.resolve([] as InstalledExtension[])));
   const usable = createMemo(() => (exts() ?? []).filter((e) => e.enabled && e.kind === kind()));
@@ -50,12 +55,15 @@ export function createSource(media: () => Media | undefined, preferred?: () => s
   const matchKey = createMemo(() => {
     const m = media();
     const e = ext();
-    return m && e ? { id: m.id, ext: e } : null;
-  }, null, { equals: (a, b) => a?.id === b?.id && a?.ext === b?.ext });
+    const d = kind() === "anime" && dub();
+    return m && e ? { id: m.id, ext: e, dub: d } : null;
+  }, null, { equals: (a, b) => a?.id === b?.id && a?.ext === b?.ext && a?.dub === b?.dub });
   const [match, { refetch: rematch, mutate: setMatch }] = createResource(matchKey, (k) => {
     const m = media()!;
-    return findSource(k.id, k.ext, searchTitles(m), m.seasonYear ?? m.startDate.year);
+    return findSource(k.id, k.ext, searchTitles(m), m.seasonYear ?? m.startDate.year, k.dub);
   });
+  /** Whether the current match is for the dub (what the player should be told). */
+  const isDub = () => matchKey()?.dub ?? false;
 
   const itemsKey = createMemo(() => {
     const mt = match();
@@ -71,7 +79,7 @@ export function createSource(media: () => Media | undefined, preferred?: () => s
     return map;
   });
 
-  return { kind, exts, usable, ext, setExt, match, rematch, setMatch, items, reloadItems, byNumber };
+  return { kind, exts, usable, ext, setExt, isDub, match, rematch, setMatch, items, reloadItems, byNumber };
 }
 
 export type SourceState = ReturnType<typeof createSource>;

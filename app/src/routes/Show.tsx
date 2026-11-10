@@ -9,7 +9,7 @@ import { createSource } from "../lib/source";
 import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
 import { ArrowLeft, ExternalLink } from "../lib/icons";
-import { errorText, getMedia, inTauri, openAniList } from "../lib/api";
+import { errorText, getMedia, getPlayerPrefs, inTauri, openAniList } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
 import { createEntrySaver } from "../lib/entry";
@@ -70,7 +70,11 @@ export default function Show() {
     return m ? (m.type === "ANIME" ? m.episodes : m.chapters) : null;
   };
   const navigate = useNavigate();
-  const source = createSource(() => page()?.media);
+  // Sub or dub for online sources: starts from the audio preference (Settings → Playback).
+  const [prefs] = createResource(getPlayerPrefs);
+  const [dubChoice, setDubChoice] = createSignal<boolean | null>(null);
+  const dub = () => dubChoice() ?? prefs()?.audio === "en";
+  const source = createSource(() => page()?.media, undefined, dub);
 
   const saver = createEntrySaver({
     mediaId: id,
@@ -176,12 +180,22 @@ export default function Show() {
                         media={m()}
                         saver={saver}
                         localFiles={p().localFiles}
-                        panel={<SourcePanel media={m()} source={source} quiet={p().localFiles.length > 0} />}
+                        panel={
+                          <SourcePanel
+                            media={m()}
+                            source={source}
+                            quiet={p().localFiles.length > 0}
+                            dub={dub()}
+                            onDubChange={setDubChoice}
+                          />
+                        }
                         playable={(ep) => p().localFiles.some((f) => f.episode === ep) || source.byNumber().has(ep)}
                         onPlay={(ep) =>
                           p().localFiles.some((f) => f.episode === ep)
                             ? void playLibraryEpisode(m().id, ep, navigate, notify)
-                            : navigate(`/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}`)
+                            : navigate(
+                                `/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}${source.isDub() ? "&dub=1" : ""}`,
+                              )
                         }
                       />
                     </When>

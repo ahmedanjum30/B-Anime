@@ -5,12 +5,14 @@ import type {
 } from "./types";
 
 // ── Streaming & reading (desktop only) ──
-export const findSource = (mediaId: number, ext: string, titles: string[], year: number | null) =>
-  call<MatchState>("find_source", { mediaId, ext, titles, year });
-export const searchSource = (ext: string, query: string) => call<SourceResult[]>("search_source", { ext, query });
-export const setSourceMatch = (mediaId: number, ext: string, sourceId: string, title: string) =>
-  call<void>("set_source_match", { mediaId, ext, sourceId, title });
-export const clearSourceMatch = (mediaId: number, ext: string) => call<void>("clear_source_match", { mediaId, ext });
+export const findSource = (mediaId: number, ext: string, titles: string[], year: number | null, dub = false) =>
+  call<MatchState>("find_source", { mediaId, ext, titles, year, dub });
+export const searchSource = (ext: string, query: string, dub = false) =>
+  call<SourceResult[]>("search_source", { ext, query, dub });
+export const setSourceMatch = (mediaId: number, ext: string, sourceId: string, title: string, dub = false) =>
+  call<void>("set_source_match", { mediaId, ext, sourceId, title, dub });
+export const clearSourceMatch = (mediaId: number, ext: string, dub = false) =>
+  call<void>("clear_source_match", { mediaId, ext, dub });
 export const sourceItems = (ext: string, sourceId: string, refresh = false) =>
   call<SourceItem[]>("source_items", { ext, sourceId, refresh });
 export const getStream = (ext: string, episodeId: string) => call<Stream>("get_stream", { ext, episodeId });
@@ -54,8 +56,14 @@ export const pickFolder = () => call<string | null>("pick_folder");
 
 // ── Playback of library files ──
 export const getPlayerPrefs = () =>
-  inTauri ? call<PlayerPrefs>("get_player_prefs") : Promise.resolve<PlayerPrefs>({ player: "builtin", available: [] });
+  inTauri
+    ? call<PlayerPrefs>("get_player_prefs")
+    : Promise.resolve<PlayerPrefs>({ player: "builtin", available: [], audio: "ja", subtitles: "en" });
 export const setPlayerPref = (player: PlayerChoice) => call<void>("set_player_pref", { player });
+export const setLanguages = (audio: string, subtitles: string) => call<void>("set_languages", { audio, subtitles });
+/** Opens a file picker for .srt/.ass/.vtt; resolves with a playable WebVTT URL, or null. */
+export const pickSubtitleFile = () =>
+  inTauri ? call<{ url: string; label: string } | null>("pick_subtitle_file") : Promise.resolve(null);
 export const localEpisodes = (mediaId: number) => call<number[]>("local_episodes", { mediaId });
 export const localStream = (mediaId: number, episode: number) => call<Stream>("local_stream", { mediaId, episode });
 /** Plays with the preferred player; "builtin" means the caller opens the in-app player. */

@@ -578,6 +578,38 @@ pub async fn episode_file(db: &Db, media_id: i64, episode: i64) -> Result<Option
         .await?)
 }
 
+/// Subtitle files next to a video that belong to it: `Show - 05.mkv` picks up `Show - 05.srt`,
+/// `Show - 05.en.ass`, `Show - 05.English.vtt`. Returns (path, language label).
+pub fn sidecar_subtitles(video: &Path) -> Vec<(PathBuf, String)> {
+    let (Some(dir), Some(stem)) = (video.parent(), video.file_stem().and_then(|s| s.to_str())) else {
+        return vec![];
+    };
+    let stem_lower = stem.to_lowercase();
+    let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if !matches!(ext.as_str(), "srt" | "ass" | "ssa" | "vtt") {
+            continue;
+        }
+        let Some(sub_stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let lower = sub_stem.to_lowercase();
+        if lower == stem_lower {
+            out.push((path, "Subtitles".to_owned()));
+        } else if let Some(rest) = lower.strip_prefix(&format!("{stem_lower}.")) {
+            let label = match rest {
+                "en" | "eng" | "english" => "English".to_owned(),
+                "ja" | "jp" | "jpn" | "japanese" => "Japanese".to_owned(),
+                other => other.to_owned(),
+            };
+            out.push((path, label));
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Episode numbers available locally for a show.
 pub async fn episodes(db: &Db, media_id: i64) -> Result<Vec<i64>> {
     Ok(sqlx::query_scalar("SELECT DISTINCT episode FROM local_file WHERE media_id = ? AND episode IS NOT NULL ORDER BY episode")
@@ -624,6 +656,17 @@ mod tests {
         assert_eq!(again.removed, 1);
         assert_eq!(episodes(&db, 2).await.unwrap(), vec![2]);
         assert!(episodes(&db, 1).await.unwrap().is_empty());
+
+        // Subtitles next to an episode are found by name.
+        let ep2_path = Path::new(&ep2);
+        let stem = ep2_path.file_stem().unwrap().to_str().unwrap().to_owned();
+        std::fs::write(ep2_path.with_file_name(format!("{stem}.en.ass")), b"x").unwrap();
+        std::fs::write(ep2_path.with_file_name(format!("{stem}.srt")), b"x").unwrap();
+        std::fs::write(show.join("unrelated.srt"), b"x").unwrap();
+        let subs = sidecar_subtitles(ep2_path);
+        let labels: Vec<&str> = subs.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(subs.len(), 2, "{subs:?}");
+        assert!(labels.contains(&"English") && labels.contains(&"Subtitles"));
 
         remove_root(&db, dir.to_str().unwrap()).await.unwrap();
         assert!(episodes(&db, 2).await.unwrap().is_empty());

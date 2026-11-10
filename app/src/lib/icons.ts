@@ -2,6 +2,7 @@
 // on every build. Add new icons here.
 export { default as ArrowLeft } from "lucide-solid/icons/arrow-left";
 export { default as ArrowLeftRight } from "lucide-solid/icons/arrow-left-right";
+export { default as AudioLines } from "lucide-solid/icons/audio-lines";
 export { default as BookOpen } from "lucide-solid/icons/book-open";
 export { default as CalendarDays } from "lucide-solid/icons/calendar-days";
 export { default as Captions } from "lucide-solid/icons/captions";

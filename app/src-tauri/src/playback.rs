@@ -62,11 +62,96 @@ async fn preferred_player(db: &db::Db) -> String {
 pub struct PlayerPrefs {
     pub player: String,
     pub available: Vec<String>,
+    /// Preferred audio: "ja" (original Japanese) or "en" (English dub).
+    pub audio: String,
+    /// Preferred subtitles: a language code ("en", "es", …) or "off".
+    pub subtitles: String,
+}
+
+/// Audio and subtitle language preferences (defaults: Japanese audio, English subtitles).
+pub async fn languages(db: &db::Db) -> (String, String) {
+    let get = |key: &'static str| async move { db::scalar_text(db, key).await.ok().flatten() };
+    let audio = get("SELECT value FROM setting WHERE key = 'playback.audio'").await.unwrap_or_else(|| "ja".into());
+    let subs = get("SELECT value FROM setting WHERE key = 'playback.subtitles'").await.unwrap_or_else(|| "en".into());
+    (audio, subs)
 }
 
 #[tauri::command]
 pub async fn get_player_prefs(state: tauri::State<'_, AppState>) -> Result<PlayerPrefs, String> {
-    Ok(PlayerPrefs { player: preferred_player(&state.db).await, available: external_players() })
+    let (audio, subtitles) = languages(&state.db).await;
+    Ok(PlayerPrefs { player: preferred_player(&state.db).await, available: external_players(), audio, subtitles })
+}
+
+#[tauri::command]
+pub async fn set_languages(state: tauri::State<'_, AppState>, audio: String, subtitles: String) -> Result<(), String> {
+    let valid = |s: &str| (2..=3).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase());
+    if !valid(&audio) || !(subtitles == "off" || valid(&subtitles)) {
+        return Err("Unknown language.".into());
+    }
+    db::set_setting(&state.db, "playback.audio", &audio).await.map_err(msg)?;
+    db::set_setting(&state.db, "playback.subtitles", &subtitles).await.map_err(msg)
+}
+
+/// A subtitle file picked by the user, served as WebVTT for the built-in player.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedSubtitle {
+    url: String,
+    label: String,
+}
+
+#[tauri::command]
+pub async fn pick_subtitle_file(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Option<PickedSubtitle>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .set_title("Load subtitles")
+            .add_filter("Subtitles", &["srt", "ass", "ssa", "vtt"])
+            .set_parent(&window)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Subtitles".into());
+    Ok(Some(PickedSubtitle { url: state.proxy.subtitle_url(&path), label }))
+}
+
+/// MPV / VLC arguments that pick the preferred audio and subtitle tracks in multi-track files.
+fn language_args(player: &str, audio: &str, subs: &str) -> Vec<String> {
+    let codes = |c: &str| match c {
+        "ja" => "jpn,ja,jp,japanese".to_owned(),
+        "en" => "eng,en,english".to_owned(),
+        other => other.to_owned(),
+    };
+    match player {
+        "mpv" => {
+            let mut args = vec![format!("--alang={}", codes(audio))];
+            if subs == "off" {
+                args.push("--sid=no".into());
+            } else {
+                args.push(format!("--slang={}", codes(subs)));
+                // English audio doesn't need English subtitles forced on (signs and songs still show).
+                if audio == subs {
+                    args.push("--subs-with-matching-audio=forced".into());
+                }
+            }
+            args
+        }
+        _ => {
+            let mut args = vec![format!("--audio-language={audio}")];
+            if subs == "off" {
+                args.push("--sub-track=-1".into());
+            } else {
+                args.push(format!("--sub-language={subs}"));
+            }
+            args
+        }
+    }
 }
 
 #[tauri::command]
@@ -95,9 +180,22 @@ pub async fn local_stream(state: tauri::State<'_, AppState>, media_id: i64, epis
         return Err(format!("{} is missing. It may have been moved or deleted.", path.display()));
     }
     let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // Subtitle files sitting next to the episode come along automatically.
+    let subtitles = scanner::sidecar_subtitles(&path)
+        .into_iter()
+        .map(|(sub, label)| streaming::StreamSubtitle {
+            url: state.proxy.subtitle_url(&sub),
+            lang: match label.as_str() {
+                "English" => "en".into(),
+                "Japanese" => "ja".into(),
+                _ => "und".into(),
+            },
+            label,
+        })
+        .collect();
     Ok(streaming::Stream {
-        sources: vec![streaming::StreamSource { url: state.proxy.file_url(&path), kind: "file".into(), label }],
-        subtitles: vec![],
+        sources: vec![streaming::StreamSource { url: state.proxy.file_url(&path), kind: "file".into(), label, audio: None }],
+        subtitles,
     })
 }
 
@@ -124,7 +222,8 @@ pub async fn play_local(app: AppHandle, state: tauri::State<'_, AppState>, media
     }
     let title = show_title(&state.db, media_id).await;
     let start = streaming::position(&state.db, media_id, episode).await.ok().flatten().filter(|s| *s > 30);
-    launch(&app, &player, &path, &format!("{title} · Episode {episode}"), None, start, Some((media_id, episode)))?;
+    let langs = languages(&state.db).await;
+    launch(&app, &player, &path, &format!("{title} · Episode {episode}"), None, start, Some((media_id, episode)), &langs)?;
     Ok(PlayOutcome { mode: player })
 }
 
@@ -134,7 +233,7 @@ async fn show_title(db: &db::Db, media_id: i64) -> String {
 
 /// Opens a proxied stream in MPV or VLC (from the built-in player's menu).
 #[tauri::command]
-pub fn open_external_player(
+pub async fn open_external_player(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     player: String,
@@ -148,9 +247,11 @@ pub fn open_external_player(
     if !url.starts_with(&origin) || subtitle.as_deref().is_some_and(|s| !s.starts_with(&origin)) {
         return Err("Only B-Anime streams can be opened externally.".into());
     }
-    launch(&app, &player, &url, &title, subtitle.as_deref(), None, media_id.zip(episode))
+    let langs = languages(&state.db).await;
+    launch(&app, &player, &url, &title, subtitle.as_deref(), None, media_id.zip(episode), &langs)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn launch(
     app: &AppHandle,
     player: &str,
@@ -159,10 +260,12 @@ fn launch(
     subtitle: Option<&str>,
     start: Option<i64>,
     track: Option<(i64, i64)>,
+    (audio, subs): &(String, String),
 ) -> Result<(), String> {
     let exe = find_player(player).ok_or_else(|| format!("{player} isn't installed."))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg(target);
+    cmd.args(language_args(player, audio, subs));
     match player {
         "mpv" => {
             cmd.arg(format!("--force-media-title={title}"));

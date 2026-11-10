@@ -1804,6 +1804,19 @@ a.slot:focus-visible {
   background: rgb(0 0 0 / 0.55);
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
 }
+/* While the controls show, subtitles move up out from behind them. */
+.player-video::-webkit-media-text-track-container {
+  transition: transform var(--t-med) var(--ease-out);
+}
+.player:not(.is-idle) .player-video::-webkit-media-text-track-container {
+  transform: translateY(-88px);
+}
+.player[data-subsize="s"] .player-video::cue {
+  font-size: clamp(14px, 1.8vw, 26px);
+}
+.player[data-subsize="l"] .player-video::cue {
+  font-size: clamp(22px, 3.2vw, 46px);
+}
 
 .player-top,
 .player-controls {
@@ -2007,6 +2020,48 @@ a.slot:focus-visible {
   font-weight: 600;
   background: var(--z2);
 }
+.menu-wide {
+  min-width: 240px;
+}
+.menu-action {
+  color: var(--z10) !important;
+  font-weight: 600;
+}
+.menu-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 0 6px 6px;
+}
+.menu .menu-row button {
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 12px;
+  background: var(--z2);
+}
+.menu .menu-row button[aria-pressed="true"] {
+  background: var(--z4);
+  color: var(--z10);
+  font-weight: 600;
+}
+.menu .menu-row .menu-value {
+  color: var(--z10);
+  background: transparent;
+}
+.menu-hint {
+  margin-left: 6px;
+  font: 500 10px/14px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--z5);
+}
+.segmented-sm button {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .menu-head {
   padding: 8px 12px 4px;
   font: 700 11px/16px var(--font-head);

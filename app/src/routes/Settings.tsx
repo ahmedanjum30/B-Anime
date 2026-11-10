@@ -2,8 +2,8 @@ import { For, Match, Show, Switch, createResource, createSignal, onCleanup } fro
 
 import {
   addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, libraryStatus, login, logout, onLibraryChanged, pickFolder, removeLibraryRoot, setPlayerPref,
-  unmatchedFiles,
+  installUpdate, libraryStatus, login, logout, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
+  setPlayerPref, unmatchedFiles,
 } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
@@ -371,6 +371,15 @@ function PlaybackPrefs() {
       mutate(prev);
     }
   };
+  const saveLangs = async (audio: string, subtitles: string) => {
+    const prev = prefs();
+    mutate((x) => (x ? { ...x, audio, subtitles } : x));
+    try {
+      await setLanguages(audio, subtitles);
+    } catch {
+      mutate(prev);
+    }
+  };
   const note = () =>
     ({
       builtin: "Plays inside B-Anime. Some MKV files need MPV.",
@@ -400,10 +409,55 @@ function PlaybackPrefs() {
             </select>
           </label>
         </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <p class="setting-title">Audio</p>
+            <p class="setting-desc">
+              Picks the matching audio track in dual-audio files and streams, and the Sub or Dub version of online
+              sources.
+            </p>
+          </div>
+          <div class="segmented" role="group" aria-label="Preferred audio">
+            <button type="button" aria-pressed={prefs()?.audio !== "en"} onClick={() => void saveLangs("ja", prefs()?.subtitles ?? "en")}>
+              Japanese
+            </button>
+            <button type="button" aria-pressed={prefs()?.audio === "en"} onClick={() => void saveLangs("en", prefs()?.subtitles ?? "off")}>
+              English
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <p class="setting-title">Subtitles</p>
+            <p class="setting-desc">Turned on automatically when a video has them in this language.</p>
+          </div>
+          <label class="select">
+            <span class="select-label">Language</span>
+            <select value={prefs()?.subtitles ?? "en"} onChange={(e) => void saveLangs(prefs()?.audio ?? "ja", e.currentTarget.value)}>
+              <For each={SUB_LANGS}>{([code, label]) => <option value={code}>{label}</option>}</For>
+            </select>
+          </label>
+        </div>
       </section>
     </Show>
   );
 }
+
+const SUB_LANGS: [string, string][] = [
+  ["en", "English"],
+  ["off", "Off"],
+  ["es", "Spanish"],
+  ["pt", "Portuguese"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["it", "Italian"],
+  ["ar", "Arabic"],
+  ["id", "Indonesian"],
+  ["ru", "Russian"],
+  ["ja", "Japanese"],
+];
 
 function About() {
   const { update, refetchUpdate } = homeStore;

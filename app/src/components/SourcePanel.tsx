@@ -11,6 +11,9 @@ export default function SourcePanel(props: {
   source: SourceState;
   /** The library already has episodes: keep an unmatched source to one quiet line. */
   quiet?: boolean;
+  /** Sub/Dub switch (anime): the current choice and how to change it. */
+  dub?: boolean;
+  onDubChange?: (dub: boolean) => void;
 }) {
   const s = () => props.source;
   const verb = () => (s().kind() === "anime" ? "watch" : "read");
@@ -35,7 +38,7 @@ export default function SourcePanel(props: {
     setSearching(true);
     setError(null);
     try {
-      setResults(await searchSource(ext, query().trim()));
+      setResults(await searchSource(ext, query().trim(), s().isDub()));
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -46,7 +49,7 @@ export default function SourcePanel(props: {
     const ext = s().ext();
     if (!ext) return;
     try {
-      await setSourceMatch(props.media.id, ext, r.id, r.title);
+      await setSourceMatch(props.media.id, ext, r.id, r.title, s().isDub());
       s().setMatch({ status: "matched", sourceId: r.id, title: r.title, auto: false });
       setPicking(false);
     } catch (err) {
@@ -56,7 +59,7 @@ export default function SourcePanel(props: {
   const retry = async () => {
     const ext = s().ext();
     if (!ext) return;
-    await clearSourceMatch(props.media.id, ext).catch(() => {});
+    await clearSourceMatch(props.media.id, ext, s().isDub()).catch(() => {});
     void s().rematch();
   };
 
@@ -86,6 +89,16 @@ export default function SourcePanel(props: {
                     <For each={s().usable()}>{(e) => <option value={e.id}>{e.name}</option>}</For>
                   </select>
                 </label>
+              </Show>
+              <Show when={s().kind() === "anime" && props.onDubChange}>
+                <div class="segmented segmented-sm" role="group" aria-label="Audio">
+                  <button type="button" aria-pressed={!props.dub} onClick={() => props.onDubChange?.(false)} title="Original Japanese audio with subtitles">
+                    Sub
+                  </button>
+                  <button type="button" aria-pressed={!!props.dub} onClick={() => props.onDubChange?.(true)} title="English dub">
+                    Dub
+                  </button>
+                </div>
               </Show>
               <Switch>
                 <Match when={s().match.loading}>

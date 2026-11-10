@@ -43,7 +43,9 @@ Updates are checked at the manifest URL the user installed from.
 
 ```js
 class Provider {
-  // query: { query: string }
+  // query: { query: string, dub: boolean }
+  // `dub` is true when the user picked "Dub" (English audio). Return the dubbed entries if the
+  // site lists them separately; ignore it if the site has no dubs.
   // → [{ id, title, image?, year? }]
   async search(query) {}
 
@@ -52,8 +54,11 @@ class Provider {
   async episodes(id) {}
 
   // episodeId: an episode's id
-  // → { headers?, sources: [{ url, type: "hls" | "mp4", quality?, label? }],
+  // → { headers?, sources: [{ url, type: "hls" | "mp4", quality?, label?, audio? }],
   //     subtitles?: [{ url, lang, label?, format?: "vtt" | "ass" | "srt" }] }
+  // `audio` ("ja"/"sub" or "en"/"dub") marks a source's audio language when an episode offers
+  // both; the player starts on the user's preferred one and shows an Audio menu.
+  // HLS streams with alternate audio tracks need nothing extra: the player lists those itself.
   async sources(episodeId) {}
 }
 ```
