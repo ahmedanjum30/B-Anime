@@ -32,6 +32,8 @@ pub struct UpNext {
     pub resume_s: Option<i64>,
     /// Episodes watched / total, 0..=1.
     pub progress: f64,
+    /// How much of this episode has been watched, 0..=1 (0 when not started).
+    pub episode_progress: f64,
     pub mark: Option<Mark>,
     /// Evidence of where the episode comes from: the file name, or none when it isn't in the library.
     pub source: Option<String>,
@@ -82,7 +84,16 @@ struct UpNextRow {
     progress: i64,
     path: Option<String>,
     position_s: Option<i64>,
+    played_duration_s: Option<i64>,
     aired_at: Option<DateTime<Utc>>,
+}
+
+/// Share of an episode watched: the saved position over the length the player measured,
+/// falling back to AniList's per-episode minutes.
+fn episode_share(position_s: Option<i64>, duration_s: Option<i64>, duration_min: Option<i64>) -> f64 {
+    let pos = position_s.unwrap_or(0).max(0) as f64;
+    let len = duration_s.filter(|d| *d > 0).or_else(|| duration_min.map(|m| m * 60)).unwrap_or(0) as f64;
+    if pos <= 0.0 || len <= 0.0 { 0.0 } else { (pos / len).min(1.0) }
 }
 
 #[derive(sqlx::FromRow)]
@@ -114,7 +125,7 @@ pub async fn load(db: &Db) -> Result<HomeData> {
     let rows: Vec<UpNextRow> = sqlx::query_as(
         r#"
         SELECT m.id AS media_id, m.title, m.cover_url, m.banner_url, m.color, m.episodes, m.duration_min,
-               e.progress, MIN(f.path) AS path, p.position_s, a.airs_at AS aired_at
+               e.progress, MIN(f.path) AS path, p.position_s, p.duration_s AS played_duration_s, a.airs_at AS aired_at
         FROM list_entry e
         JOIN media m          ON m.id = e.media_id
         LEFT JOIN local_file f ON f.media_id = e.media_id AND f.episode = e.progress + 1
@@ -150,6 +161,7 @@ pub async fn load(db: &Db) -> Result<HomeData> {
                 duration_min: r.duration_min,
                 resume_s: r.position_s.filter(|s| *s > 0),
                 progress: ratio(r.progress, r.episodes),
+                episode_progress: episode_share(r.position_s, r.played_duration_s, r.duration_min),
                 mark: pick_mark(is_new, is_final),
                 source: r.path.as_deref().map(file_name),
             }
@@ -269,6 +281,7 @@ pub fn sample(now: DateTime<Utc>) -> HomeData {
         duration_min: Some(dur),
         resume_s: resume,
         progress: ratio(ep - 1, total),
+        episode_progress: episode_share(resume, None, Some(dur)),
         mark,
         source: Some(file.into()),
     };

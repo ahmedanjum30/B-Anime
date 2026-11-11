@@ -126,6 +126,7 @@ export function browserPreviewHome(now = new Date()): HomeData {
   ): UpNext => ({
     mediaId, title, color, episode, totalEpisodes, resumeS, mark, source,
     coverUrl: null, bannerUrl: null, durationMin: 24, progress: (episode - 1) / totalEpisodes,
+    episodeProgress: resumeS ? Math.min(1, resumeS / (24 * 60)) : 0,
   });
   const slot = (
     mediaId: number, title: string, color: string, episode: number, airsAt: string,

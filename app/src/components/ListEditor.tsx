@@ -1,4 +1,4 @@
-import { For, Match, Switch, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createSignal } from "solid-js";
 import { A } from "@solidjs/router";
 
 import { Minus, Plus } from "../lib/icons";
@@ -46,6 +46,7 @@ export default function ListEditor(props: { media: Media; saver: EntrySaver; tot
     if (!Number.isNaN(v) && v !== e()?.progress) s().save({ progress: v });
   };
   const step = (d: number) => s().save({ progress: (e()?.progress ?? 0) + d }, 600);
+  const [confirming, setConfirming] = createSignal(false);
 
   return (
     <section class="list-editor" aria-label="Your list">
@@ -115,6 +116,37 @@ export default function ListEditor(props: { media: Media; saver: EntrySaver; tot
                   <span class="step-of">/ 10</span>
                 </div>
               </div>
+
+              <Show
+                when={confirming()}
+                fallback={
+                  <button type="button" class="editor-remove" onClick={() => setConfirming(true)}>
+                    Remove from list
+                  </button>
+                }
+              >
+                <div class="editor-confirm" role="group" aria-label="Remove from list">
+                  <p>
+                    Remove <strong>{props.media.title.userPreferred}</strong> from your AniList list? Its status,{" "}
+                    {anime() ? "episode" : "chapter"} progress and score there are deleted.
+                  </p>
+                  <div class="editor-confirm-actions">
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm"
+                      disabled={s().state() === "saving"}
+                      onClick={async () => {
+                        if (await s().remove()) setConfirming(false);
+                      }}
+                    >
+                      {s().state() === "saving" ? "Removing…" : "Remove"}
+                    </button>
+                    <button type="button" class="btn btn-quiet btn-sm" onClick={() => setConfirming(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </Show>
             </>
           )}
         </Match>
@@ -122,6 +154,7 @@ export default function ListEditor(props: { media: Media; saver: EntrySaver; tot
 
       <p class="save-state" role="status" data-state={s().state()} hidden={s().state() === "idle"}>
         <Switch>
+          <Match when={s().state() === "saving" && confirming()}>Removing from AniList…</Match>
           <Match when={s().state() === "saving"}>Saving to AniList…</Match>
           <Match when={s().state() === "error"}>{s().error()}</Match>
           <Match when={s().state() === "saved" && s().savedAt()}>Saved to AniList {fmtAgo(s().savedAt()!, now())}</Match>

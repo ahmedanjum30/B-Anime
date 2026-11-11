@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createSignal } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 
 import { findSource, inTauri, listExtensions, sourceItems } from "./api";
 import type { ExtKind, InstalledExtension, Media, SourceItem } from "./types";
@@ -58,9 +58,26 @@ export function createSource(
     const d = kind() === "anime" && dub();
     return m && e ? { id: m.id, ext: e, dub: d } : null;
   }, null, { equals: (a, b) => a?.id === b?.id && a?.ext === b?.ext && a?.dub === b?.dub });
-  const [match, { refetch: rematch, mutate: setMatch }] = createResource(matchKey, (k) => {
+  // Lookups never leave their resource in an error state: Solid rethrows a failed resource's
+  // error from every read, so one source failing (a site down) used to break the episode list
+  // for whichever source was picked next until the page was reloaded. Errors are kept beside
+  // the value instead, and a reply for a source that's no longer selected is ignored.
+  const [matchError, setMatchError] = createSignal<unknown>(undefined);
+  let matchSeq = 0;
+  const [matchRes, { refetch: rematch, mutate: setMatch }] = createResource(matchKey, async (k) => {
+    const seq = ++matchSeq;
+    setMatchError(undefined);
     const m = media()!;
-    return findSource(k.id, k.ext, searchTitles(m), m.seasonYear ?? m.startDate.year, k.dub);
+    try {
+      return await findSource(k.id, k.ext, searchTitles(m), m.seasonYear ?? m.startDate.year, k.dub);
+    } catch (e) {
+      if (seq === matchSeq) setMatchError(e);
+      return undefined;
+    }
+  });
+  const match = Object.assign(() => matchRes(), {
+    get loading() { return matchRes.loading; },
+    get error() { return matchError(); },
   });
   /** Whether the current match is for the dub (what the player should be told). */
   const isDub = () => matchKey()?.dub ?? false;
@@ -70,7 +87,27 @@ export function createSource(
     const e = ext();
     return mt?.status === "matched" && e ? { ext: e, sourceId: mt.sourceId } : null;
   }, null, { equals: (a, b) => a?.ext === b?.ext && a?.sourceId === b?.sourceId });
-  const [items, { refetch: reloadItems }] = createResource(itemsKey, (k) => sourceItems(k.ext, k.sourceId));
+  const [itemsError, setItemsError] = createSignal<unknown>(undefined);
+  let itemsSeq = 0;
+  const [itemsRes, { refetch: reloadItems }] = createResource(itemsKey, async (k) => {
+    const seq = ++itemsSeq;
+    setItemsError(undefined);
+    try {
+      return await sourceItems(k.ext, k.sourceId);
+    } catch (e) {
+      if (seq === itemsSeq) setItemsError(e);
+      return undefined;
+    }
+  });
+  const items = Object.assign(() => itemsRes(), {
+    get loading() { return itemsRes.loading; },
+    get error() { return itemsError(); },
+  });
+  // Switching to another source (or show) drops the last one's errors straight away.
+  createEffect(on(matchKey, () => {
+    setMatchError(undefined);
+    setItemsError(undefined);
+  }, { defer: true }));
 
   /** Source items by whole number (AniList progress is whole episodes/chapters). */
   const byNumber = createMemo(() => {

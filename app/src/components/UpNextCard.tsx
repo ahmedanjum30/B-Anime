@@ -48,8 +48,8 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
         <p class="upnext-source" data-missing={it().source ? undefined : ""} title={it().source ?? undefined}>
           {it().source ?? "Not in your library"}
         </p>
-        <div class="progress" aria-hidden="true">
-          <i style={{ "--p": it().progress }} />
+        <div class="progress" aria-hidden="true" title={it().episodeProgress > 0 ? `${Math.round(it().episodeProgress * 100)}% of this episode watched` : undefined}>
+          <i style={{ "--p": it().episodeProgress }} />
         </div>
       </div>
     </button>

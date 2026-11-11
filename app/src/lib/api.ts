@@ -136,6 +136,12 @@ export async function saveEntry(mediaId: number, change: EntryChange): Promise<L
   return call<ListEntry>("save_entry", { mediaId, change });
 }
 
+/** Removes the show from the user's AniList list (status, progress, score and notes). */
+export async function deleteEntry(mediaId: number): Promise<void> {
+  if (!inTauri) return void (await new Promise((r) => setTimeout(r, 300)));
+  return call<void>("delete_entry", { mediaId });
+}
+
 /** True inside the Tauri webview; false when the UI runs in a plain browser (vite dev). */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 

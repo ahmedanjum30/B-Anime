@@ -1,6 +1,6 @@
 import { createEffect, createSignal, on, onCleanup } from "solid-js";
 
-import { errorText, saveEntry } from "./api";
+import { deleteEntry, errorText, saveEntry } from "./api";
 import type { EntryChange, ListEntry, ListStatus } from "./types";
 
 const WATCHING: ListStatus[] = ["CURRENT", "REPEATING", "PLANNING", "PAUSED"];
@@ -93,7 +93,27 @@ export function createEntrySaver(opts: {
     }
   }
 
-  return { entry, save, state, error, savedAt };
+  /** Takes the show off the list on AniList. Any unsent edit is dropped first. */
+  async function remove(): Promise<boolean> {
+    clearTimeout(timer);
+    pending = {};
+    setState("saving");
+    setError(null);
+    try {
+      await deleteEntry(opts.mediaId());
+      confirmed = null;
+      setEntry(null);
+      setState("idle");
+      opts.notify("Removed from your AniList list.");
+      return true;
+    } catch (e) {
+      setError(errorText(e));
+      setState("error");
+      return false;
+    }
+  }
+
+  return { entry, save, remove, state, error, savedAt };
 }
 
 export type EntrySaver = ReturnType<typeof createEntrySaver>;

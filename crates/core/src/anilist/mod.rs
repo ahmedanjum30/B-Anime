@@ -19,6 +19,7 @@ const ENDPOINT: &str = "https://graphql.anilist.co";
 pub struct Client {
     http: reqwest::Client,
     token: Option<String>,
+    endpoint: String,
 }
 
 impl Client {
@@ -28,13 +29,19 @@ impl Client {
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| Error::Network(e.to_string()))?;
-        Ok(Self { http, token })
+        Ok(Self { http, token, endpoint: ENDPOINT.to_owned() })
+    }
+
+    /// Tests only: talk to a stand-in GraphQL server instead of AniList.
+    #[cfg(test)]
+    pub fn with_endpoint(token: Option<String>, endpoint: &str) -> Result<Self> {
+        Ok(Self { endpoint: endpoint.to_owned(), ..Self::new(token)? })
     }
 
     /// Runs a GraphQL query, waiting out AniList's rate limit (90/min) when it hits.
     pub async fn query<T: DeserializeOwned>(&self, query: &str, variables: Value) -> Result<T> {
         for attempt in 0..3 {
-            let mut req = self.http.post(ENDPOINT).json(&json!({ "query": query, "variables": variables }));
+            let mut req = self.http.post(&self.endpoint).json(&json!({ "query": query, "variables": variables }));
             if let Some(token) = &self.token {
                 req = req.bearer_auth(token);
             }

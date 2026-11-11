@@ -1101,6 +1101,41 @@ code {
 .editor-note {
   color: var(--z8);
 }
+/* Removing from the list: a quiet text action that expands into an inline confirmation. */
+.editor-remove {
+  align-self: flex-start;
+  padding: 2px 0;
+  color: var(--z6);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: var(--z4);
+  text-underline-offset: 3px;
+  transition: color var(--t-fast) var(--ease-out);
+}
+.editor-remove:hover,
+.editor-remove:focus-visible {
+  color: var(--z10);
+  text-decoration-color: var(--red);
+}
+.editor-confirm {
+  display: grid;
+  gap: var(--u);
+  padding: calc(var(--u) * 1.5);
+  border: 1px solid var(--z4);
+  border-radius: 6px;
+  background: var(--z3);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--z8);
+}
+.editor-confirm strong {
+  color: var(--z10);
+  font-weight: 600;
+}
+.editor-confirm-actions {
+  display: flex;
+  gap: var(--u);
+}
 .editor-note a {
   color: var(--z10);
   text-decoration: underline;
@@ -1904,7 +1939,8 @@ a.slot:focus-visible {
 }
 .seek-buffered,
 .seek-played,
-.seek-chapter {
+.seek-chapter,
+.seek-cut {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -1916,8 +1952,35 @@ a.slot:focus-visible {
 .seek-played {
   background: var(--red);
 }
+/* Opening / ending / recap sections: solid amber ahead, covered by red once played, cut at both
+   ends so each reads as its own stretch of the episode. */
 .seek-chapter {
-  background: rgb(226 164 59 / 0.55);
+  background: rgb(226 164 59);
+}
+.seek-cut {
+  width: 2px;
+  margin-left: -1px;
+  background: rgb(0 0 0 / 0.75);
+}
+.seek-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgb(10 10 12 / 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.seek-tip b {
+  color: rgb(236 184 92);
+  font-weight: 600;
 }
 .seek-input,
 .volume-input {
@@ -2043,6 +2106,55 @@ a.slot:focus-visible {
 }
 .menu-wide {
   min-width: 240px;
+}
+/* An on/off setting inside a menu: label (with a hint line) and a small switch. */
+.menu .menu-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-weight: 400;
+  background: transparent;
+}
+.menu .menu-toggle[aria-checked="true"] {
+  font-weight: 400;
+  background: transparent;
+}
+.menu .menu-toggle:hover {
+  background: var(--z3);
+}
+.menu-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--z6);
+}
+.menu-switch {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--z4);
+  transition: background var(--t-fast) var(--ease-out);
+}
+.menu-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--z8);
+  transition: transform var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out);
+}
+.menu-toggle[aria-checked="true"] .menu-switch {
+  background: var(--red);
+}
+.menu-toggle[aria-checked="true"] .menu-switch::after {
+  transform: translateX(12px);
+  background: #fff;
 }
 .menu-action {
   color: var(--z10) !important;

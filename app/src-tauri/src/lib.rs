@@ -316,6 +316,16 @@ async fn save_entry(
     Ok(entry)
 }
 
+/// Removes a show from the user's AniList list and the local mirror.
+#[tauri::command]
+async fn delete_entry(app: AppHandle, state: tauri::State<'_, AppState>, media_id: i64) -> Result<(), String> {
+    let token = auth::load_token().map_err(msg)?.ok_or_else(|| msg(Error::Unauthorized))?;
+    let client = anilist::Client::new(Some(token)).map_err(msg)?;
+    media::delete_entry(&client, &state.db, media_id).await.map_err(msg)?;
+    let _ = app.emit(LIBRARY_CHANGED, ());
+    Ok(())
+}
+
 #[tauri::command]
 async fn get_account(state: tauri::State<'_, AppState>) -> Result<Account, String> {
     account(&state).await.map_err(msg)
@@ -496,6 +506,7 @@ pub fn run() {
             get_library,
             get_media,
             save_entry,
+            delete_entry,
             browse,
             get_schedule,
             find_source,

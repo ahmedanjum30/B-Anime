@@ -12,7 +12,10 @@ export interface UpNext {
   totalEpisodes: number | null;
   durationMin: number | null;
   resumeS: number | null;
+  /** Episodes watched / total, 0..1. */
   progress: number;
+  /** How much of this episode has been watched, 0..1. */
+  episodeProgress: number;
   mark: Mark | null;
   /** File name in the library, or null when the episode isn't in the library. */
   source: string | null;

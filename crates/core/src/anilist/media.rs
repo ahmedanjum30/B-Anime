@@ -215,6 +215,57 @@ pub async fn save_entry(client: &Client, db: &Db, media_id: i64, change: EntryCh
     Ok(entry)
 }
 
+const ENTRY_ID_QUERY: &str = r#"
+query ($mediaId: Int) {
+  Media(id: $mediaId) { mediaListEntry { id } }
+}"#;
+
+const DELETE_MUTATION: &str = r#"
+mutation ($id: Int) {
+  DeleteMediaListEntry(id: $id) { deleted }
+}"#;
+
+/// Removes the show from the signed-in user's AniList list (status, progress, score and notes
+/// go with it), then from the local mirror. Library files and watch positions stay. Succeeds
+/// when the show wasn't on the list to begin with.
+pub async fn delete_entry(client: &Client, db: &Db, media_id: i64) -> Result<()> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntryRef {
+        id: i64,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MediaRef {
+        media_list_entry: Option<EntryRef>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Lookup {
+        media: Option<MediaRef>,
+    }
+    #[derive(Deserialize)]
+    struct Deleted {
+        deleted: Option<bool>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Delete {
+        delete_media_list_entry: Option<Deleted>,
+    }
+
+    // AniList deletes by the entry's own id, which only the signed-in viewer's query reveals.
+    let lookup: Lookup = client.query(ENTRY_ID_QUERY, json!({ "mediaId": media_id })).await?;
+    if let Some(entry) = lookup.media.and_then(|m| m.media_list_entry) {
+        let done: Delete = client.query(DELETE_MUTATION, json!({ "id": entry.id })).await?;
+        if done.delete_media_list_entry.and_then(|d| d.deleted) != Some(true) {
+            return Err(Error::AniList("AniList didn't delete the entry".into()));
+        }
+    }
+    sqlx::query("DELETE FROM list_entry WHERE media_id = ?").bind(media_id).execute(db).await?;
+    Ok(())
+}
+
 /// The change that records `episode` as watched (or chapter as read), with the usual list rules:
 /// reaching the last one completes the show, starting a planned one moves it to Watching.
 /// `None` when the user is already at or past it.
@@ -287,6 +338,55 @@ pub async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in for AniList that knows one entry (id 555 for show 21) and records deletes.
+    async fn fake_anilist(deleted: std::sync::Arc<std::sync::Mutex<Vec<i64>>>) -> String {
+        use axum::{Json, Router, routing::post};
+        let app = Router::new().route(
+            "/",
+            post(move |Json(body): Json<Value>| {
+                let deleted = deleted.clone();
+                async move {
+                    let q = body["query"].as_str().unwrap_or_default();
+                    let vars = &body["variables"];
+                    Json(if q.contains("DeleteMediaListEntry") {
+                        deleted.lock().unwrap().push(vars["id"].as_i64().unwrap());
+                        json!({ "data": { "DeleteMediaListEntry": { "deleted": true } } })
+                    } else {
+                        let entry = (vars["mediaId"] == 21).then(|| json!({ "id": 555 }));
+                        json!({ "data": { "Media": { "mediaListEntry": entry } } })
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn deleting_removes_the_entry_on_anilist_and_locally() {
+        let db = crate::db::open_memory().await.unwrap();
+        for sql in [
+            "INSERT INTO media (id, kind, title) VALUES (21, 'ANIME', 'ONE PIECE'), (22, 'ANIME', 'Other')",
+            "INSERT INTO list_entry (media_id, status, progress) VALUES (21, 'CURRENT', 1180), (22, 'PLANNING', 0)",
+        ] {
+            sqlx::query(sql).execute(&db).await.unwrap();
+        }
+        let deleted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = Client::with_endpoint(Some("t".into()), &fake_anilist(deleted.clone()).await).unwrap();
+
+        delete_entry(&client, &db, 21).await.unwrap();
+        assert_eq!(*deleted.lock().unwrap(), [555], "deleted by the entry's id, not the show's");
+        assert!(local_entry(&db, 21).await.unwrap().is_none());
+        assert!(local_entry(&db, 22).await.unwrap().is_some(), "other shows stay");
+
+        // Not on the AniList list (already removed elsewhere): just drops the local copy.
+        delete_entry(&client, &db, 22).await.unwrap();
+        assert_eq!(deleted.lock().unwrap().len(), 1);
+        assert!(local_entry(&db, 22).await.unwrap().is_none());
+    }
 
     #[test]
     fn progress_rules() {

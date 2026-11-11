@@ -26,6 +26,14 @@ const SKIP_LABEL: Record<string, string> = {
   "mixed-ed": "Skip outro",
   recap: "Skip recap",
 };
+/** What a marked section of the timeline is, for its hover label. */
+const SECTION_NAME: Record<string, string> = {
+  op: "Opening",
+  "mixed-op": "Opening",
+  ed: "Ending",
+  "mixed-ed": "Ending",
+  recap: "Recap",
+};
 
 const stored = (key: string, fallback: number) => {
   try {
@@ -133,6 +141,15 @@ export default function Player() {
   const [fullscreen, setFullscreen] = createSignal(false);
   const [skips, setSkips] = createSignal<SkipTime[]>([]);
   const [countdown, setCountdown] = createSignal<number | null>(null);
+  /** Pointer over the timeline: where (0..1) and which time it points at. */
+  const [hover, setHover] = createSignal<{ x: number; t: number } | null>(null);
+  const pct = (t: number) => (duration() ? Math.min(100, Math.max(0, (t / duration()) * 100)) : 0);
+  const sectionAt = (t: number) => skips().find((s) => t >= s.start && t < s.end);
+  const onSeekHover = (e: PointerEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    setHover({ x, t: x * duration() });
+  };
 
   const destroy = () => {
     hls?.destroy();
@@ -425,6 +442,24 @@ export default function Player() {
     if (s) video.currentTime = s.end;
   };
 
+  // ── Auto-skip: jump over each opening / ending / recap once as playback reaches it.
+  // On unless the viewer turned it off.
+  const [autoSkip, setAutoSkipSignal] = createSignal(stored("banime.autoskip", 1) === 1);
+  const setAutoSkip = (on: boolean) => {
+    setAutoSkipSignal(on);
+    store("banime.autoskip", on ? 1 : 0);
+  };
+  /** Sections already skipped (or seeked back into) this episode; never skipped twice. */
+  let autoSkipped = new Set<number>();
+  createEffect(on(skips, () => (autoSkipped = new Set())));
+  createEffect(() => {
+    const s = activeSkip();
+    if (!s || !autoSkip() || !playing() || autoSkipped.has(s.start)) return;
+    autoSkipped.add(s.start);
+    video.currentTime = s.end;
+    notify(`Skipped the ${(SECTION_NAME[s.kind] ?? "section").toLowerCase()}.`);
+  });
+
   // ── Auto-next
   let tick: number | undefined;
   const onEnded = () => {
@@ -698,19 +733,31 @@ export default function Player() {
       </Show>
 
       <div class="player-controls" onPointerDown={(e) => e.stopPropagation()}>
-        <div class="seek">
+        <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => setHover(null)}>
           <div class="seek-track" aria-hidden="true">
-            <div class="seek-buffered" style={{ width: `${duration() ? (buffered() / duration()) * 100 : 0}%` }} />
-            <div class="seek-played" style={{ width: `${duration() ? (time() / duration()) * 100 : 0}%` }} />
+            <div class="seek-buffered" style={{ width: `${pct(buffered())}%` }} />
+            {/* Openings, endings and recaps: amber until played, then red like the rest. */}
+            <For each={skips()}>
+              {(s) => <div class="seek-chapter" style={{ left: `${pct(s.start)}%`, width: `${pct(s.end) - pct(s.start)}%` }} />}
+            </For>
+            <div class="seek-played" style={{ width: `${pct(time())}%` }} />
             <For each={skips()}>
               {(s) => (
-                <div
-                  class="seek-chapter"
-                  style={{ left: `${duration() ? (s.start / duration()) * 100 : 0}%`, width: `${duration() ? ((s.end - s.start) / duration()) * 100 : 0}%` }}
-                />
+                <>
+                  <i class="seek-cut" style={{ left: `${pct(s.start)}%` }} />
+                  <i class="seek-cut" style={{ left: `${pct(s.end)}%` }} />
+                </>
               )}
             </For>
           </div>
+          <Show when={hover() && duration() ? hover() : null}>
+            {(h) => (
+              <span class="seek-tip num" style={{ left: `clamp(40px, ${h().x * 100}%, calc(100% - 40px))` }}>
+                <Show when={sectionAt(h().t)}>{(s) => <b>{SECTION_NAME[s().kind] ?? "Section"}</b>}</Show>
+                {fmtClock(h().t)}
+              </span>
+            )}
+          </Show>
           <input
             type="range"
             class="seek-input"
@@ -835,13 +882,25 @@ export default function Player() {
               </Show>
             </div>
 
-            <Show when={levels().length > 1 || (stream()?.sources.length ?? 0) > 1}>
-              <div class="menu-wrap">
-                <button type="button" class="icon-btn" aria-haspopup="menu" aria-expanded={menu() === "quality"} onClick={() => setMenu(menu() === "quality" ? null : "quality")} aria-label="Quality and source">
+            <div class="menu-wrap">
+                <button type="button" class="icon-btn" aria-haspopup="menu" aria-expanded={menu() === "quality"} onClick={() => setMenu(menu() === "quality" ? null : "quality")} aria-label="Settings">
                   <Settings2 size={20} stroke-width={2} />
                 </button>
                 <Show when={menu() === "quality"}>
                   <div class="menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      class="menu-toggle"
+                      aria-checked={autoSkip()}
+                      onClick={() => setAutoSkip(!autoSkip())}
+                    >
+                      <span>
+                        Auto-skip
+                        <span class="menu-sub">Openings, endings and recaps</span>
+                      </span>
+                      <span class="menu-switch" aria-hidden="true" />
+                    </button>
                     <Show when={levels().length > 1}>
                       <p class="menu-head">Quality</p>
                       <button type="button" role="menuitemradio" aria-checked={level() === -1} onClick={() => chooseLevel(-1)}>Auto</button>
@@ -865,8 +924,7 @@ export default function Player() {
                     </Show>
                   </div>
                 </Show>
-              </div>
-            </Show>
+            </div>
 
             <Show when={players()?.length}>
               <div class="menu-wrap">
