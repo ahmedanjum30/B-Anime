@@ -412,16 +412,18 @@ mod tests {
     use super::*;
     use axum::{Router, routing::get as route};
 
-    #[tokio::test]
-    async fn the_starter_repository_parses() {
-        let base = serve(
-            Router::new()
-                .route("/docs/repository.json", route(|| async { include_str!("../../../../docs/repository.json") })),
-        )
-        .await;
-        let repo = read_repo(&format!("{base}/docs/repository.json"), test_limits()).await.unwrap();
-        assert_eq!(repo.name.as_deref(), Some("B-Anime"));
-        assert!(repo.extensions.is_empty());
+    #[test]
+    fn the_official_repository_has_its_keys() {
+        let repo: serde_json::Value = serde_json::from_str(include_str!("../../../../docs/repository.json")).unwrap();
+        for key in ["name", "description"] {
+            assert!(repo[key].is_string(), "repository.json: `{key}` must be a string");
+        }
+        let extensions = repo["extensions"].as_array().expect("repository.json: `extensions` must be a list");
+        for (i, entry) in extensions.iter().enumerate() {
+            for key in ["manifestUrl", "id", "name", "version", "kind", "author", "language", "description"] {
+                assert!(entry[key].is_string(), "repository.json: extension {i} is missing `{key}`");
+            }
+        }
     }
 
     #[test]

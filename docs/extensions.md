@@ -111,9 +111,10 @@ Users add repositories in **Extensions → Repositories**.
 
 B-Anime's own repository, [`docs/repository.json`](repository.json), is always included and has
 its own **B-Anime** panel at the top of **Browse**. It lists extensions made by the project, which
-only use legal, freely available sources. To publish one there, put its folder under
-`docs/examples/` (or anywhere in `docs/`) and add an entry to that file; installed copies of
-B-Anime see it as soon as it's on the `main` branch.
+only use legal, freely available sources. To publish one there, put its `manifest.json` and
+`main.js` in `docs/sources/<id>/` and add an entry to that file with
+`"manifestUrl": "sources/<id>/manifest.json"`; installed copies of B-Anime see it as soon as
+it's on the `main` branch.
 
 ## Testing your extension locally
 
@@ -161,9 +162,9 @@ Extensions screen marks them as converted.
 
 ## Example
 
-[`docs/examples/mock-heaven`](examples/mock-heaven) is a learning extension that reads a static
-mock site. Install it by pasting its manifest URL:
+[`docs/sources/mock-heaven`](sources/mock-heaven) is a learning extension that reads a static
+mock site. It's listed in B-Anime's own repository, or install it by pasting its manifest URL:
 
 ```
-https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/examples/mock-heaven/manifest.json
+https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/sources/mock-heaven/manifest.json
 ```

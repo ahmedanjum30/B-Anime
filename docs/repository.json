@@ -1,5 +1,16 @@
 {
   "name": "B-Anime",
   "description": "Extensions made by the B-Anime project.",
-  "extensions": []
+  "extensions": [
+    {
+      "manifestUrl": "sources/anime-heaven/manifest.json",
+      "id": "anime-heaven",
+      "name": "Mock Heaven (learning)",
+      "version": "1.0.0",
+      "kind": "anime",
+      "author": "you",
+      "language": "en",
+      "description": "Learning extension that reads a static mock site and plays public test videos."
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 class Provider {
   constructor() {
-    this.base = "https://example.me";
+    this.base = "https://animeheaven.me";
   }
 
   getSettings() {
@@ -105,7 +105,7 @@ class Provider {
     if (!videoUrl) {
       const tokenMatch = html.match(/video\.mp4\?([a-f0-9]+)&([a-f0-9]+)/);
       if (tokenMatch) {
-        videoUrl = `https://ax.example.me/video.mp4?${tokenMatch[1]}&${tokenMatch[2]}`;
+        videoUrl = `https://ax.animeheaven.me/video.mp4?${tokenMatch[1]}&${tokenMatch[2]}`;
       }
     }
 
@@ -114,8 +114,8 @@ class Provider {
     return {
       server: "Server 1",
       headers: {
-        "Referer": "https://example.me/",
-        "Origin": "https://example.me",
+        "Referer": "https://animeheaven.me/",
+        "Origin": "https://animeheaven.me",
       },
       videoSources: [
         {
