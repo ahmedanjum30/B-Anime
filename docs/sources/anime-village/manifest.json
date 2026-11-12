@@ -1,0 +1,12 @@
+{
+  "id": "anime-village",
+  "name": "AnimeVillage",
+  "version": "1.0.0",
+  "kind": "anime",
+  "author": "you",
+  "icon": "https://animevillage.org/favicon.ico",
+  "description": "AnimeVillage is an online streaming provider for subbed and dubbed anime in english.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1
+}
