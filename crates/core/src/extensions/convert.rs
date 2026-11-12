@@ -185,7 +185,6 @@ mod tests {
 
     /// An online-stream provider in that format, using the runtime's globals.
     const ANIME_TS: &str = r#"
-        /// <reference path="./online-streaming-provider.d.ts" />
         class Provider {
             api = "https://example.invalid"
             getSettings(): Settings {

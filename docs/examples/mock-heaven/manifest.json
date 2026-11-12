@@ -1,0 +1,11 @@
+{
+  "id": "mock-heaven",
+  "name": "Mock Heaven (learning)",
+  "version": "1.0.0",
+  "kind": "anime",
+  "author": "you",
+  "description": "Learning extension that reads a static mock site and plays public test videos.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1
+}

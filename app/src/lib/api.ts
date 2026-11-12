@@ -90,6 +90,12 @@ export const listExtensions = () => (inTauri ? call<InstalledExtension[]>("list_
 export const previewExtension = (url: string) => call<ExtManifest>("preview_extension", { url });
 export const installExtension = (url: string) => call<InstalledExtension>("install_extension", { url });
 export const updateExtension = (id: string) => call<InstalledExtension>("update_extension", { id });
+/** B-Anime's own repository (legal sources), shown in its own panel. */
+export const officialExtensionRepo = () => call<string>("official_extension_repo");
+/** Development builds only: pick a manifest on disk and install it. Null when cancelled. */
+export const installLocalExtension = () => call<InstalledExtension | null>("install_local_extension");
+/** Installed from a file on this computer (development builds). */
+export const isLocalExtension = (ext: { sourceUrl: string }) => ext.sourceUrl.startsWith("file:");
 export const checkExtensionUpdates = () =>
   inTauri ? call<{ id: string; version: string }[]>("check_extension_updates") : Promise.resolve([]);
 export const setExtensionEnabled = (id: string, enabled: boolean) => call<void>("set_extension_enabled", { id, enabled });

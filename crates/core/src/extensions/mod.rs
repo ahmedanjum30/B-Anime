@@ -119,20 +119,70 @@ pub async fn fetch(manifest_url: &str, limits: Limits) -> Result<(Manifest, Stri
     let (manifest, code) = if convert::is_manifest(&raw) {
         convert::convert(&raw, &url, limits).await?
     } else {
-        let mut manifest: Manifest =
-            serde_json::from_value(raw).map_err(|e| Error::Extension(format!("the manifest isn't valid: {e}")))?;
-        manifest.origin = None;
-        if manifest.api_version != API_VERSION {
-            return Err(Error::Extension(format!(
-                "made for extension API v{}, this version of B-Anime supports v{API_VERSION}",
-                manifest.api_version
-            )));
-        }
+        let manifest = native_manifest(raw)?;
         let code_url = url
             .join(&manifest.code_url)
             .map_err(|e| Error::Extension(format!("bad codeUrl: {e}")))?;
         (manifest, download(&code_url, MAX_CODE_BYTES, limits).await?)
     };
+    verify(manifest, code, limits).await
+}
+
+fn native_manifest(raw: Value) -> Result<Manifest> {
+    let mut manifest: Manifest =
+        serde_json::from_value(raw).map_err(|e| Error::Extension(format!("the manifest isn't valid: {e}")))?;
+    manifest.origin = None;
+    if manifest.api_version != API_VERSION {
+        return Err(Error::Extension(format!(
+            "made for extension API v{}, this version of B-Anime supports v{API_VERSION}",
+            manifest.api_version
+        )));
+    }
+    Ok(manifest)
+}
+
+async fn read_local(path: &Path, cap: usize) -> Result<String> {
+    let meta = tokio::fs::metadata(path).await.map_err(|e| Error::Extension(format!("can't read {}: {e}", path.display())))?;
+    if meta.len() as usize > cap {
+        return Err(Error::Extension(format!("{} is larger than {} KB", path.display(), cap / 1024)));
+    }
+    tokio::fs::read_to_string(path).await.map_err(|e| Error::Extension(format!("can't read {}: {e}", path.display())))
+}
+
+/// Development builds only (the app enforces that): reads and checks an extension from a
+/// manifest on disk. Code given by a relative `codeUrl` / `payloadURI` is read from the
+/// manifest's folder; http(s) ones are downloaded as usual.
+pub async fn fetch_local(manifest_path: &Path, limits: Limits) -> Result<(Manifest, String)> {
+    let path = std::path::absolute(manifest_path).map_err(|e| Error::Extension(e.to_string()))?;
+    let base = reqwest::Url::from_file_path(&path).map_err(|_| Error::Extension(format!("not a file path: {}", path.display())))?;
+    let folder = path.parent().unwrap_or(Path::new("."));
+    let is_web = |s: &str| s.starts_with("http://") || s.starts_with("https://");
+    let mut raw: Value = serde_json::from_str(&read_local(&path, MAX_MANIFEST_BYTES).await?)
+        .map_err(|e| Error::Extension(format!("the manifest isn't valid JSON: {e}")))?;
+
+    let (manifest, code) = if convert::is_manifest(&raw) {
+        let payload_uri = raw.get("payloadURI").and_then(Value::as_str).unwrap_or_default().trim().to_owned();
+        let has_payload = raw.get("payload").and_then(Value::as_str).is_some_and(|p| !p.trim().is_empty());
+        if !has_payload && !payload_uri.is_empty() && !is_web(&payload_uri) {
+            raw["payload"] = Value::String(read_local(&folder.join(&payload_uri), MAX_CODE_BYTES).await?);
+        }
+        convert::convert(&raw, &base, limits).await?
+    } else {
+        let manifest = native_manifest(raw)?;
+        let code = if is_web(&manifest.code_url) {
+            let url = reqwest::Url::parse(&manifest.code_url).map_err(|e| Error::Extension(format!("bad codeUrl: {e}")))?;
+            download(&url, MAX_CODE_BYTES, limits).await?
+        } else {
+            read_local(&folder.join(&manifest.code_url), MAX_CODE_BYTES).await?
+        };
+        (manifest, code)
+    };
+    verify(manifest, code, limits).await
+}
+
+/// Checks an extension before it's installed: a valid id, and code that loads in the sandbox
+/// and has the methods its kind needs.
+async fn verify(manifest: Manifest, code: String, limits: Limits) -> Result<(Manifest, String)> {
     if !valid_id(&manifest.id) {
         return Err(Error::Extension(format!("invalid id {:?}: use lowercase letters, digits and dashes", manifest.id)));
     }
@@ -156,6 +206,24 @@ fn code_path(dir: &Path, id: &str) -> PathBuf {
 /// Installs (or replaces) an extension from its manifest URL.
 pub async fn install(db: &Db, dir: &Path, manifest_url: &str, limits: Limits) -> Result<Installed> {
     let (manifest, code) = fetch(manifest_url, limits).await?;
+    store(db, dir, manifest, code, manifest_url.trim()).await
+}
+
+/// Development builds only: installs (or reloads) an extension from a manifest on disk. Its
+/// source is recorded as a `file:` URL, which the update check skips.
+pub async fn install_local(db: &Db, dir: &Path, manifest_path: &Path, limits: Limits) -> Result<Installed> {
+    let (manifest, code) = fetch_local(manifest_path, limits).await?;
+    let path = std::path::absolute(manifest_path).map_err(|e| Error::Extension(e.to_string()))?;
+    let source = reqwest::Url::from_file_path(&path).map_err(|_| Error::Extension("not a file path".into()))?;
+    store(db, dir, manifest, code, source.as_str()).await
+}
+
+/// The manifest path of an extension installed from disk, if it was.
+pub fn local_source(ext: &Installed) -> Option<PathBuf> {
+    reqwest::Url::parse(&ext.source_url).ok().filter(|u| u.scheme() == "file").and_then(|u| u.to_file_path().ok())
+}
+
+async fn store(db: &Db, dir: &Path, manifest: Manifest, code: String, source_url: &str) -> Result<Installed> {
     tokio::fs::create_dir_all(dir).await?;
     // Write then rename, so a half-written script is never loaded.
     let tmp = dir.join(format!("{}.js.part", manifest.id));
@@ -170,7 +238,7 @@ pub async fn install(db: &Db, dir: &Path, manifest_url: &str, limits: Limits) ->
     )
     .bind(&manifest.id)
     .bind(json)
-    .bind(manifest_url.trim())
+    .bind(source_url)
     .execute(db)
     .await?;
     get(db, &manifest.id).await?.ok_or_else(|| Error::Extension("install didn't stick".into()))
@@ -247,6 +315,10 @@ pub async fn call(db: &Db, dir: &Path, id: &str, method: &str, args: &Value, lim
     let code = tokio::fs::read_to_string(code_path(dir, id)).await?;
     runtime::call(&code, method, args, limits).await
 }
+
+/// B-Anime's own repository: extensions made by the project, using legal, freely available
+/// sources. Always listed (in its own panel) and can't be removed.
+pub const OFFICIAL_REPO: &str = "https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/repository.json";
 
 /// The repository B-Anime starts with: its own examples (public test videos and placeholder
 /// pages). Users can remove it and add others.
@@ -341,48 +413,15 @@ mod tests {
     use axum::{Router, routing::get as route};
 
     #[tokio::test]
-    async fn the_documented_example_works() {
-        let code = include_str!("../../../../docs/examples/demo-streams/main.js");
-        let manifest: Manifest =
-            serde_json::from_str(include_str!("../../../../docs/examples/demo-streams/manifest.json")).unwrap();
-        assert_eq!(manifest.kind, ExtKind::Anime);
-        let limits = Limits::default();
-        let found = runtime::call(code, "search", &serde_json::json!([{ "query": "anything" }]), limits).await.unwrap();
-        let id = found.value[0]["id"].as_str().unwrap().to_owned();
-        let eps = runtime::call(code, "episodes", &serde_json::json!([id]), limits).await.unwrap();
-        let ep = eps.value[0]["id"].as_str().unwrap().to_owned();
-        let src = runtime::call(code, "sources", &serde_json::json!([ep]), limits).await.unwrap();
-        assert_eq!(src.value["sources"][0]["type"], "hls");
-
-        let manga = include_str!("../../../../docs/examples/demo-manga/main.js");
-        let chapters = runtime::call(manga, "chapters", &serde_json::json!(["demo"]), limits).await.unwrap();
-        let first = chapters.value[0]["id"].as_str().unwrap().to_owned();
-        let pages = runtime::call(manga, "pages", &serde_json::json!([first]), limits).await.unwrap();
-        assert_eq!(pages.value["pages"].as_array().unwrap().len(), 8);
-    }
-
-    #[tokio::test]
-    async fn the_starter_repository_lists_the_examples() {
+    async fn the_starter_repository_parses() {
         let base = serve(
             Router::new()
-                .route("/docs/repository.json", route(|| async { include_str!("../../../../docs/repository.json") }))
-                .route("/docs/examples/demo-streams/manifest.json", route(|| async {
-                    include_str!("../../../../docs/examples/demo-streams/manifest.json")
-                }))
-                .route("/docs/examples/demo-manga/manifest.json", route(|| async {
-                    include_str!("../../../../docs/examples/demo-manga/manifest.json")
-                })),
+                .route("/docs/repository.json", route(|| async { include_str!("../../../../docs/repository.json") })),
         )
         .await;
         let repo = read_repo(&format!("{base}/docs/repository.json"), test_limits()).await.unwrap();
-        assert_eq!(repo.extensions.len(), 2);
-        for entry in &repo.extensions {
-            // The listing must agree with the manifest it points at.
-            let manifest: Manifest = serde_json::from_str(&reqwest::get(&entry.manifest_url).await.unwrap().text().await.unwrap()).unwrap();
-            assert_eq!(entry.id.as_deref(), Some(manifest.id.as_str()));
-            assert_eq!(entry.version.as_deref(), Some(manifest.version.as_str()));
-            assert_eq!(entry.kind, Some(manifest.kind));
-        }
+        assert_eq!(repo.name.as_deref(), Some("B-Anime"));
+        assert!(repo.extensions.is_empty());
     }
 
     #[test]
@@ -464,6 +503,57 @@ mod tests {
         remove(&db, &dir, "test-source").await.unwrap();
         assert!(list(&db).await.unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn local_extensions_install_and_reload_from_disk() {
+        let root = std::env::temp_dir().join(format!("banime-local-ext-{}", std::process::id()));
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        // Ours: manifest + code next to it.
+        std::fs::write(
+            src.join("manifest.json"),
+            r#"{"id":"my-local","name":"Mine","version":"0.1.0","kind":"anime","codeUrl":"main.js","apiVersion":1}"#,
+        )
+        .unwrap();
+        let code = |n: u32| {
+            format!(
+                "class Provider {{ async search(){{ return [{{ id: 'a', title: 'v{n}' }}]; }} async episodes(){{ return []; }} async sources(){{ return {{ sources: [] }}; }} }}"
+            )
+        };
+        std::fs::write(src.join("main.js"), code(1)).unwrap();
+        // The single-manifest format with its TypeScript in a separate file.
+        std::fs::write(
+            src.join("single.json"),
+            r#"{"id":"single_one","name":"Single","version":"1.0.0","type":"manga-provider","language":"typescript","payloadURI":"single.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("single.ts"),
+            "class Provider { getSettings(): Settings { return {} } async search(o: QueryOptions) { return [] } async findChapters(id: string) { return [] } async findChapterPages(id: string) { return [] } }",
+        )
+        .unwrap();
+
+        let db = crate::db::open_memory().await.unwrap();
+        let dir = root.join("installed");
+        let limits = Limits::default();
+        let ext = install_local(&db, &dir, &src.join("manifest.json"), limits).await.unwrap();
+        assert_eq!(local_source(&ext).unwrap(), src.join("manifest.json"));
+        assert_eq!(call(&db, &dir, "my-local", "search", &serde_json::json!([{}]), limits).await.unwrap().value[0]["title"], "v1");
+
+        // Edit the code, reload from the same manifest.
+        std::fs::write(src.join("main.js"), code(2)).unwrap();
+        install_local(&db, &dir, &local_source(&ext).unwrap(), limits).await.unwrap();
+        assert_eq!(call(&db, &dir, "my-local", "search", &serde_json::json!([{}]), limits).await.unwrap().value[0]["title"], "v2");
+        // No update check against a file.
+        assert!(available_update(&ext, limits).await.is_err());
+
+        let single = install_local(&db, &dir, &src.join("single.json"), limits).await.unwrap();
+        assert_eq!((single.manifest.id.as_str(), single.manifest.kind), ("single-one", ExtKind::Manga));
+        assert_eq!(single.manifest.origin.as_deref(), Some("converted"));
+
+        assert!(install_local(&db, &dir, &src.join("missing.json"), limits).await.is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

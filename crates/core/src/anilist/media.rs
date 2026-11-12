@@ -190,7 +190,7 @@ pub async fn save_entry(client: &Client, db: &Db, media_id: i64, change: EntryCh
     }
     let saved = client.query::<Data>(SAVE_MUTATION, Value::Object(vars)).await?.save_media_list_entry;
 
-    ensure_media_row(db, media_id).await?;
+    fill_media_row(client, db, media_id).await?;
     let entry = ListEntry {
         status: saved.status,
         progress: saved.progress.unwrap_or(0),
@@ -295,26 +295,85 @@ pub async fn local_entry(db: &Db, id: i64) -> Result<Option<ListEntry>> {
     list_entry(db, id).await
 }
 
-/// A show added from its page may not be in `media` yet; fill it from the cached detail.
-pub async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media WHERE id = ?)")
+/// What Library and Home need about a show: enough to fill its `media` row.
+const BASICS_QUERY: &str = r#"
+query ($id: Int) {
+  Media(id: $id) {
+    id type format status episodes chapters duration bannerImage
+    title { userPreferred english }
+    coverImage { extraLarge large color }
+    nextAiringEpisode { episode }
+  }
+}"#;
+
+/// True when the show has no `media` row yet, or only the placeholder written when nothing
+/// was known about it ("#<id>", no cover).
+async fn media_row_needed(db: &Db, id: i64) -> Result<bool> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT title, cover_url FROM media WHERE id = ?")
         .bind(id)
-        .fetch_one(db)
+        .fetch_optional(db)
         .await?;
-    if exists {
-        return Ok(());
-    }
+    Ok(match row {
+        None => true,
+        Some((title, cover)) => cover.is_none() && title == format!("#{id}"),
+    })
+}
+
+async fn cached_detail(db: &Db, id: i64) -> Result<Option<Value>> {
     let json: Option<String> = sqlx::query_scalar("SELECT json FROM media_detail WHERE media_id = ?")
         .bind(id)
         .fetch_optional(db)
         .await?;
-    let m: Value = json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or(Value::Null);
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+}
+
+/// A show added from its page may not be in `media` yet; fill it from the cached detail.
+pub async fn ensure_media_row(db: &Db, id: i64) -> Result<()> {
+    if !media_row_needed(db, id).await? {
+        return Ok(());
+    }
+    let m = cached_detail(db, id).await?.unwrap_or(Value::Null);
+    write_media_row(db, id, &m).await
+}
+
+/// Like [`ensure_media_row`], but when nothing is cached (a show added straight from Discover
+/// or search, without opening its page) asks AniList, so Library shows its title and cover at
+/// once instead of a placeholder until the next sync.
+pub async fn fill_media_row(client: &Client, db: &Db, id: i64) -> Result<()> {
+    if !media_row_needed(db, id).await? {
+        return Ok(());
+    }
+    let m = match cached_detail(db, id).await? {
+        Some(m) => m,
+        None => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "PascalCase")]
+            struct Data {
+                media: Option<Value>,
+            }
+            match client.query::<Data>(BASICS_QUERY, json!({ "id": id })).await {
+                Ok(Data { media: Some(m) }) => m,
+                // Offline or AniList down: the placeholder stays until the next sync.
+                Ok(Data { media: None }) | Err(_) => Value::Null,
+            }
+        }
+    };
+    write_media_row(db, id, &m).await
+}
+
+async fn write_media_row(db: &Db, id: i64, m: &Value) -> Result<()> {
     let s = |v: &Value| v.as_str().map(str::to_owned);
     let n = |v: &Value| v.as_i64();
     sqlx::query(
         "INSERT INTO media (id, kind, title, title_english, cover_url, cover_thumb, banner_url, color, format, status,
                             episodes, chapters, duration_min, next_episode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, title = excluded.title,
+           title_english = excluded.title_english, cover_url = excluded.cover_url,
+           cover_thumb = excluded.cover_thumb, banner_url = excluded.banner_url, color = excluded.color,
+           format = excluded.format, status = excluded.status, episodes = excluded.episodes,
+           chapters = excluded.chapters, duration_min = excluded.duration_min,
+           next_episode = excluded.next_episode, updated_at = datetime('now')",
     )
     .bind(id)
     .bind(s(&m["type"]).unwrap_or_else(|| "ANIME".into()))
@@ -399,6 +458,48 @@ mod tests {
         let c = progress_change(Some(&at("PLANNING", 0)), 1, None).unwrap();
         assert_eq!(c.status.as_deref(), Some("CURRENT"));
         assert_eq!(progress_change(None, 1, Some(24)).unwrap().status.as_deref(), Some("CURRENT"));
+    }
+
+    #[tokio::test]
+    async fn shows_added_without_their_page_get_title_and_cover_at_once() {
+        use axum::{Json, Router, routing::post};
+        let app = Router::new().route(
+            "/",
+            post(|Json(body): Json<Value>| async move {
+                let id = body["variables"]["id"].as_i64().unwrap();
+                Json(json!({ "data": { "Media": {
+                    "id": id, "type": "ANIME", "format": "TV", "status": "FINISHED", "episodes": 25, "duration": 24,
+                    "title": { "userPreferred": format!("Show {id}"), "english": null },
+                    "coverImage": { "extraLarge": "xl.jpg", "large": "l.jpg", "color": "#abcdef" },
+                    "bannerImage": "b.jpg", "nextAiringEpisode": null
+                } } }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = Client::with_endpoint(Some("t".into()), &format!("http://{addr}/")).unwrap();
+        let db = crate::db::open_memory().await.unwrap();
+
+        // Never opened: nothing cached, so AniList is asked.
+        fill_media_row(&client, &db, 7).await.unwrap();
+        // A placeholder left by an earlier offline add is repaired.
+        sqlx::query("INSERT INTO media (id, kind, title) VALUES (8, 'ANIME', '#8')").execute(&db).await.unwrap();
+        fill_media_row(&client, &db, 8).await.unwrap();
+        // A real row is left alone.
+        sqlx::query("INSERT INTO media (id, kind, title, cover_url) VALUES (9, 'ANIME', 'Kept', 'k.jpg')").execute(&db).await.unwrap();
+        fill_media_row(&client, &db, 9).await.unwrap();
+
+        let rows: Vec<(i64, String, Option<String>, Option<i64>)> =
+            sqlx::query_as("SELECT id, title, cover_thumb, episodes FROM media ORDER BY id").fetch_all(&db).await.unwrap();
+        assert_eq!(
+            rows,
+            [
+                (7, "Show 7".into(), Some("l.jpg".into()), Some(25)),
+                (8, "Show 8".into(), Some("l.jpg".into()), Some(25)),
+                (9, "Kept".into(), None, None),
+            ]
+        );
     }
 
     #[tokio::test]

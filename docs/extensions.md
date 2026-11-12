@@ -109,6 +109,30 @@ A repository is a JSON array of manifest URLs, or of objects with a `manifestUrl
 
 Users add repositories in **Extensions → Repositories**.
 
+B-Anime's own repository, [`docs/repository.json`](repository.json), is always included and has
+its own **B-Anime** panel at the top of **Browse**. It lists extensions made by the project, which
+only use legal, freely available sources. To publish one there, put its folder under
+`docs/examples/` (or anywhere in `docs/`) and add an entry to that file; installed copies of
+B-Anime see it as soon as it's on the `main` branch.
+
+## Testing your extension locally
+
+Development builds of B-Anime can install an extension straight from files on your computer,
+so you can test changes without uploading them anywhere. Release builds can't: they only
+install from `https://` addresses.
+
+1. Run B-Anime from the source code: `cd app` then `npm run tauri dev`.
+2. Go to **Extensions → Installed** and choose **Install from a file (development build)**.
+3. Pick your manifest `.json`. B-Anime reads the code from the same folder: the file named in
+   `codeUrl` (`"codeUrl": "main.js"`) or, in the converted format, the code in `payload` or the
+   file named in `payloadURI`. A full `http(s)` address in either field is downloaded instead.
+4. Edit your files, then press **Reload** on the extension to read them from disk again. Use
+   **Try it** on the same row to run a search and see the results and your `console.log` output.
+
+A local extension shows **Local file** in its details, and the update check skips it. It runs in
+the same sandbox as any other extension: the files are read once, at install or reload, and the
+extension itself still can't read your files or reach this computer or your local network.
+
 ## Converted extensions
 
 B-Anime also installs extensions written in a second format and converts them when they're
@@ -137,9 +161,9 @@ Extensions screen marks them as converted.
 
 ## Example
 
-[`docs/examples/demo-streams`](examples/demo-streams) serves public test videos for any search.
-Install it with:
+[`docs/examples/mock-heaven`](examples/mock-heaven) is a learning extension that reads a static
+mock site. Install it by pasting its manifest URL:
 
 ```
-https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/examples/demo-streams/manifest.json
+https://raw.githubusercontent.com/ahmedanjum30/B-Anime/main/docs/examples/mock-heaven/manifest.json
 ```

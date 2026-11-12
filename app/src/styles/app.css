@@ -2450,6 +2450,26 @@ a.slot:focus-visible {
 .repo-intro {
   margin: calc(var(--u) * 3) 0 calc(var(--u) * 2);
 }
+/* Browse: B-Anime's own extensions first, then the user's repositories. */
+.ext-panel {
+  margin-top: calc(var(--u) * 4);
+}
+.ext-panel + .ext-panel {
+  margin-top: calc(var(--u) * 7);
+}
+.ext-panel-head {
+  display: grid;
+  gap: 2px;
+}
+.ext-panel-head .subhead {
+  margin-bottom: 0;
+}
+.ext-panel-official .ext-panel-head .subhead {
+  color: var(--z10);
+}
+.ext-panel .ext-grid {
+  margin-top: calc(var(--u) * 2);
+}
 .repo-rows {
   list-style: none;
   padding: 0;

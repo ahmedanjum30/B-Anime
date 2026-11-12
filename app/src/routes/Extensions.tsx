@@ -3,6 +3,7 @@ import { For, Match, Show, Switch, createMemo, createResource, createSignal } fr
 import {
   checkExtensionUpdates, errorText, getExtensionRepos, inTauri, installExtension, listExtensions, previewExtension,
   readExtensionRepo, removeExtension, setExtensionEnabled, setExtensionRepos, tryExtension, updateExtension,
+  installLocalExtension, isLocalExtension, officialExtensionRepo,
 } from "../lib/api";
 import { Plus, Search } from "../lib/icons";
 import { homeStore } from "../lib/store";
@@ -44,6 +45,17 @@ export default function Extensions() {
         ),
       ),
   );
+
+  // B-Anime's own repository, listed in its own panel and never removable.
+  type RepoState = { url: string; repo: Repo | null; error: string | null };
+  const [official, { refetch: reloadOfficial }] = createResource(async (): Promise<RepoState | null> => {
+    if (!inTauri) return null;
+    const url = await officialExtensionRepo();
+    return readExtensionRepo(url).then(
+      (repo) => ({ url, repo, error: null }),
+      (e) => ({ url, repo: null, error: errorText(e) }),
+    );
+  });
 
   const [installing, setInstalling] = createSignal<string | null>(null);
   const install = async (manifestUrl: string, name?: string) => {
@@ -96,14 +108,17 @@ export default function Extensions() {
             </Show>
           </button>
           <button type="button" role="tab" class="tab" aria-selected={tab() === "repos"} onClick={() => setTab("repos")}>
-            Repositories <span class="tab-count num">{repoUrls()?.length ?? 0}</span>
+            Repositories <span class="tab-count num">{(repoUrls() ?? []).filter((u) => u !== official()?.url).length + 1}</span>
           </button>
         </div>
 
         <Switch>
           <Match when={tab() === "browse"}>
             <Browse
-              repos={repos() ?? []}
+              official={official() ?? null}
+              officialLoading={official.loading}
+              onRetryOfficial={() => void reloadOfficial()}
+              repos={(repos() ?? []).filter((r) => r.url !== official()?.url)}
               loading={repos.loading}
               installed={installed() ?? []}
               installing={installing()}
@@ -155,11 +170,20 @@ export default function Extensions() {
               </Match>
             </Switch>
             <InstallFromUrl installedIds={() => installed()?.map((x) => x.id) ?? []} onInstall={install} />
+            <Show when={import.meta.env.DEV}>
+              <InstallFromFile
+                onInstalled={async (ext) => {
+                  notify(`Installed ${ext.name} from a file.`);
+                  await refetch();
+                }}
+              />
+            </Show>
           </Match>
 
           <Match when={tab() === "repos"}>
             <Repositories
-              urls={repoUrls() ?? []}
+              official={official() ?? null}
+              urls={(repoUrls() ?? []).filter((u) => u !== official()?.url)}
               repos={repos() ?? []}
               onSave={(next) => void saveRepos(next)}
               onReload={() => void reloadRepos()}
@@ -173,7 +197,12 @@ export default function Extensions() {
 
 // ── Browse: every extension from every repository ──────────────────────────────
 
+type RepoCard = RepoEntry & { repoName: string };
+
 function Browse(props: {
+  official: { url: string; repo: Repo | null; error: string | null } | null;
+  officialLoading: boolean;
+  onRetryOfficial: () => void;
   repos: { url: string; repo: Repo | null; error: string | null }[];
   loading: boolean;
   installed: InstalledExtension[];
@@ -185,10 +214,13 @@ function Browse(props: {
   const [kind, setKind] = createSignal<"all" | ExtKind>("all");
   const [query, setQuery] = createSignal("");
 
-  type Card = RepoEntry & { repoName: string };
-  const cards = createMemo<Card[]>(() => {
-    const seen = new Set<string>();
-    const out: Card[] = [];
+  const officialCards = createMemo<RepoCard[]>(() =>
+    (props.official?.repo?.extensions ?? []).map((e) => ({ ...e, repoName: "B-Anime" })),
+  );
+  // Everything from the user's repositories, minus what B-Anime's own panel already lists.
+  const cards = createMemo<RepoCard[]>(() => {
+    const seen = new Set<string>(officialCards().map((c) => c.id ?? c.manifestUrl));
+    const out: RepoCard[] = [];
     for (const { url, repo } of props.repos) {
       for (const e of repo?.extensions ?? []) {
         const key = e.id ?? e.manifestUrl;
@@ -199,16 +231,22 @@ function Browse(props: {
     }
     return out;
   });
-  const shown = createMemo(() => {
+  const matches = (c: RepoCard) => {
     const q = query().trim().toLowerCase();
-    return cards().filter(
-      (c) =>
-        (kind() === "all" || c.kind === kind()) &&
-        (!q || c.name.toLowerCase().includes(q) || (c.description ?? "").toLowerCase().includes(q) || (c.author ?? "").toLowerCase().includes(q)),
+    return (
+      (kind() === "all" || c.kind === kind()) &&
+      (!q || c.name.toLowerCase().includes(q) || (c.description ?? "").toLowerCase().includes(q) || (c.author ?? "").toLowerCase().includes(q))
     );
-  });
-  const installedOf = (c: Card) => props.installed.find((x) => x.id === c.id);
+  };
+  const officialShown = createMemo(() => officialCards().filter(matches));
+  const shown = createMemo(() => cards().filter(matches));
   const failed = () => props.repos.filter((r) => r.error);
+  const cardProps = () => ({
+    installed: props.installed,
+    installing: props.installing,
+    onInstall: props.onInstall,
+    onUpdate: props.onUpdate,
+  });
 
   return (
     <>
@@ -223,8 +261,46 @@ function Browse(props: {
           <button type="button" aria-pressed={kind() === "anime"} onClick={() => setKind("anime")}>Anime</button>
           <button type="button" aria-pressed={kind() === "manga"} onClick={() => setKind("manga")}>Manga</button>
         </div>
-        <p class="toolbar-count num">{shown().length} shown</p>
+        <p class="toolbar-count num">{officialShown().length + shown().length} shown</p>
       </div>
+
+      <section class="ext-panel ext-panel-official" aria-labelledby="official-h">
+        <div class="ext-panel-head">
+          <h2 id="official-h" class="subhead subhead-plain">B-Anime</h2>
+          <p class="setting-desc">
+            Extensions made by the B-Anime project.
+          </p>
+        </div>
+        <Switch>
+          <Match when={props.official?.error}>
+            <p class="inline-error">
+              Couldn't read B-Anime's repository: {props.official!.error}{" "}
+              <button type="button" class="link-btn" onClick={props.onRetryOfficial}>Try again</button>
+            </p>
+          </Match>
+          <Match when={props.officialLoading && !officialCards().length}>
+            <div class="ext-grid" aria-busy="true">
+              <For each={[0, 1]}>{() => <div class="ext-card sk-card" />}</For>
+            </div>
+          </Match>
+          <Match when={!officialShown().length}>
+            <p class="empty">
+              {query().trim() || kind() !== "all" ? "No B-Anime extensions match." : "B-Anime hasn't published extensions yet."}
+            </p>
+          </Match>
+          <Match when={officialShown().length}>
+            <ul class="ext-grid">
+              <For each={officialShown()}>{(c) => <ExtCard card={c} {...cardProps()} />}</For>
+            </ul>
+          </Match>
+        </Switch>
+      </section>
+
+      <section class="ext-panel" aria-labelledby="yours-h">
+        <div class="ext-panel-head">
+          <h2 id="yours-h" class="subhead subhead-plain">From your repositories</h2>
+          <p class="setting-desc">Made by other people. Install only what you trust.</p>
+        </div>
 
       <For each={failed()}>
         {(r) => <p class="inline-error">Couldn't read {r.url}: {r.error}</p>}
@@ -238,8 +314,8 @@ function Browse(props: {
         </Match>
         <Match when={!props.repos.length}>
           <div class="empty-block">
-            <p>No repositories yet. Add one to see the extensions it offers.</p>
-            <button type="button" class="btn btn-primary" onClick={props.onAddRepos}>Add a repository</button>
+            <p>You haven't added any repositories. Add one to see the extensions it offers.</p>
+            <button type="button" class="btn" onClick={props.onAddRepos}>Add a repository</button>
           </div>
         </Match>
         <Match when={!shown().length}>
@@ -247,12 +323,27 @@ function Browse(props: {
         </Match>
         <Match when={shown().length}>
           <ul class="ext-grid">
-            <For each={shown()}>
-              {(c) => {
-                const mine = () => installedOf(c);
-                const canUpdate = () => !!mine() && !!c.version && newer(c.version, mine()!.version);
-                const busy = () => props.installing === c.manifestUrl || props.installing === c.id;
-                return (
+            <For each={shown()}>{(c) => <ExtCard card={c} {...cardProps()} />}</For>
+          </ul>
+        </Match>
+      </Switch>
+      </section>
+    </>
+  );
+}
+
+function ExtCard(props: {
+  card: RepoCard;
+  installed: InstalledExtension[];
+  installing: string | null;
+  onInstall: (manifestUrl: string, name: string) => Promise<boolean>;
+  onUpdate: (id: string) => Promise<void>;
+}) {
+  const c = props.card;
+  const mine = () => props.installed.find((x) => x.id === c.id);
+  const canUpdate = () => !!mine() && !!c.version && newer(c.version, mine()!.version);
+  const busy = () => props.installing === c.manifestUrl || props.installing === c.id;
+  return (
                   <li class="ext-card">
                     <div class="ext-card-head">
                       <Show
@@ -302,19 +393,13 @@ function Browse(props: {
                       </Switch>
                     </div>
                   </li>
-                );
-              }}
-            </For>
-          </ul>
-        </Match>
-      </Switch>
-    </>
   );
 }
 
 // ── Repositories ───────────────────────────────────────────────────────────────
 
 function Repositories(props: {
+  official: { url: string; repo: Repo | null; error: string | null } | null;
   urls: string[];
   repos: { url: string; repo: Repo | null; error: string | null }[];
   onSave: (next: string[]) => void;
@@ -328,6 +413,7 @@ function Repositories(props: {
     e.preventDefault();
     const u = draft().trim();
     if (!u) return;
+    if (u === props.official?.url) return setError("That's B-Anime's own repository, which is always included.");
     if (props.urls.includes(u)) return setError("That repository is already added.");
     setChecking(true);
     setError(null);
@@ -363,7 +449,28 @@ function Repositories(props: {
         <p class="inline-error" role="alert">{error()}</p>
       </Show>
 
-      <Show when={props.urls.length} fallback={<p class="empty">No repositories. Add one above.</p>}>
+      <ul class="repo-rows">
+        <li class="repo-row">
+          <div class="setting-text">
+            <p class="setting-title">B-Anime</p>
+            <p class="setting-desc">
+              <Show when={props.official?.repo} fallback={props.official?.error ? `Couldn't read it: ${props.official.error}` : "Loading…"}>
+                {(repo) => (
+                  <>
+                    <span class="num">{repo().extensions.length}</span> extension{repo().extensions.length === 1 ? "" : "s"} · made
+                    by the B-Anime project.
+                  </>
+                )}
+              </Show>
+            </p>
+          </div>
+          <div class="setting-actions">
+            <span class="slot-stamp">Built in</span>
+          </div>
+        </li>
+      </ul>
+
+      <Show when={props.urls.length} fallback={<p class="empty">You haven't added any repositories. Add one above.</p>}>
         <ul class="repo-rows">
           <For each={props.urls}>
             {(url) => {
@@ -493,6 +600,39 @@ function InstallFromUrl(props: { installedIds: () => string[]; onInstall: (url: 
   );
 }
 
+// ── Install from a file (development builds only) ─────────────────────────────
+
+function InstallFromFile(props: { onInstalled: (ext: InstalledExtension) => Promise<void> }) {
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const pick = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const ext = await installLocalExtension();
+      if (ext) await props.onInstalled(ext);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div class="install-url">
+      <button type="button" class="link-btn" disabled={busy()} onClick={() => void pick()}>
+        {busy() ? "Installing…" : "Install from a file (development build)"}
+      </button>
+      <p class="setting-desc">
+        Pick a manifest <code>.json</code>; its code is read from the same folder. Use <strong>Reload</strong> after
+        editing the files.
+      </p>
+      <Show when={error()}>
+        <p class="inline-error" role="alert">{error()}</p>
+      </Show>
+    </div>
+  );
+}
+
 function ExtIdentity(props: { ext: ExtManifest }) {
   return (
     <div class="ext-identity">
@@ -511,6 +651,7 @@ function ExtIdentity(props: { ext: ExtManifest }) {
           {props.ext.language ? ` · ${props.ext.language.toUpperCase()}` : ""}
           {props.ext.author ? ` · by ${props.ext.author}` : ""}
           {props.ext.origin === "converted" ? " · Converted extension" : ""}
+          {"sourceUrl" in props.ext && isLocalExtension(props.ext as InstalledExtension) ? " · Local file" : ""}
         </p>
       </div>
     </div>
@@ -548,6 +689,19 @@ function ExtensionRow(props: {
     try {
       const ext = await updateExtension(props.ext.id);
       notify(`Updated ${ext.name} to ${ext.version}.`);
+      await props.onChanged();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const reload = async () => {
+    setBusy("update");
+    setError(null);
+    try {
+      const ext = await updateExtension(props.ext.id);
+      notify(`Reloaded ${ext.name} ${ext.version} from disk.`);
       await props.onChanged();
     } catch (e) {
       setError(errorText(e));
@@ -598,6 +752,11 @@ function ExtensionRow(props: {
         </Show>
       </div>
       <div class="ext-actions">
+        <Show when={isLocalExtension(props.ext)}>
+          <button type="button" class="btn btn-sm" disabled={busy() !== null} onClick={reload} title="Read the manifest and code from disk again">
+            {busy() === "update" ? "Reloading…" : "Reload"}
+          </button>
+        </Show>
         <Show when={props.update}>
           <button type="button" class="btn btn-primary btn-sm" disabled={busy() !== null} onClick={update}>
             {busy() === "update" ? "Updating…" : `Update to ${props.update}`}

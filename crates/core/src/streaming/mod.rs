@@ -331,8 +331,62 @@ pub async fn clear_match(db: &Db, media_id: i64, ext: &str, dub: bool) -> Result
 /// Titles past this length are searched by their short form: light-novel titles run to whole
 /// sentences, which sites list (and search engines match) only by their opening clause.
 const LONG_TITLE: usize = 60;
-/// At most this many searches per match attempt.
-const MAX_QUERIES: usize = 3;
+/// At most this many searches per match attempt (matching stops early on an exact hit).
+const MAX_QUERIES: usize = 4;
+
+/// Symbols sites spell out in plain text: "SPY×FAMILY" → "SPY x FAMILY", typographic dashes
+/// and quotes → ASCII.
+pub fn plain_title(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    for c in title.chars() {
+        match c {
+            '×' | '✕' | '✖' => out.push_str(" x "),
+            '–' | '—' | '‐' => out.push('-'),
+            '’' | '‘' | '`' => out.push('\''),
+            '“' | '”' => out.push('"'),
+            c => out.push(c),
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn ordinal(n: u32) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
+}
+
+static SEASON_N: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\bseason\s+(\d+)\b").unwrap());
+static NTH_SEASON: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\b(\d+)(?:st|nd|rd|th)\s+season\b").unwrap());
+static SEASON_MARKER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\b(?:(?:season|part|cour)\s+\d+|\d+(?:st|nd|rd|th)\s+(?:season|part|cour)|final\s+season)\b").unwrap()
+});
+
+/// The other common way of writing a season: "Season 2" ↔ "2nd Season".
+pub fn swap_season(title: &str) -> Option<String> {
+    if let Some(c) = SEASON_N.captures(title) {
+        let n: u32 = c[1].parse().ok()?;
+        return Some(SEASON_N.replace(title, format!("{} Season", ordinal(n))).into_owned());
+    }
+    let c = NTH_SEASON.captures(title)?;
+    Some(NTH_SEASON.replace(title, format!("Season {}", &c[1])).into_owned())
+}
+
+/// The title without its season or part ("SPY x FAMILY Season 2" → "SPY x FAMILY"): a broad
+/// search that returns every season, for the scoring to pick from.
+pub fn base_title(title: &str) -> Option<String> {
+    let stripped = SEASON_MARKER.replace_all(title, " ");
+    let base = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    let base = base.trim_matches(|c: char| c == ':' || c == '-' || c == ',' || c.is_whitespace()).to_owned();
+    (base.chars().count() >= 4 && base.len() < title.trim().len()).then_some(base)
+}
 
 /// The opening clause of a title, cut at the first ":", ". ", "? ", "! " or " - " that leaves
 /// at least 12 characters ("Dr. STONE: Science Future" → "Dr. STONE").
@@ -347,18 +401,23 @@ pub fn short_title(title: &str) -> Option<String> {
 }
 
 /// What to search a source for (best first, at most [`MAX_QUERIES`]) and what to score its
-/// results against (every title plus its short form).
+/// results against.
+///
+/// Searches go from exact to loose: each title as AniList has it (long ones by their short
+/// form), short forms, symbols in plain text ("SPY x FAMILY"), the other season wording
+/// ("2nd Season"), and finally the title without its season, which returns every season for
+/// the scoring to choose from.
 fn match_titles(titles: &[String]) -> (Vec<String>, Vec<String>) {
     let titles: Vec<&str> = titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    let main: Vec<&str> = titles.iter().take(2).copied().collect();
     let shorts: Vec<Option<String>> = titles.iter().map(|t| short_title(t)).collect();
     let mut queries: Vec<String> = Vec::new();
-    let add = |q: &str, queries: &mut Vec<String>| {
-        if !queries.iter().any(|x| x.eq_ignore_ascii_case(q)) {
-            queries.push(q.to_owned());
+    let add = |q: &str, list: &mut Vec<String>| {
+        if !q.is_empty() && !list.iter().any(|x| x.eq_ignore_ascii_case(q)) {
+            list.push(q.to_owned());
         }
     };
-    // Each title, long ones by their short form; then the short forms of the rest.
-    for (t, short) in titles.iter().zip(&shorts).take(2) {
+    for (t, short) in main.iter().zip(&shorts) {
         match short {
             Some(s) if t.chars().count() > LONG_TITLE => add(s, &mut queries),
             _ => add(t, &mut queries),
@@ -367,9 +426,45 @@ fn match_titles(titles: &[String]) -> (Vec<String>, Vec<String>) {
     for s in shorts.iter().take(2).flatten() {
         add(s, &mut queries);
     }
+    // Searchable form of each main title (plain symbols, long ones shortened).
+    let searchable: Vec<String> = main
+        .iter()
+        .zip(&shorts)
+        .map(|(t, short)| {
+            let t = match short {
+                Some(s) if t.chars().count() > LONG_TITLE => s.as_str(),
+                _ => t,
+            };
+            plain_title(t)
+        })
+        .collect();
+    for t in &searchable {
+        add(t, &mut queries);
+    }
+    for t in &searchable {
+        if let Some(s) = swap_season(t) {
+            add(&s, &mut queries);
+        }
+    }
+    for t in &searchable {
+        if let Some(b) = base_title(t) {
+            add(&b, &mut queries);
+        }
+    }
     queries.truncate(MAX_QUERIES);
-    let mut compare: Vec<String> = titles.iter().map(|t| t.to_string()).collect();
-    compare.extend(shorts.into_iter().flatten());
+
+    let mut compare: Vec<String> = Vec::new();
+    for t in &titles {
+        add(t, &mut compare);
+        let plain = plain_title(t);
+        add(&plain, &mut compare);
+        if let Some(s) = swap_season(&plain) {
+            add(&s, &mut compare);
+        }
+    }
+    for s in shorts.into_iter().flatten() {
+        add(&s, &mut compare);
+    }
     (queries, compare)
 }
 
@@ -583,11 +678,41 @@ mod tests {
         let best = compare.iter().map(|t| similarity(t, "Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life wo Ouka Suru")).fold(0.0, f64::max);
         assert!(best >= AUTO_MATCH, "{best}");
 
-        // Ordinary titles search as before, then try their short form.
+        // Ordinary titles search exactly first, then the other season wording.
         let (queries, _) = match_titles(&["Kusuriya no Hitorigoto 2nd Season".into(), "The Apothecary Diaries Season 2".into()]);
-        assert_eq!(queries, ["Kusuriya no Hitorigoto 2nd Season", "The Apothecary Diaries Season 2"]);
+        assert_eq!(
+            queries,
+            [
+                "Kusuriya no Hitorigoto 2nd Season",
+                "The Apothecary Diaries Season 2",
+                "Kusuriya no Hitorigoto Season 2",
+                "The Apothecary Diaries 2nd Season"
+            ]
+        );
         let (queries, _) = match_titles(&["Sousou no Frieren: Season 2".into(), "Frieren: Beyond Journey's End Season 2".into()]);
-        assert_eq!(queries, ["Sousou no Frieren: Season 2", "Frieren: Beyond Journey's End Season 2", "Sousou no Frieren"]);
+        assert_eq!(queries[..3], ["Sousou no Frieren: Season 2", "Frieren: Beyond Journey's End Season 2", "Sousou no Frieren"]);
+    }
+
+    #[test]
+    fn season_and_symbol_spellings_are_searched_too() {
+        assert_eq!(plain_title("SPY×FAMILY Season 2"), "SPY x FAMILY Season 2");
+        assert_eq!(swap_season("SPY x FAMILY Season 2").as_deref(), Some("SPY x FAMILY 2nd Season"));
+        assert_eq!(swap_season("Kusuriya no Hitorigoto 3rd Season").as_deref(), Some("Kusuriya no Hitorigoto Season 3"));
+        assert_eq!(swap_season("Season 11 of Something").as_deref(), Some("11th Season of Something"));
+        assert_eq!(swap_season("Frieren"), None);
+        assert_eq!(base_title("SPY x FAMILY Season 2").as_deref(), Some("SPY x FAMILY"));
+        assert_eq!(base_title("Attack on Titan Final Season Part 2").as_deref(), Some("Attack on Titan"));
+        assert_eq!(base_title("Frieren"), None);
+
+        // AniList's titles for SPY×FAMILY Season 2; a site listing it as "SPY x FAMILY 2nd Season".
+        let (queries, compare) = match_titles(&["SPY×FAMILY Season 2".into(), "SPY x FAMILY Season 2".into()]);
+        assert_eq!(queries, ["SPY×FAMILY Season 2", "SPY x FAMILY Season 2", "SPY x FAMILY 2nd Season", "SPY x FAMILY"]);
+        let best = compare.iter().map(|t| similarity(t, "SPY x FAMILY 2nd Season")).fold(0.0, f64::max);
+        assert!(best >= 0.99, "{best}");
+        // The broad search returns every season; the right one still scores highest.
+        let score = |c: &str| compare.iter().map(|t| similarity(t, c)).fold(0.0, f64::max);
+        assert!(score("SPY x FAMILY 2nd Season") > score("SPY x FAMILY"));
+        assert!(score("SPY x FAMILY 2nd Season") > score("SPY x FAMILY Season 3"));
     }
 
     #[test]

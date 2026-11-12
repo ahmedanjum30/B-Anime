@@ -216,8 +216,52 @@ async fn install_extension(state: tauri::State<'_, AppState>, url: String) -> Re
 #[tauri::command]
 async fn update_extension(state: tauri::State<'_, AppState>, id: String) -> Result<extensions::Installed, String> {
     let ext = extensions::get(&state.db, &id).await.map_err(msg)?.ok_or("Not installed.")?;
+    // Installed from disk in a development build: "update" re-reads the files.
+    if let Some(path) = extensions::local_source(&ext) {
+        if !LOCAL_EXTENSIONS {
+            return Err(LOCAL_ONLY_IN_DEV.into());
+        }
+        return extensions::install_local(&state.db, &state.paths.extensions, &path, extensions::Limits::default())
+            .await
+            .map_err(msg);
+    }
     extensions::install(&state.db, &state.paths.extensions, &ext.source_url, extensions::Limits::default())
         .await
+        .map_err(msg)
+}
+
+/// Installing extensions from files on this computer is for testing your own extension, so it
+/// exists in development builds (`tauri dev`) only. Release builds keep installs to http(s).
+const LOCAL_EXTENSIONS: bool = cfg!(debug_assertions);
+const LOCAL_ONLY_IN_DEV: &str = "Installing extensions from a file is only available in development builds.";
+
+/// Development builds only: pick an extension manifest on disk and install it.
+#[tauri::command]
+async fn install_local_extension(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<extensions::Installed>, String> {
+    if !LOCAL_EXTENSIONS {
+        return Err(LOCAL_ONLY_IN_DEV.into());
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .set_title("Install an extension from a manifest")
+            .add_filter("Extension manifest", &["json"])
+            .set_parent(&window)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    extensions::install_local(&state.db, &state.paths.extensions, &path, extensions::Limits::default())
+        .await
+        .map(Some)
         .map_err(msg)
 }
 
@@ -261,6 +305,12 @@ async fn try_extension(
     extensions::call(&state.db, &state.paths.extensions, &id, "search", &args, extensions::Limits::default())
         .await
         .map_err(msg)
+}
+
+/// B-Anime's own repository, shown in its own panel apart from the user's list.
+#[tauri::command]
+fn official_extension_repo() -> &'static str {
+    extensions::OFFICIAL_REPO
 }
 
 const REPOS_KEY: &str = "extensions.repos";
@@ -507,6 +557,8 @@ pub fn run() {
             get_media,
             save_entry,
             delete_entry,
+            install_local_extension,
+            official_extension_repo,
             browse,
             get_schedule,
             find_source,
