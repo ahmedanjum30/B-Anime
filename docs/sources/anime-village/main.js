@@ -9,8 +9,14 @@
 //   search result id:  "158927" (sub) or "158927:dub"
 //   episode id:        "sub|spy-x-family-season-2-qlfdj-6399?ep=107908"
 
-const BASE = "https://animevillage.org";
+const BASE = "http://localhost:3000";
 const SERVER = "hd-1";
+
+// Headers the video host expects. The stream API normally returns these too;
+// these are the fallback, and anything the API returns wins.
+const REFERER = "https://megaplay.buzz/";
+const ORIGIN = "https://megaplay.buzz";
+const HEADERS = { Referer: REFERER, Origin: ORIGIN };
 
 const LANGS = {
   english: "en", japanese: "ja", arabic: "ar", french: "fr", german: "de", italian: "it", spanish: "es",
@@ -85,7 +91,7 @@ class Provider {
     const json = await getJSON(`${BASE}/api/stream/${encodeURIComponent(showPart)}?${params}`);
 
     return {
-      headers: json.headers || {},
+      headers: { ...HEADERS, ...json.headers },
       sources: (json.sources || []).map((src) => ({
         url: src.url,
         type: src.isM3U8 || /\.m3u8(?:[?#]|$)/i.test(src.url) ? "hls" : "mp4",
