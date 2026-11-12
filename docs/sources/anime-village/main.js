@@ -9,7 +9,7 @@
 //   search result id:  "158927" (sub) or "158927:dub"
 //   episode id:        "sub|spy-x-family-season-2-qlfdj-6399?ep=107908"
 
-const BASE = "http://localhost:3000";
+const BASE = "https://animevillage.org";
 const SERVER = "hd-1";
 
 // Headers the video host expects. The stream API normally returns these too;
