@@ -10,6 +10,7 @@
       "kind": "anime",
       "author": "you",
       "language": "en",
+      "icon": "https://animeheaven.me/ah_logo.png",
       "description": "Learning extension that reads a static mock site and plays public test videos."
     }
   ]
