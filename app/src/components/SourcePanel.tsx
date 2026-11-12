@@ -101,8 +101,18 @@ export default function SourcePanel(props: {
                 </div>
               </Show>
               <Switch>
-                <Match when={s().match.loading}>
-                  <span class="source-status">Finding this {s().kind() === "anime" ? "show" : "series"}…</span>
+                {/* Also covers the moment before the first lookup answers, so the row is never blank. */}
+                <Match when={s().match.loading || (!s().match() && !s().match.error)}>
+                  <span class="source-status is-busy" role="status">
+                    <i class="spin-dot" aria-hidden="true" />
+                    <span>
+                      Finding your {s().kind() === "anime" ? "anime" : "manga"} on {extName()}…{" "}
+                      <span class="source-query">
+                        Searching for <strong>{searchTitles(props.media)[0] ?? props.media.title.userPreferred}</strong>
+                        {s().isDub() ? " (dub)" : ""}
+                      </span>
+                    </span>
+                  </span>
                 </Match>
                 <Match when={s().match.error}>
                   <span class="source-status is-error">{errorText(s().match.error)}</span>
@@ -115,6 +125,24 @@ export default function SourcePanel(props: {
                         Matched to <strong>{(m() as { title: string }).title}</strong>
                       </span>
                       <button type="button" class="link-btn" onClick={openPicker}>Wrong match?</button>
+                      <Show when={s().items.loading}>
+                        <span class="source-status is-busy" role="status">
+                          <i class="spin-dot" aria-hidden="true" />
+                          Loading {s().kind() === "anime" ? "episodes" : "chapters"}…
+                        </span>
+                      </Show>
+                      <Show when={!s().items.loading && !s().items.error && s().items()?.length === 0}>
+                        <span class="source-status is-warn">
+                          {extName()} lists no {s().kind() === "anime" ? "episodes" : "chapters"} for this match.
+                        </span>
+                        <button type="button" class="link-btn" onClick={() => void s().reloadItems()}>Try again</button>
+                      </Show>
+                      <Show when={s().items.error}>
+                        <span class="source-status is-error">
+                          Couldn't load the {s().kind() === "anime" ? "episodes" : "chapters"}: {errorText(s().items.error)}
+                        </span>
+                        <button type="button" class="link-btn" onClick={() => void s().reloadItems()}>Try again</button>
+                      </Show>
                     </>
                   )}
                 </Match>

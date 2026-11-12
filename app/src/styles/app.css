@@ -1758,6 +1758,19 @@ a.slot:focus-visible {
 .source-status.is-warn {
   color: var(--amber);
 }
+.source-status.is-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--z8);
+}
+.source-query {
+  color: var(--z6);
+}
+.source-query strong {
+  color: var(--z8);
+  font-weight: 600;
+}
 .source-status.is-error {
   color: var(--red);
 }
@@ -1810,6 +1823,16 @@ a.slot:focus-visible {
 .btn.is-play {
   gap: 6px;
 }
+/* Placeholder for Play while the source loads: same footprint, quieter, not clickable. */
+.btn.is-play.is-loading,
+.btn.is-play.is-loading:disabled {
+  color: var(--z6);
+  cursor: progress;
+}
+.btn.is-play.is-loading .spin-dot {
+  width: 10px;
+  height: 10px;
+}
 
 /* ───────── Player ───────── */
 .player {
@@ -1839,12 +1862,23 @@ a.slot:focus-visible {
   background: rgb(0 0 0 / 0.55);
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
 }
-/* While the controls show, subtitles move up out from behind them. */
+/* Subtitles sit a set share of the picture's height above its bottom edge (Position in the
+   subtitles menu), and move further up while the controls show so they're never behind them. */
+.player {
+  --sub-lift: 6;
+}
+.player[data-subpos="low"] {
+  --sub-lift: 2;
+}
+.player[data-subpos="high"] {
+  --sub-lift: 13;
+}
 .player-video::-webkit-media-text-track-container {
+  transform: translateY(calc(var(--sub-lift) * -1%));
   transition: transform var(--t-med) var(--ease-out);
 }
 .player:not(.is-idle) .player-video::-webkit-media-text-track-container {
-  transform: translateY(-88px);
+  transform: translateY(calc(var(--sub-lift) * -1% - 88px));
 }
 /* Picture subtitles (PGS): a box matching the video's picture, images placed in percentages. */
 .pgs-layer {
@@ -1864,8 +1898,12 @@ a.slot:focus-visible {
   height: auto;
   transition: transform var(--t-med) var(--ease-out);
 }
+/* Picture subtitles in the lower half follow the same lift (cqh: the picture's height). */
+.pgs-screen .pgs-low {
+  transform: translateY(calc(var(--sub-lift) * -1cqh));
+}
 .player:not(.is-idle) .pgs-screen .pgs-low {
-  transform: translateY(-88px);
+  transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
 }
 .player[data-subsize="s"] .player-video::cue {
   font-size: clamp(14px, 1.8vw, 26px);

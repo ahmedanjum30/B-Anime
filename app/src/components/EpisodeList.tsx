@@ -18,6 +18,8 @@ export default function EpisodeList(props: {
   panel?: JSX.Element;
   playable?: (episode: number) => boolean;
   onPlay?: (episode: number) => void;
+  /** The online source is still finding the show or loading its episodes. */
+  pending?: boolean;
 }) {
   const { account } = homeStore;
   const m = () => props.media;
@@ -105,6 +107,12 @@ export default function EpisodeList(props: {
                     <Show when={!aired() && !airing()}>Not aired yet</Show>
                   </span>
                   <span class="ep-action">
+                    {/* Where Play will appear once the source has listed its episodes. */}
+                    <Show when={props.pending && aired() && !props.playable?.(ep)}>
+                      <button type="button" class="btn btn-sm is-play is-loading" disabled aria-label={`Episode ${ep}: loading from the source`}>
+                        <i class="spin-dot" aria-hidden="true" /> Loading
+                      </button>
+                    </Show>
                     <Show when={props.playable?.(ep)}>
                       <button
                         type="button"

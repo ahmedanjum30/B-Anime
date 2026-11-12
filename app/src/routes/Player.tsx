@@ -133,6 +133,14 @@ export default function Player() {
     setSubSizeSignal(s);
     store("banime.subsize", ["s", "m", "l"].indexOf(s));
   };
+  /** How far above the bottom edge subtitles sit: low, middle (default) or high. */
+  const [subPos, setSubPosSignal] = createSignal<"low" | "mid" | "high">(
+    (["low", "mid", "high"] as const)[Math.max(0, Math.min(2, stored("banime.subpos", 1)))],
+  );
+  const setSubPos = (p: "low" | "mid" | "high") => {
+    setSubPosSignal(p);
+    store("banime.subpos", ["low", "mid", "high"].indexOf(p));
+  };
   /** Subtitle timing correction in seconds (positive shows them later). */
   const [subOffset, setSubOffset] = createSignal(0);
   /** Alternate audio tracks inside an HLS stream (e.g. Japanese and English). */
@@ -606,6 +614,7 @@ export default function Player() {
       class="player"
       classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu() }}
       data-subsize={subSize()}
+      data-subpos={subPos()}
       onPointerMove={wake}
       onPointerDown={wake}
     >
@@ -866,6 +875,15 @@ export default function Player() {
                     <For each={[["s", "Small"], ["m", "Medium"], ["l", "Large"]] as const}>
                       {([v, label]) => (
                         <button type="button" aria-pressed={subSize() === v} onClick={() => setSubSize(v)}>{label}</button>
+                      )}
+                    </For>
+                  </div>
+
+                  <p class="menu-head">Position</p>
+                  <div class="menu-row" role="group" aria-label="Subtitle position">
+                    <For each={[["low", "Low"], ["mid", "Middle"], ["high", "High"]] as const}>
+                      {([v, label]) => (
+                        <button type="button" aria-pressed={subPos() === v} onClick={() => setSubPos(v)}>{label}</button>
                       )}
                     </For>
                   </div>

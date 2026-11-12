@@ -236,6 +236,18 @@ async fn call(db: &Db, dir: &Path, ext: &str, method: &str, args: Value) -> Resu
 /// `dub` asks the source for its English-dubbed version (sources without one ignore it).
 /// `media` describes the show when known: `{ id, titles, year }` (AniList id, titles best first).
 pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str, dub: bool, media: Option<Value>) -> Result<Vec<SourceResult>> {
+    search_with(db, dir, ext, query, dub, media, Limits::default()).await
+}
+
+async fn search_with(
+    db: &Db,
+    dir: &Path,
+    ext: &str,
+    query: &str,
+    dub: bool,
+    media: Option<Value>,
+    limits: Limits,
+) -> Result<Vec<SourceResult>> {
     let mut q = json!({ "query": query, "dub": dub });
     if let Some(media) = media {
         if let Some(year) = media.get("year").filter(|y| !y.is_null()) {
@@ -243,8 +255,14 @@ pub async fn search(db: &Db, dir: &Path, ext: &str, query: &str, dub: bool, medi
         }
         q["media"] = media;
     }
-    parse(call(db, dir, ext, "search", json!([q])).await?, "search results")
+    let out = extensions::call(db, dir, ext, "search", &json!([q]), limits).await?.value;
+    parse(out, "search results")
 }
+
+/// The whole automatic lookup (all searches together) gives up after this long.
+const MATCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+/// Each search on its own: a bit under the deadline, so a stuck one is cut off cleanly.
+const MATCH_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// The saved match for this show on this source (sub or dub), or the best automatic one
 /// (saved when confident).
@@ -269,26 +287,56 @@ pub async fn find_match(
         return Ok(MatchState::Matched { source_id, title, auto });
     }
 
-    let mut scored: Vec<(f64, SourceResult)> = Vec::new();
+    // Every search runs at once; results are scored as they arrive. The lookup ends at the
+    // first exact hit, when all searches are done, or at the deadline, using whatever came back.
+    use futures_util::StreamExt;
     let media = json!({ "id": media_id, "titles": titles, "year": year });
     let (queries, compare) = match_titles(titles);
-    for query in &queries {
-        for r in search(db, dir, ext, query, dub, Some(media.clone())).await? {
-            // "(Dub)" / "(English Dub)" suffixes on dub entries shouldn't cost them the match.
-            let candidate = strip_dub_marker(&r.title);
-            let mut score = compare.iter().map(|t| similarity(t, &candidate)).fold(0.0, f64::max);
-            if let (Some(a), Some(b)) = (year, r.year) {
-                if a == b {
-                    score += 0.05;
+    let limits = Limits { call_timeout: MATCH_SEARCH_TIMEOUT, ..Limits::default() };
+    let mut pending: futures_util::stream::FuturesUnordered<_> = queries
+        .iter()
+        .map(|q| search_with(db, dir, ext, q, dub, Some(media.clone()), limits))
+        .collect();
+    let deadline = tokio::time::Instant::now() + MATCH_DEADLINE;
+    let mut scored: Vec<(f64, SourceResult)> = Vec::new();
+    let mut answered = 0usize;
+    let mut first_error: Option<Error> = None;
+    loop {
+        let next = match tokio::time::timeout_at(deadline, pending.next()).await {
+            Ok(Some(r)) => r,
+            Ok(None) | Err(_) => break,
+        };
+        match next {
+            Ok(results) => {
+                answered += 1;
+                for r in results {
+                    // "(Dub)" / "(English Dub)" suffixes on dub entries shouldn't cost them the match.
+                    let candidate = strip_dub_marker(&r.title);
+                    let mut score = compare.iter().map(|t| similarity(t, &candidate)).fold(0.0, f64::max);
+                    if let (Some(a), Some(b)) = (year, r.year) {
+                        if a == b {
+                            score += 0.05;
+                        }
+                    }
+                    if !scored.iter().any(|(_, x)| x.id == r.id) {
+                        scored.push((score, r));
+                    }
                 }
             }
-            if !scored.iter().any(|(_, x)| x.id == r.id) {
-                scored.push((score, r));
+            Err(e) => {
+                first_error.get_or_insert(e);
             }
         }
         if scored.iter().any(|(s, _)| *s >= 0.99) {
             break;
         }
+    }
+    drop(pending);
+    if answered == 0 {
+        // Nothing usable: every search failed, or none answered in time.
+        return Err(first_error.unwrap_or_else(|| {
+            Error::Extension(format!("the source didn't answer within {} seconds", MATCH_DEADLINE.as_secs()))
+        }));
     }
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
 

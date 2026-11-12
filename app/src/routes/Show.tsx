@@ -190,6 +190,11 @@ export default function Show() {
                           />
                         }
                         playable={(ep) => p().localFiles.some((f) => f.episode === ep) || source.byNumber().has(ep)}
+                        pending={
+                          inTauri &&
+                          source.usable().length > 0 &&
+                          (source.match.loading || source.items.loading || (!source.match() && !source.match.error))
+                        }
                         onPlay={(ep) =>
                           p().localFiles.some((f) => f.episode === ep)
                             ? void playLibraryEpisode(m().id, ep, navigate, notify)
