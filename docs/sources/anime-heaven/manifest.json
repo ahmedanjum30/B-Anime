@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "kind": "anime",
   "author": "you",
-  "description": "Learning extension that reads a static mock site and plays public test videos.",
+  "description": "AnimeHeaven is an online streaming provider for subbed anime in english.",
   "language": "en",
   "codeUrl": "main.js",
   "apiVersion": 1,
