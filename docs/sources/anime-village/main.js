@@ -91,7 +91,7 @@ class Provider {
     const json = await getJSON(`${BASE}/api/stream/${encodeURIComponent(showPart)}?${params}`);
 
     return {
-      headers: { ...HEADERS, ...json.headers },
+      headers: { ...json.headers, ...HEADERS },
       sources: (json.sources || []).map((src) => ({
         url: src.url,
         type: src.isM3U8 || /\.m3u8(?:[?#]|$)/i.test(src.url) ? "hls" : "mp4",
