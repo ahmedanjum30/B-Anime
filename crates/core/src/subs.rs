@@ -38,7 +38,7 @@ pub fn render(mut cues: Vec<Cue>) -> String {
         let end = c.end.max(c.start + 1);
         out.push_str(&format!("{} --> {}", timestamp(c.start), timestamp(end)));
         if c.top {
-            out.push_str(" line:4%");
+            out.push_str(" line:1");
         }
         out.push('\n');
         out.push_str(&c.text);
@@ -232,8 +232,8 @@ mod tests {
         let vtt = ass_to_vtt(SCRIPT);
         assert!(vtt.starts_with("WEBVTT\n\n"));
         assert!(vtt.contains("00:00:01.000 --> 00:00:02.500\nHello\nthere &amp; you\n"), "{vtt}");
-        assert!(vtt.contains("00:00:03.000 --> 00:00:04.000 line:4%\nShop"), "style alignment 8 is top: {vtt}");
-        assert!(vtt.contains("00:00:05.000 --> 00:00:06.000 line:4%\nTop note"), "{vtt}");
+        assert!(vtt.contains("00:00:03.000 --> 00:00:04.000 line:1\nShop"), "style alignment 8 is top: {vtt}");
+        assert!(vtt.contains("00:00:05.000 --> 00:00:06.000 line:1\nTop note"), "{vtt}");
         assert!(!vtt.contains("m 0 0"), "drawings are dropped");
         assert_eq!(vtt.matches("Moving").count(), 1, "per-frame typesetting merges: {vtt}");
         assert!(vtt.contains("00:00:07.000 --> 00:00:07.080"), "{vtt}");
