@@ -1862,8 +1862,8 @@ a.slot:focus-visible {
   background: rgb(0 0 0 / 0.55);
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
 }
-/* Subtitles sit a set share of the picture's height above its bottom edge (Position in the
-   subtitles menu), and move further up while the controls show so they're never behind them. */
+/* Text subtitles are lifted per cue in Player.tsx (only bottom ones, so top-placed signs stay on
+   screen). Picture subtitles in the lower half use --sub-lift below. */
 .player {
   --sub-lift: 6;
 }
@@ -1872,13 +1872,6 @@ a.slot:focus-visible {
 }
 .player[data-subpos="high"] {
   --sub-lift: 13;
-}
-.player-video::-webkit-media-text-track-container {
-  transform: translateY(calc(var(--sub-lift) * -1%));
-  transition: transform var(--t-med) var(--ease-out);
-}
-.player:not(.is-idle) .player-video::-webkit-media-text-track-container {
-  transform: translateY(calc(var(--sub-lift) * -1% - 88px));
 }
 /* Picture subtitles (PGS): a box matching the video's picture, images placed in percentages. */
 .pgs-layer {

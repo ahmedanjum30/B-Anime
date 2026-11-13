@@ -269,6 +269,7 @@ export default function Player() {
     for (const t of list) {
       t.oncuechange = () => {
         applyOffset();
+        placeCues();
         if (pictureUrl.has(t)) void updatePictures();
       };
     }
@@ -559,6 +560,38 @@ export default function Player() {
     idleTimer = window.setTimeout(() => playing() && !menu() && setIdle(true), 2600);
   };
   onCleanup(() => clearTimeout(idleTimer));
+
+  // ── Subtitle placement
+  // Only bottom subtitles are lifted (Position in the subtitles menu, plus room for the controls
+  // while they show). Lifting the whole subtitle layer pushed top-placed ones (signs, `line:`
+  // cues) off the top of the screen. Cues the file places itself keep their place.
+  const [videoHeight, setVideoHeight] = createSignal(0);
+  const SUB_LIFT = { low: 2, mid: 6, high: 13 } as const;
+  const lifted = new WeakSet<TextTrackCue>();
+  function placeCues() {
+    const h = videoHeight() || video?.clientHeight || 0;
+    const controls = !(idle() && playing() && !menu());
+    const lift = SUB_LIFT[subPos()] + (controls && h ? (88 / h) * 100 : 0);
+    const line = Math.max(50, 100 - lift);
+    for (const t of tracks()) {
+      for (const cue of Array.from(t.cues ?? [])) {
+        if (!(cue instanceof VTTCue)) continue;
+        if (!lifted.has(cue)) {
+          if (cue.line !== "auto") continue;
+          lifted.add(cue);
+          cue.snapToLines = false;
+          cue.lineAlign = "end";
+        }
+        if (cue.line !== line) cue.line = line;
+      }
+    }
+  }
+  createEffect(on([subPos, idle, playing, menu, videoHeight, tracks], placeCues));
+  onMount(() => {
+    const ro = new ResizeObserver(() => setVideoHeight(video.clientHeight));
+    ro.observe(video);
+    onCleanup(() => ro.disconnect());
+  });
 
   const onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement)?.closest("input, select, textarea")) return;
