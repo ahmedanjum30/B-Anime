@@ -19,6 +19,8 @@ jobs:
       - name: Rust (MSVC, from rust-toolchain.toml)
         run: rustup show
       - uses: Swatinem/rust-cache@v2
+      # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly (cached with target/).
+      - uses: ilammy/setup-nasm@v1
       - name: Backend tests
         run: cargo test -p banime-core
       - name: Frontend type-check and build

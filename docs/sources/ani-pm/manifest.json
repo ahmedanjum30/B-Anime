@@ -1,0 +1,12 @@
+{
+  "id": "ani-pm",
+  "name": "AniPm",
+  "version": "1.0.0",
+  "kind": "anime",
+  "author": "you",
+  "description": "AniPm is an online streaming provider for subbed and dubbed anime in english.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1,
+  "icon": "https://ani.pm/favicon.ico?v=20260923b"
+}

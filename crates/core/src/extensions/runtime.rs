@@ -10,6 +10,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::prelude::{Async, Func};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Function, Promise};
 use serde_json::{Value, json};
@@ -198,11 +199,29 @@ async fn host_fetch_inner(url: String, options: String, limits: Limits) -> std::
     Err("too many redirects".into())
 }
 
+/// mozillaFetch keeps TLS session tickets per site (so later connections resume like
+/// Firefox's); store them in the app's cache instead of the working directory.
+fn mozillafetch_session_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Ok(paths) = crate::paths::AppPaths::resolve(None) {
+            mozillafetch::set_session_dir(paths.cache.join("tls-sessions"));
+        }
+    });
+}
+
 /// Runs one provider method in a fresh sandbox.
 pub async fn call(code: &str, method: &str, args: &Value, limits: Limits) -> Result<CallOutput> {
     let ext_err = |m: String| Error::Extension(m);
 
     let rt = AsyncRuntime::new().map_err(|e| ext_err(e.to_string()))?;
+    // `import("mozillafetch")`: fetch with Firefox's TLS / HTTP/2 / header fingerprint.
+    rt.set_loader(
+        BuiltinResolver::default().with_module(mozillafetch::quickjs::MODULE_NAME),
+        BuiltinLoader::default().with_module(mozillafetch::quickjs::MODULE_NAME, mozillafetch::quickjs::MODULE_SOURCE),
+    )
+    .await;
+    mozillafetch_session_dir();
     rt.set_memory_limit(limits.memory_bytes).await;
     rt.set_max_stack_size(1024 * 1024).await;
     let deadline = Instant::now() + limits.call_timeout;
@@ -298,6 +317,17 @@ pub async fn call(code: &str, method: &str, args: &Value, limits: Limits) -> Res
             .map_err(|e| e.to_string())?;
 
         ctx.eval::<(), _>(PRELUDE).catch(&ctx).map_err(|e| format!("sandbox setup failed: {e}"))?;
+        // mozillaFetch follows the same network policy as fetch, on every redirect hop.
+        let allow_private = limits.allow_private_hosts;
+        mozillafetch::quickjs::install_with(
+            &ctx,
+            mozillafetch::quickjs::Options {
+                mode: mozillafetch::quickjs::Mode::Async,
+                url_check: Some(Arc::new(move |url: &reqwest::Url| check_url(url, allow_private))),
+            },
+        )
+        .catch(&ctx)
+        .map_err(|e| format!("sandbox setup failed (mozillafetch): {e}"))?;
         ctx.eval::<(), _>(code).catch(&ctx).map_err(|e| format!("the extension failed to load: {e}"))?;
         let caller: Function = ctx.eval(CALL).catch(&ctx).map_err(|e| e.to_string())?;
         let promise: Promise = caller.call((method, args)).catch(&ctx).map_err(|e| e.to_string())?;
@@ -357,10 +387,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn imports_and_endless_waits_end_with_an_error() {
+        let limits = Limits { call_timeout: Duration::from_millis(800), ..quick(false) };
+        let started = Instant::now();
+        let err = call(r#"class Provider { async search() { await import("missing-module"); return []; } }"#, "search", &json!([]), limits)
+            .await
+            .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(3), "import took {:?}: {err}", started.elapsed());
+
+        let started = Instant::now();
+        let err = call("class Provider { async search() { await new Promise(() => {}); } }", "search", &json!([]), limits)
+            .await
+            .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(3), "endless wait took {:?}: {err}", started.elapsed());
+        assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    /// Matching runs several calls at once inside one task; they must all finish.
+    #[tokio::test]
+    async fn concurrent_calls_in_one_task_all_finish() {
+        use futures_util::StreamExt;
+        use axum::{Router, routing::get};
+        let app = Router::new().route(
+            "/slow",
+            get(|| async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                "[1]"
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let fetching = format!(r#"class Provider {{ async search() {{ const r = await fetch("http://{addr}/slow"); return r.json(); }} }}"#);
+        let failing = r#"class Provider { async search() { await import("missing"); } }"#.to_owned();
+        let limits = Limits { call_timeout: Duration::from_secs(5), ..quick(true) };
+        let codes = [fetching.clone(), failing.clone(), fetching, failing];
+        let args = json!([]);
+        let started = Instant::now();
+        let mut all: futures_util::stream::FuturesUnordered<_> = codes.iter().map(|c| call(c, "search", &args, limits)).collect();
+        let mut done = 0;
+        while let Some(r) = tokio::time::timeout(Duration::from_secs(8), all.next()).await.expect("a call hung") {
+            done += 1;
+            let _ = r;
+        }
+        assert_eq!(done, 4);
+        assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+    }
+
+    #[tokio::test]
     async fn memory_is_capped() {
         let limits = Limits { memory_bytes: 16 * 1024 * 1024, ..quick(false) };
         let code = "class Provider { search() { const a = []; for (;;) a.push(new Array(1e5).fill(1)); } }";
         assert!(call(code, "search", &json!([]), limits).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn mozillafetch_is_importable_and_sends_firefox_headers() {
+        use axum::{Router, http::HeaderMap, routing::get};
+        let app = Router::new().route(
+            "/echo",
+            get(|h: HeaderMap| async move {
+                let get = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                serde_json::json!({ "ua": get("user-agent"), "mode": get("sec-fetch-mode"), "referer": get("referer") }).to_string()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let code = format!(
+            r#"class Provider {{
+                async search() {{
+                  const {{ createMozillaFetch }} = await import("mozillafetch");
+                  const tab = createMozillaFetch({{ session: true }});
+                  const r = await tab("http://{addr}/echo", {{ mode: "cors", referer: "http://{addr}/page" }});
+                  const j = await r.json();
+                  tab.close();
+                  return {{ status: r.status, firefox: j.ua.includes("Firefox/"), mode: j.mode, referer: j.referer }};
+                }}
+              }}"#
+        );
+        let out = call(&code, "search", &json!([]), quick(true)).await.unwrap();
+        assert_eq!(out.value, json!({ "status": 200, "firefox": true, "mode": "cors", "referer": format!("http://{addr}/page") }));
+    }
+
+    #[tokio::test]
+    async fn mozillafetch_refuses_this_machine() {
+        let code = r#"class Provider { async search() { const { mozillaFetch } = await import("mozillafetch"); await mozillaFetch("http://127.0.0.1:9/"); } }"#;
+        let err = call(code, "search", &json!([]), quick(false)).await.unwrap_err();
+        assert!(err.to_string().contains("on this computer"), "{err}");
+    }
+
+    /// The real ani-pm extension against ani.pm (network). Run with:
+    /// cargo test -p banime-core --release ani_pm_live -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn ani_pm_live() {
+        let code = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/sources/ani-pm/main.js")).unwrap();
+        let limits = Limits { call_timeout: Duration::from_secs(60), ..Limits::default() };
+        let found = call(&code, "search", &json!([{ "query": "naruto" }]), limits).await.unwrap();
+        println!("search: {}", found.value);
+        let id = found.value[0]["id"].as_str().unwrap().to_string();
+        let eps = call(&code, "episodes", &json!([id]), limits).await.unwrap();
+        println!("episodes: {} found", eps.value.as_array().map(|a| a.len()).unwrap_or(0));
+        let ep = eps.value[0]["id"].as_str().unwrap().to_string();
+        let out = call(&code, "sources", &json!([ep]), limits).await;
+        match out {
+            Ok(o) => println!("sources: {}", o.value),
+            Err(e) => panic!("sources failed: {e}"),
+        }
     }
 
     #[tokio::test]

@@ -260,9 +260,9 @@ async fn search_with(
 }
 
 /// The whole automatic lookup (all searches together) gives up after this long.
-const MATCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+const MATCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 /// Each search on its own: a bit under the deadline, so a stuck one is cut off cleanly.
-const MATCH_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const MATCH_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// The saved match for this show on this source (sub or dub), or the best automatic one
 /// (saved when confident).
@@ -292,6 +292,8 @@ pub async fn find_match(
     use futures_util::StreamExt;
     let media = json!({ "id": media_id, "titles": titles, "year": year });
     let (queries, compare) = match_titles(titles);
+    let started = std::time::Instant::now();
+    tracing::info!(media_id, ext, dub, searches = queries.len(), "matching: looking the show up on the source");
     let limits = Limits { call_timeout: MATCH_SEARCH_TIMEOUT, ..Limits::default() };
     let mut pending: futures_util::stream::FuturesUnordered<_> = queries
         .iter()
@@ -331,13 +333,18 @@ pub async fn find_match(
             break;
         }
     }
+    let unfinished = pending.len();
     drop(pending);
+    let ms = started.elapsed().as_millis() as u64;
     if answered == 0 {
         // Nothing usable: every search failed, or none answered in time.
-        return Err(first_error.unwrap_or_else(|| {
+        let err = first_error.unwrap_or_else(|| {
             Error::Extension(format!("the source didn't answer within {} seconds", MATCH_DEADLINE.as_secs()))
-        }));
+        });
+        tracing::warn!(media_id, ext, ms, unfinished, error = %err, "matching: no search answered");
+        return Err(err);
     }
+    tracing::info!(media_id, ext, ms, answered, unfinished, results = scored.len(), "matching: searches done");
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
 
     match scored.first() {

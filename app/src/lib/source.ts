@@ -61,6 +61,14 @@ function remember<T>(cache: Map<string, Entry<T>>, key: string, value: T) {
 const matchKeyOf = (k: { id: number; ext: string; dub: boolean }) => `${k.id}|${k.ext}|${k.dub ? 1 : 0}`;
 const itemsKeyOf = (k: { ext: string; sourceId: string }) => `${k.ext}|${k.sourceId}`;
 
+/** A value accessor with live `loading` / `error` properties, shaped like a Solid resource. */
+function withState<T>(read: () => T, loading: () => boolean, error: () => unknown) {
+  return Object.defineProperties(read, {
+    loading: { get: loading, enumerable: true },
+    error: { get: error, enumerable: true },
+  }) as (() => T) & { readonly loading: boolean; readonly error: unknown };
+}
+
 /** Titles to search a source with, most specific first, without duplicates. */
 export function searchTitles(m: Media): string[] {
   return [...new Set([m.title.romaji, m.title.english, m.title.userPreferred].filter((t): t is string => !!t?.trim()))];
@@ -131,10 +139,8 @@ export function createSource(
     if (k) remember(matchCache, matchKeyOf(k), v);
     return mutateMatch(v);
   };
-  const match = Object.assign(() => matchRes(), {
-    get loading() { return matchRes.loading; },
-    get error() { return matchError(); },
-  });
+  // Live getters (Object.assign would run them once and copy frozen values).
+  const match = withState(() => matchRes(), () => matchRes.loading, () => matchError());
   /** Whether the current match is for the dub (what the player should be told). */
   const isDub = () => matchKey()?.dub ?? false;
 
@@ -171,10 +177,11 @@ export function createSource(
     return refetchItems();
   };
   // No key (switching sources, or no match): no episodes, rather than the last source's.
-  const items = Object.assign(() => (itemsKey() ? itemsRes() : undefined), {
-    get loading() { return !!itemsKey() && itemsRes.loading; },
-    get error() { return itemsKey() ? itemsError() : undefined; },
-  });
+  const items = withState(
+    () => (itemsKey() ? itemsRes() : undefined),
+    () => !!itemsKey() && itemsRes.loading,
+    () => (itemsKey() ? itemsError() : undefined),
+  );
   // Switching to another source (or show) drops the last one's errors straight away.
   createEffect(on(matchKey, () => {
     setMatchError(undefined);

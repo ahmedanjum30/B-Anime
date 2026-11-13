@@ -23,6 +23,17 @@
       "language": "en",
       "icon": "https://animevillage.org/favicon.ico",
       "description": "AnimeVillage is an online streaming provider for subbed and dubbed anime in english."
+    },
+    {
+      "manifestUrl": "sources/ani-pm/manifest.json",
+      "id": "ani-pm",
+      "name": "AniPm",
+      "version": "1.0.0",
+      "kind": "anime",
+      "author": "you",
+      "language": "en",
+      "icon": "https://ani.pm/favicon.ico?v=20260923b",
+      "description": "AniPm is an online streaming provider for subbed and dubbed anime in english."
     }
   ]
 }

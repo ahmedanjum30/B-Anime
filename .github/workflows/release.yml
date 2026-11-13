@@ -46,6 +46,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly (cached with target/).
+      - uses: ilammy/setup-nasm@v1
+
       - name: Install frontend dependencies
         working-directory: app
         run: npm ci
