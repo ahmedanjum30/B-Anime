@@ -1856,14 +1856,56 @@ a.slot:focus-visible {
   object-fit: contain;
   background: #000;
 }
-.player-video::cue {
+/* Text subtitles are drawn by the player (.sub-layer), so the browser's own are hidden. */
+.player-video::-webkit-media-text-track-container {
+  display: none;
+}
+/* Bottom subtitles sit a set share of the picture's height above its bottom edge (Position in
+   the subtitles menu) and glide further up while the controls show, so they're never behind
+   them. Top-placed ones (signs) stay put. */
+.sub-layer {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 2.5cqh 5cqw 1.5cqh;
+  pointer-events: none;
+}
+.sub-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  text-align: center;
+}
+.sub-bottom {
+  transform: translateY(calc(var(--sub-lift) * -1cqh));
+  transition: transform var(--t-med) var(--ease-out);
+}
+.player:not(.is-idle) .sub-bottom {
+  transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
+}
+.sub-cue {
+  max-width: 100%;
   font: 600 clamp(18px, 2.4vw, 34px) / 1.35 var(--font-ui);
   color: #fff;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.sub-text {
+  padding: 0.04em 0.3em;
   background: rgb(0 0 0 / 0.55);
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
-/* Text subtitles are lifted per cue in Player.tsx (only bottom ones, so top-placed signs stay on
-   screen). Picture subtitles in the lower half use --sub-lift below. */
+@media (prefers-reduced-motion: reduce) {
+  .sub-bottom {
+    transition: none;
+  }
+}
 .player {
   --sub-lift: 6;
 }
@@ -1898,10 +1940,10 @@ a.slot:focus-visible {
 .player:not(.is-idle) .pgs-screen .pgs-low {
   transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
 }
-.player[data-subsize="s"] .player-video::cue {
+.player[data-subsize="s"] .sub-cue {
   font-size: clamp(14px, 1.8vw, 26px);
 }
-.player[data-subsize="l"] .player-video::cue {
+.player[data-subsize="l"] .sub-cue {
   font-size: clamp(22px, 3.2vw, 46px);
 }
 

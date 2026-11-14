@@ -261,6 +261,32 @@ export default function Player() {
   };
   createEffect(on(stream, () => setPictures((p) => ({ ...p, images: [] }))));
 
+  // ── Text subtitles
+  // Drawn by us rather than the browser (its own cues are hidden in app.css): the browser only
+  // repositions a cue when the next one starts, so subtitles couldn't follow the controls or a
+  // fullscreen switch. Ours sit in two stacks: top-placed cues (signs, `line:` near the top) stay
+  // at the top, the rest stack at the bottom and glide up with the controls (CSS transform).
+  const [textCues, setTextCues] = createSignal<{ top: VTTCue[]; bottom: VTTCue[] }>({ top: [], bottom: [] });
+  const isTopCue = (c: VTTCue) =>
+    c.line !== "auto" && (c.snapToLines ? c.line >= 0 : c.line < 50);
+  function updateTextCues() {
+    const t = tracks().find((x) => x.mode === "showing");
+    const active = t && !pictureUrl.has(t) ? Array.from(t.activeCues ?? []) : [];
+    const cues = active.filter((c): c is VTTCue => c instanceof VTTCue);
+    const top = cues.filter(isTopCue);
+    const bottom = cues.filter((c) => !isTopCue(c));
+    const same = (a: VTTCue[], b: VTTCue[]) => a.length === b.length && a.every((c, i) => c === b[i]);
+    const prev = textCues();
+    if (!same(prev.top, top) || !same(prev.bottom, bottom)) setTextCues({ top, bottom });
+  }
+  createEffect(on(stream, () => setTextCues({ top: [], bottom: [] })));
+  /** One cue's text with its WebVTT markup (italics, bold, ruby…) as safe DOM nodes. */
+  const CueText = (p: { cue: VTTCue }) => (
+    <span class="sub-cue">
+      <span class="sub-text" ref={(el) => el.append(p.cue.getCueAsHTML())} />
+    </span>
+  );
+
   // External subtitles are <track>s; HLS ones arrive as TextTracks too. Keep one list.
   let autoPicked = false;
   const refreshTracks = () => {
@@ -269,7 +295,7 @@ export default function Player() {
     for (const t of list) {
       t.oncuechange = () => {
         applyOffset();
-        placeCues();
+        updateTextCues();
         if (pictureUrl.has(t)) void updatePictures();
       };
     }
@@ -295,6 +321,7 @@ export default function Player() {
   const chooseTrack = (i: number, close = true) => {
     tracks().forEach((t, j) => (t.mode = j === i ? "showing" : "disabled"));
     setActiveTrack(i);
+    updateTextCues();
     void updatePictures();
     if (close) setMenu(null);
   };
@@ -561,43 +588,6 @@ export default function Player() {
   };
   onCleanup(() => clearTimeout(idleTimer));
 
-  // ── Subtitle placement
-  // Only bottom subtitles are lifted (Position in the subtitles menu, plus room for the controls
-  // while they show). Lifting the whole subtitle layer pushed top-placed ones (signs, `line:`
-  // cues) off the top of the screen. Cues the file places itself keep their place.
-  // The lift is counted in subtitle lines (line -1 is the bottom line, -3 two lines up), so the
-  // browser still stacks cues that show at the same time instead of drawing them on top of
-  // each other.
-  const [videoHeight, setVideoHeight] = createSignal(0);
-  const SUB_LIFT = { low: 2, mid: 6, high: 13 } as const;
-  /** Font size per subtitle size, mirroring `.player-video::cue` in app.css: [min, vw, max]. */
-  const SUB_FONT = { s: [14, 1.8, 26], m: [18, 2.4, 34], l: [22, 3.2, 46] } as const;
-  const lifted = new WeakSet<TextTrackCue>();
-  function placeCues() {
-    const h = videoHeight() || video?.clientHeight || 0;
-    if (!h) return;
-    const controls = !(idle() && playing() && !menu());
-    const [min, vw, max] = SUB_FONT[subSize()];
-    const lineHeight = Math.min(max, Math.max(min, (vw / 100) * window.innerWidth)) * 1.35;
-    const liftPx = (SUB_LIFT[subPos()] / 100) * h + (controls ? 88 : 0);
-    const line = -1 - Math.round(liftPx / lineHeight);
-    for (const t of tracks()) {
-      for (const cue of Array.from(t.cues ?? [])) {
-        if (!(cue instanceof VTTCue)) continue;
-        if (!lifted.has(cue)) {
-          if (cue.line !== "auto") continue;
-          lifted.add(cue);
-        }
-        if (cue.line !== line) cue.line = line;
-      }
-    }
-  }
-  createEffect(on([subPos, subSize, idle, playing, menu, videoHeight, tracks], placeCues));
-  onMount(() => {
-    const ro = new ResizeObserver(() => setVideoHeight(video.clientHeight));
-    ro.observe(video);
-    onCleanup(() => ro.disconnect());
-  });
 
   const onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement)?.closest("input, select, textarea")) return;
@@ -702,6 +692,17 @@ export default function Player() {
           {(s) => <track kind="subtitles" src={s.url} label={s.label} onLoad={refreshTracks} />}
         </For>
       </video>
+
+      <Show when={textCues().top.length || textCues().bottom.length}>
+        <div class="sub-layer" aria-live="off">
+          <div class="sub-stack sub-top">
+            <For each={textCues().top}>{(c) => <CueText cue={c} />}</For>
+          </div>
+          <div class="sub-stack sub-bottom">
+            <For each={textCues().bottom}>{(c) => <CueText cue={c} />}</For>
+          </div>
+        </div>
+      </Show>
 
       <Show when={pictures().images.length}>
         <div class="pgs-layer" aria-hidden="true">
