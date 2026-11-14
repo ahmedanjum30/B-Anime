@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
-import { Play } from "../lib/icons";
+import { A } from "@solidjs/router";
+import { Info, Play } from "../lib/icons";
 
 import Mark from "./Mark";
 import type { UpNext } from "../lib/types";
@@ -18,16 +19,22 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
     return parts.join(" · ");
   };
 
+  // The card plays; the ⓘ link in the corner opens the show page (a sibling, since a button
+  // can't contain another control).
   return (
+    <div
+      class="upnext-item"
+      data-linked={linked() ? "" : undefined}
+      onPointerEnter={() => setHoverMedia(it().mediaId)}
+      onPointerLeave={() => setHoverMedia(null)}
+      onFocusIn={() => setHoverMedia(it().mediaId)}
+      onFocusOut={() => setHoverMedia(null)}
+    >
     <button
       type="button"
       class="upnext-card"
       data-linked={linked() ? "" : undefined}
       onClick={() => props.onPlay(it())}
-      onPointerEnter={() => setHoverMedia(it().mediaId)}
-      onPointerLeave={() => setHoverMedia(null)}
-      onFocus={() => setHoverMedia(it().mediaId)}
-      onBlur={() => setHoverMedia(null)}
       aria-label={`Play ${it().title}, ${meta()}`}
     >
       <div class="upnext-art" style={{ "background-color": it().color ?? "var(--z3)" }}>
@@ -53,5 +60,9 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
         </div>
       </div>
     </button>
+      <A href={`/show/${it().mediaId}`} class="upnext-info" aria-label={`Show details for ${it().title}`} title="Show details">
+        <Info size={16} stroke-width={2} aria-hidden="true" />
+      </A>
+    </div>
   );
 }
