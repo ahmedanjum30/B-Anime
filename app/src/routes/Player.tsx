@@ -13,6 +13,7 @@ import {
 import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
+import { leaveTo } from "../lib/nav";
 import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
@@ -117,7 +118,7 @@ export default function Player() {
     setTextCues({ top: [], bottom: [] });
     setPictures((p) => ({ ...p, images: [] }));
   };
-  const back =() => navigate(`/show/${mediaId()}`);
+  const back = () => leaveTo(navigate, `/show/${mediaId()}`);
 
   const failure = () => {
     if (page.error) return `Couldn't load the show: ${errorText(page.error)}`;

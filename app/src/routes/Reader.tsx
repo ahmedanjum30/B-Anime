@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { ArrowLeft, ArrowLeftRight, ChevronLeft, ChevronRight, Columns2, File, Rows3 } from "../lib/icons";
 import { errorText, getMedia, getPages, inTauri, saveEntry } from "../lib/api";
 import { applyRules } from "../lib/entry";
+import { leaveTo } from "../lib/nav";
 import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 
@@ -144,7 +145,7 @@ export default function Reader() {
         case "PageUp": if (mode() !== "strip") { backward(); return true; } return false;
         case "Home": setAt(0); return mode() !== "strip";
         case "End": setAt(Math.max(0, count() - step())); return mode() !== "strip";
-        case "Escape": navigate(`/show/${mediaId()}`); return true;
+        case "Escape": leaveTo(navigate, `/show/${mediaId()}`); return true;
       }
       return false;
     })();
@@ -175,7 +176,7 @@ export default function Reader() {
   return (
     <div class="reader" data-mode={mode()}>
       <header class="reader-bar">
-        <button type="button" class="back-link" onClick={() => navigate(`/show/${mediaId()}`)}>
+        <button type="button" class="back-link" onClick={() => leaveTo(navigate, `/show/${mediaId()}`)}>
           <ArrowLeft size={16} stroke-width={2} aria-hidden="true" /> Back
         </button>
         <div class="reader-title">
@@ -218,7 +219,7 @@ export default function Reader() {
         {(msg) => (
           <div class="player-message" role="alert">
             <p>{msg()}</p>
-            <button type="button" class="btn" onClick={() => navigate(`/show/${mediaId()}`)}>Back to the series</button>
+            <button type="button" class="btn" onClick={() => leaveTo(navigate, `/show/${mediaId()}`)}>Back to the series</button>
           </div>
         )}
       </Show>

@@ -2,7 +2,7 @@ class Provider {
   constructor() {
     this.base = "https://ani.pm"; // local server
     this.site = "https://ani.pm";        // only used for display links
-    this.embedBase = "https://embed.settlar.io";                 // embed session server; "" = use the host from the player link
+    this.embedBase = "https://embed.settlar.io"; 
     // mozillaFetch tab (sets Firefox User-Agent and Accept-Language itself).
     // Created on the first request, because main.js is loaded as a script, so a top-level import isn't allowed.
     this.tab = null;
@@ -18,29 +18,42 @@ class Provider {
 
   getSettings() {
     return {
-      episodeServers: ["Settlar"],
+      episodeServers: ["Settlar", "Beta"],
       supportsDub: true,
     };
   }
 
   // referer/origin default to the local server; the embed call passes the player's own.
-  async getJSON(url, { referer = `${this.base}/`, origin = this.base } = {}) {
+  async request(url, { referer = `${this.base}/`, origin = this.base, accept = "application/json" } = {}) {
     const tab = await this.getTab();
     const res = await tab(url, {
       mode: "cors",
       referer,
       origin,
-      headers: { Accept: "application/json" },
+      headers: { Accept: accept },
     });
     const text = await res.text();
+    return { res, text };
+  }
+
+  async getJSON(url, opts) {
+    const { res, text } = await this.request(url, opts);
     let json = {};
     try { json = JSON.parse(text); } catch { /* not JSON */ }
     if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}: ${json.error || json.message || text.slice(0, 200)}`);
     return json;
   }
 
-  // Step 1: search. Result id = "{settlar|anilist}/{key}/{sub|dub}"
-  //   settlar shows are keyed by the ani.pm id, anilist-only shows by the AniList id.
+  // Ids carry everything later steps need, separated by "/":
+  //   show    = "{settlar|anilist}/{key}/{sub|dub}/{anilistId}"
+  //   episode = "{settlar|anilist}/{key}/{number}/{sub|dub}/{anilistId}"
+  // key = ani.pm id for settlar shows, AniList id for anilist-only shows. anilistId is used by the beta server.
+  parseEpisodeId(id) {
+    const [src, key, number, lang = "sub", anilistId] = String(id).split("/");
+    return { src, key, number, lang, anilistId: anilistId || (src === "anilist" ? key : "") };
+  }
+
+  // Step 1: search.
   async search(query) {
     const q = typeof query === "string" ? query : query.query;
     const lang = query && query.dub ? "dub" : "sub";
@@ -52,7 +65,7 @@ class Provider {
       if (key == null) continue;
       if (lang === "dub" && m.dubCount === 0) continue;
       results.push({
-        id: `${isAni ? "anilist" : "settlar"}/${key}/${lang}`,
+        id: `${isAni ? "anilist" : "settlar"}/${key}/${lang}/${m.anilistId ?? ""}`,
         title: m.title,
         url: `${this.site}/${isAni ? "ani" : "anime"}/${m.routeId}`,
         subOrDub: m.dubCount > 0 && m.subCount > 0 ? "both" : m.dubCount > 0 ? "dub" : "sub",
@@ -62,12 +75,13 @@ class Provider {
     return results;
   }
 
-  // Step 2: series + episodes. Episode id = "{source}/{key}/{number}/{sub|dub}"
+  // Step 2: series + episodes.
   async findEpisodes(id) {
-    const [src, key, lang = "sub"] = String(id).split("/");
+    const [src, key, lang = "sub", showAnilistId] = String(id).split("/");
     const path = src === "anilist" ? "ani" : "series";
     const json = await this.getJSON(`${this.base}/api/anime/${path}/${encodeURIComponent(key)}`);
     const data = json.data ?? json;
+    const anilistId = showAnilistId || data.anilistId || (src === "anilist" ? key : "");
     const episodes = [];
     for (const ep of data.episodes || []) {
       const number = Number(ep.number);
@@ -76,7 +90,7 @@ class Provider {
       if (lang === "dub" && ep.dub === false) continue;
       if (lang === "sub" && ep.sub === false) continue;
       episodes.push({
-        id: `${src}/${key}/${number}/${lang}`,
+        id: `${src}/${key}/${number}/${lang}/${anilistId ?? ""}`,
         title: ep.title || `Episode ${number}`,
         number,
         url: `${this.site}/${path === "ani" ? "ani" : "anime"}/${data.routeId ?? key}?ep=${encodeURIComponent(ep.routeId || String(number))}`,
@@ -86,9 +100,68 @@ class Provider {
     return episodes;
   }
 
+  // server "Settlar" or "Beta". Anything else: Settlar first, Beta if Settlar fails.
+  async findEpisodeServer(episode, server) {
+    if (server === "Settlar") return this.settlarServer(episode);
+    if (server === "Beta") return this.betaServer(episode);
+    try {
+      return await this.settlarServer(episode);
+    } catch (settlarErr) {
+      try {
+        return await this.betaServer(episode);
+      } catch (betaErr) {
+        throw new Error(`Settlar: ${settlarErr.message} | Beta: ${betaErr.message}`);
+      }
+    }
+  }
+
+  // Beta server (step 2B): /api/anime/beta-server/{anilistId} -> origin + path, then a predictable master link:
+  //   {origin}/hls/{anilistId}-{slug}/E{0001}/master.m3u8
+  // Sub and dub are audio tracks inside the same master; subtitles are HLS tracks inside it too.
+  async betaServer(episode) {
+    const { number, anilistId } = this.parseEpisodeId(episode.id);
+    if (!anilistId) throw new Error("No AniList id for this show, so the beta server can't be asked");
+
+    const info = await this.getJSON(`${this.base}/api/anime/beta-server/${encodeURIComponent(anilistId)}`);
+    if (!info.available) throw new Error(`Not on the beta server (AniList ${anilistId})`);
+    if (Array.isArray(info.episodes) && !info.episodes.map(Number).includes(Number(number))) {
+      throw new Error(`Episode ${number} isn't on the beta server`);
+    }
+
+    // path "/watch/{slug}-{anilistId}" -> folder "{anilistId}-{slug}"
+    const origin = String(info.origin || "https://beta.cno.to").replace(/\/+$/, "");
+    const slug = String(info.path || "").split("/").pop().replace(new RegExp(`-${anilistId}$`), "");
+    if (!slug) throw new Error(`Beta server gave no path for AniList ${anilistId}`);
+    const e4 = `E${String(number).padStart(4, "0")}`;
+    const master = `${origin}/hls/${anilistId}-${slug}/${e4}/master.m3u8`;
+
+    // Make sure the master exists ("cold" shows may not be built yet).
+    const headers = { referer: `${origin}${info.path}/${number}`, origin };
+    const { res, text } = await this.request(master, { ...headers, accept: "*/*" });
+    if (!res.ok || !text.startsWith("#EXTM3U")) {
+      throw new Error(`Beta master not ready (HTTP ${res.status}${info.cold ? ", cold: true" : ""}): ${master}`);
+    }
+
+    return {
+      server: "Beta",
+      headers: {
+        Referer: `${origin}/`,
+        Origin: origin,
+      },
+      videoSources: [
+        {
+          url: master,
+          quality: "auto",
+          type: "m3u8",
+          subtitles: [], // inside the master playlist as HLS subtitle tracks
+        },
+      ],
+    };
+  }
+
   // Steps 3A -> 3B -> 4: playback-bootstrap -> settlar/session (player link) -> embed session (m3u8 + subtitles)
-  async findEpisodeServer(episode, _server) {
-    const [src, key, number, lang = "sub"] = String(episode.id).split("/");
+  async settlarServer(episode) {
+    const { src, key, number, lang } = this.parseEpisodeId(episode.id);
 
     // A) bootstrap: gives a one-time settlarSelection token
     const qa = new URLSearchParams({ ep: number, lang, core: "0" });
@@ -147,17 +220,25 @@ class Provider {
   }
 
   // The tool passes the episode id string and expects { headers, sources: [...] }.
+  // Asks both servers at once and returns every one that worked (Settlar first).
+  // headers = the first working server's; each source also carries its own server's headers.
   async sources(episodeId) {
-    const result = await this.findEpisodeServer({ id: episodeId }, "Settlar");
+    const servers = this.getSettings().episodeServers;
+    const results = await Promise.allSettled(servers.map((name) => this.findEpisodeServer({ id: episodeId }, name)));
+    const ok = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    if (!ok.length) {
+      throw new Error(results.map((r, i) => `${servers[i]}: ${r.reason?.message ?? r.reason}`).join(" | "));
+    }
     return {
-      headers: result.headers,
-      sources: result.videoSources.map((s) => ({
+      headers: ok[0].headers,
+      sources: ok.flatMap((result) => result.videoSources.map((s) => ({
         url: s.url,
         type: s.type,
         quality: s.quality,
         label: result.server,
+        headers: result.headers,
         subtitles: s.subtitles,
-      })),
+      }))),
     };
   }
 }

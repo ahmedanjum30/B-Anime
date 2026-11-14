@@ -5,6 +5,7 @@ import { A } from "@solidjs/router";
 import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, RefreshCw, Settings } from "../lib/icons";
 
 import { homeStore } from "../lib/store";
+import { trackPages } from "../lib/nav";
 import { fmtAgo, fmtCount } from "../lib/format";
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
 
 export default function Shell(props: ParentProps) {
   const { home, toast } = homeStore;
+  trackPages();
 
   const count = (k: "anime" | "manga") => {
     const h = home();

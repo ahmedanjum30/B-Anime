@@ -26,9 +26,14 @@ export default function EpisodeList(props: {
   const progress = () => props.saver.entry()?.progress ?? 0;
   const canEdit = () => !inTauri || !!account()?.viewer;
 
-  // Episode count: known total, else whatever has aired plus the next one.
+  // A movie, or an ONA that's a single release (no episode count or exactly one, not airing):
+  // AniList files some movies as ONA (e.g. web-released films) and often leaves the count empty.
+  const movie = () =>
+    m().format === "MOVIE" || (m().format === "ONA" && (m().episodes ?? 1) === 1 && !m().nextAiringEpisode);
+  // Episode count: known total, else whatever has aired plus the next one. A movie is one,
+  // even when AniList hasn't filled in its episode count.
   const count = () =>
-    Math.max(m().episodes ?? 0, m().nextAiringEpisode?.episode ?? 0, progress(), m().streamingEpisodes.length);
+    Math.max(m().episodes ?? 0, m().nextAiringEpisode?.episode ?? 0, progress(), m().streamingEpisodes.length, movie() ? 1 : 0);
   const released = () =>
     m().nextAiringEpisode ? m().nextAiringEpisode!.episode - 1 : m().status === "NOT_YET_RELEASED" ? 0 : count();
 
@@ -57,16 +62,22 @@ export default function EpisodeList(props: {
   const showUnaired = () => unairedFrom() <= count() && (chunk() + 1) * CHUNK >= unairedFrom();
 
   return (
-    <Show when={count() > 0}>
-      <section class="section" aria-labelledby="eps-h">
+    // Always shown: the source bar (with its source picker) lives here, so a show without an
+    // episode count on AniList still offers a way to pick a source.
+    <section class="section" aria-labelledby="eps-h">
         <h2 id="eps-h" class="section-head">
-          Episodes
-          <small class="num">
-            {progress()} of {m().episodes ?? released()} watched
-            {m().nextAiringEpisode ? ` · ${released()} out so far` : ""}
-          </small>
+          {movie() ? "Movie" : "Episodes"}
+          <Show when={count() > 0 && !movie()}>
+            <small class="num">
+              {progress()} of {m().episodes ?? released()} watched
+              {m().nextAiringEpisode ? ` · ${released()} out so far` : ""}
+            </small>
+          </Show>
         </h2>
         {props.panel}
+        <Show when={count() === 0}>
+          <p class="ep-unaired">AniList doesn't list any episodes for this yet.</p>
+        </Show>
 
         <Show when={chunks() > 1}>
           <div class="tabs ep-ranges" role="tablist" aria-label="Episode range">
@@ -91,7 +102,7 @@ export default function EpisodeList(props: {
                 <li class="ep-row" data-watched={watched() ? "" : undefined} data-next={next() ? "" : undefined} data-unaired={!aired() ? "" : undefined}>
                   <span class="ep-num num">{ep}</span>
                   <span class="ep-text">
-                    <span class="ep-title">{titles().get(ep) || `Episode ${ep}`}</span>
+                    <span class="ep-title">{titles().get(ep) || (movie() && count() === 1 ? m().title.userPreferred : `Episode ${ep}`)}</span>
                     <Show when={files().get(ep)}>{(f) => <span class="ep-file">{f()}</span>}</Show>
                   </span>
                   <span class="ep-state">
@@ -157,6 +168,5 @@ export default function EpisodeList(props: {
           </p>
         </Show>
       </section>
-    </Show>
   );
 }
