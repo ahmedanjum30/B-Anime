@@ -44,7 +44,12 @@ jobs:
         shell: pwsh
         run: rustup show
 
+      # Restores the release dependencies pre-compiled on main (release-cache.yml). A tag's own
+      # cache could never be reused by the next tag, so it isn't saved.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: false
 
       # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly (cached with target/).
       - uses: ilammy/setup-nasm@v1

@@ -1,0 +1,53 @@
+# Pre-compiles the release build's dependencies on main, so release tags don't start from zero.
+#
+# GitHub keeps caches per branch/tag: a run for a new tag can only read caches saved on its own
+# tag or on main. Releases used to find none and compiled every crate from scratch. This saves
+# the compiled release dependencies on main (shared key "release"), and release.yml restores
+# them, leaving only B-Anime's own crates to compile.
+#
+# Runs when dependencies or the toolchain change, and by hand (Actions → Release cache → Run).
+name: Release cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - .github/workflows/release-cache.yml
+  workflow_dispatch:
+
+jobs:
+  warm:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust (MSVC, from rust-toolchain.toml)
+        shell: pwsh
+        run: rustup show
+
+      # Must match release.yml's rust-cache settings so the key lines up.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly.
+      - uses: ilammy/setup-nasm@v1
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      # The same command the release runs (installer/build.ps1), so the cached dependencies are
+      # built with the same profile and features. No installer or upload.
+      - name: Release build
+        working-directory: app
+        run: npx tauri build --no-bundle
