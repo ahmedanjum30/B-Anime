@@ -14,6 +14,7 @@ export { default as ExternalLink } from "lucide-solid/icons/external-link";
 export { default as File } from "lucide-solid/icons/file";
 export { default as House } from "lucide-solid/icons/house";
 export { default as Library } from "lucide-solid/icons/library";
+export { default as ListVideo } from "lucide-solid/icons/list-video";
 export { default as Maximize } from "lucide-solid/icons/maximize";
 export { default as Minimize } from "lucide-solid/icons/minimize";
 export { default as Minus } from "lucide-solid/icons/minus";

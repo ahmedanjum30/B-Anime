@@ -3,8 +3,8 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import type Hls from "hls.js";
 
 import {
-  ArrowLeft, AudioLines, Captions, ExternalLink, Maximize, Minimize, Pause, PictureInPicture, Play, Settings2,
-  SkipBack, SkipForward, Volume2, VolumeX,
+  ArrowLeft, AudioLines, Captions, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
+  SkipBack, SkipForward, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
   errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
@@ -18,8 +18,12 @@ import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
 
-const WATCHED_AT = 0.8; // fraction of the episode that counts as watched
+/** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
+const WATCHED_AT = 0.8;
 const AUTO_NEXT_SECONDS = 8;
+const FORMAT_NAME: Record<string, string> = {
+  TV: "TV", TV_SHORT: "TV short", MOVIE: "Movie", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music",
+};
 const SKIP_LABEL: Record<string, string> = {
   op: "Skip intro",
   "mixed-op": "Skip intro",
@@ -83,6 +87,20 @@ export default function Player() {
   );
   const [players] = createResource(externalPlayers);
 
+  /** Episodes to switch to from the player: the library's files, or what the source lists. */
+  const episodeChoices = createMemo(() => {
+    if (local()) return (localEps() ?? []).map((number) => ({ number, title: undefined as string | undefined }));
+    return [...source.byNumber().entries()].sort((a, b) => a[0] - b[0]).map(([number, i]) => ({ number, title: i.title ?? undefined }));
+  });
+  /** The episodes panel's search: digits match episode numbers that start with them (4 → 4, 40–49…). */
+  const [epQuery, setEpQuery] = createSignal("");
+  const shownChoices = createMemo(() => {
+    const q = epQuery().trim();
+    if (!q) return episodeChoices();
+    if (/^\d+$/.test(q)) return episodeChoices().filter((e) => String(e.number).startsWith(q));
+    const text = q.toLowerCase();
+    return episodeChoices().filter((e) => e.title?.toLowerCase().includes(text));
+  });
   const has = (ep: number) => (local() ? !!localEps()?.includes(ep) : source.byNumber().has(ep));
   const hasNext = () => has(episode() + 1);
   const hasPrev = () => has(episode() - 1);
@@ -149,7 +167,9 @@ export default function Player() {
   const [videoError, setVideoError] = createSignal<string | null>(null);
   const [tracks, setTracks] = createSignal<TextTrack[]>([]);
   const [activeTrack, setActiveTrack] = createSignal(-1);
-  const [menu, setMenu] = createSignal<null | "subs" | "audio" | "quality" | "external">(null);
+  const [menu, setMenu] = createSignal<null | "subs" | "audio" | "quality" | "external" | "episodes">(null);
+  // The episodes panel opens with an empty search each time.
+  createEffect(on(menu, (m) => m !== "episodes" && setEpQuery("")));
   /** Subtitle files the user loaded for this episode. */
   const [extraSubs, setExtraSubs] = createSignal<{ url: string; label: string }[]>([]);
   const [subSize, setSubSizeSignal] = createSignal<"s" | "m" | "l">(
@@ -471,6 +491,17 @@ export default function Player() {
     void video.play().catch(() => {});
   };
 
+  /**
+   * When the episode counts as watched (seconds): 80% of the way through, and when the episode's
+   * ending is known, not before the ending starts either (both must be reached), so stopping
+   * just short of the credits doesn't count. Auto-skipping the ending passes its start too.
+   */
+  const watchedAt = () => {
+    const share = duration() * WATCHED_AT;
+    const ending = skips().find((s) => s.kind === "ed" || s.kind === "mixed-ed");
+    return ending ? Math.max(share, ending.start) : share;
+  };
+
   const onTime = () => {
     const t = video.currentTime;
     setTime(t);
@@ -480,11 +511,15 @@ export default function Player() {
       lastSave = performance.now();
       persist();
     }
-    if (!marked && duration() > 0 && t / duration() >= WATCHED_AT) {
+    if (!marked && duration() > 0 && t >= watchedAt()) {
       marked = true;
       void markWatched();
     }
   };
+
+  /** Episodes marked watched in this session (the loaded list entry doesn't refresh). */
+  const [markedUpTo, setMarkedUpTo] = createSignal(0);
+  const watchedUpTo = () => Math.max(page()?.listEntry?.progress ?? 0, markedUpTo());
 
   const markWatched = async () => {
     const entry = page()?.listEntry ?? null;
@@ -492,6 +527,7 @@ export default function Player() {
     const total = media()?.episodes ?? null;
     try {
       await saveEntry(mediaId(), applyRules(entry, { progress: episode() }, total));
+      setMarkedUpTo((n) => Math.max(n, episode()));
       notify(`Episode ${episode()} marked watched on AniList.`);
     } catch (e) {
       notify(`Couldn't update AniList: ${errorText(e)}`);
@@ -631,6 +667,7 @@ export default function Player() {
         case "arrowdown": setVol(volume() - 0.05); return true;
         case "m": toggleMute(); return true;
         case "f": void toggleFullscreen(); return true;
+        case "e": setMenu(menu() === "episodes" ? null : "episodes"); return true;
         case "s": skip(); return true;
         case "c": chooseTrack(tracks().length ? (activeTrack() + 2) % (tracks().length + 1) - 1 : -1); return true;
         case "z": nudgeSubs(-0.5); return true;
@@ -788,7 +825,98 @@ export default function Player() {
             <Show when={epTitle() && !/^episode\s*\d+$/i.test(epTitle()!)}> · {epTitle()}</Show>
           </p>
         </div>
+        <button
+          type="button"
+          class="btn btn-sm player-eps-btn"
+          classList={{ "is-on": menu() === "episodes" }}
+          aria-haspopup="dialog"
+          aria-expanded={menu() === "episodes"}
+          title="Choose another episode (E)"
+          onClick={() => setMenu(menu() === "episodes" ? null : "episodes")}
+        >
+          <ListVideo size={16} stroke-width={1.75} aria-hidden="true" /> Episodes
+        </button>
       </header>
+
+      <Show when={menu() === "episodes"}>
+        <aside class="player-drawer" role="dialog" aria-label="Episodes">
+          <div class="drawer-head">
+            <div class="drawer-title">
+              <p class="drawer-show">{title()}</p>
+              <p class="drawer-meta num">
+                {[FORMAT_NAME[media()?.format ?? ""] ?? media()?.format, media()?.seasonYear, media()?.episodes ? `${media()!.episodes} episodes` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+            <button type="button" class="icon-btn" aria-label="Close" onClick={() => setMenu(null)}>
+              <X size={18} stroke-width={1.75} aria-hidden="true" />
+            </button>
+          </div>
+          <button type="button" class="btn btn-sm drawer-details" onClick={back}>Show details</button>
+          <Show when={episodeChoices().length > 12}>
+            <form
+              class="drawer-find"
+              onSubmit={(e) => {
+                e.preventDefault();
+                // Enter plays the episode with exactly that number, if there is one.
+                const n = Number(epQuery());
+                if (episodeChoices().some((x) => x.number === n)) {
+                  setMenu(null);
+                  if (n !== episode()) goTo(n);
+                }
+              }}
+            >
+              <label class="search">
+                <Search size={14} stroke-width={1.75} aria-hidden="true" />
+                <span class="sr-only">Find an episode by number</span>
+                <input
+                  type="search"
+                  inputmode="numeric"
+                  placeholder="Episode number"
+                  value={epQuery()}
+                  onInput={(e) => setEpQuery(e.currentTarget.value)}
+                />
+              </label>
+            </form>
+          </Show>
+          <Show
+            when={episodeChoices().length}
+            fallback={<p class="drawer-empty">{local() ? "No other episodes in your library." : "Episodes are still loading from the source…"}</p>}
+          >
+            <Show when={!shownChoices().length}>
+              <p class="drawer-empty">No episode {epQuery().trim()}.</p>
+            </Show>
+            <ol class="drawer-eps">
+              <For each={shownChoices()}>
+                {(e) => {
+                  const current = () => e.number === episode();
+                  const watched = () => e.number <= watchedUpTo();
+                  return (
+                    <li>
+                      <button
+                        type="button"
+                        class="drawer-ep"
+                        aria-current={current() ? "true" : undefined}
+                        data-watched={watched() ? "" : undefined}
+                        ref={(el) => current() && !epQuery() && queueMicrotask(() => el.scrollIntoView({ block: "center" }))}
+                        onClick={() => {
+                          setMenu(null);
+                          if (!current()) goTo(e.number);
+                        }}
+                      >
+                        <span class="drawer-ep-num num">{e.number}</span>
+                        <span class="drawer-ep-title">{e.title || `Episode ${e.number}`}</span>
+                        <span class="drawer-ep-state">{current() ? "Playing" : watched() ? "Watched" : ""}</span>
+                      </button>
+                    </li>
+                  );
+                }}
+              </For>
+            </ol>
+          </Show>
+        </aside>
+      </Show>
 
       <Show when={activeSkip()}>
         {(s) => (

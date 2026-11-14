@@ -1986,6 +1986,127 @@ a.slot:focus-visible {
   color: var(--z8);
 }
 
+/* Episodes (top right of the player): labelled, so it reads as "pick another episode". */
+.player-eps-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+.player-eps-btn.is-on {
+  background: var(--z3);
+}
+/* The episodes panel: along the right edge, over the picture, under the top bar. */
+.player-drawer {
+  position: absolute;
+  top: 64px;
+  bottom: 96px;
+  right: calc(var(--u) * 3);
+  z-index: 3;
+  width: min(360px, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 2);
+  padding: calc(var(--u) * 2);
+  background: rgb(18 19 24 / 0.96);
+  border: 1px solid var(--z3);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+  animation: drawer-in var(--t-med) var(--ease-out);
+}
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-drawer {
+    animation: none;
+  }
+}
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--u);
+}
+.drawer-title {
+  min-width: 0;
+}
+.drawer-show {
+  font: 700 15px/20px var(--font-head);
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+.drawer-meta {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--z8);
+}
+.drawer-details {
+  align-self: flex-start;
+}
+.drawer-find .search {
+  width: 100%;
+}
+.drawer-empty {
+  font-size: 13px;
+  color: var(--z8);
+}
+.drawer-eps {
+  flex: 1;
+  min-height: 0;
+  margin: 0 calc(var(--u) * -1);
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.drawer-ep {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 3ch 1fr auto;
+  align-items: baseline;
+  gap: calc(var(--u) * 1.5);
+  padding: 8px var(--u);
+  border-radius: calc(var(--radius) - 2px);
+  text-align: left;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--z10);
+}
+.drawer-ep:hover {
+  background: var(--z2);
+}
+.drawer-ep:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: -2px;
+}
+.drawer-ep[data-watched] {
+  color: var(--z8);
+}
+.drawer-ep[aria-current] {
+  background: var(--z3);
+  color: var(--z10);
+}
+.drawer-ep-num {
+  color: var(--z8);
+  text-align: right;
+}
+.drawer-ep-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-ep-state {
+  font-size: 11px;
+  color: var(--z8);
+}
+.drawer-ep[aria-current] .drawer-ep-state {
+  color: var(--red);
+}
+
 .player-controls {
   bottom: 0;
   padding: calc(var(--u) * 6) calc(var(--u) * 3) calc(var(--u) * 2);

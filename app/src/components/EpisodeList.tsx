@@ -6,7 +6,7 @@ import { inTauri } from "../lib/api";
 import type { EntrySaver } from "../lib/entry";
 import type { Media } from "../lib/types";
 
-const CHUNK = 100;
+const CHUNK = 50;
 const dateFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** Episodes as a listings column: number, title, state, and one action per row. */
@@ -47,7 +47,7 @@ export default function EpisodeList(props: {
   });
   const files = createMemo(() => new Map(props.localFiles.map((f) => [f.episode, f.fileName])));
 
-  // Long shows page by 100, opening on the range with the next episode.
+  // Long shows page by 50, opening on the range with the next episode.
   const chunks = () => Math.max(1, Math.ceil(Math.min(count(), released() + 1) / CHUNK));
   const [chunk, setChunk] = createSignal(0);
   createEffect(on(() => m().id, () => setChunk(Math.min(Math.floor(progress() / CHUNK), Math.max(0, chunks() - 1)))));

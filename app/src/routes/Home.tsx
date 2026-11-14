@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createSignal, onCleanup } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { Search } from "../lib/icons";
 
@@ -8,10 +8,12 @@ import { homeStore } from "../lib/store";
 import { fmtDateLine } from "../lib/format";
 import type { UpNext } from "../lib/types";
 import { playLibraryEpisode } from "../lib/play";
+import { getPlayerPrefs, inTauri } from "../lib/api";
 
 export default function Home() {
   const { home, refetch, notify } = homeStore;
   const navigate = useNavigate();
+  const [prefs] = createResource(() => (inTauri ? getPlayerPrefs() : Promise.resolve(null)));
 
   // Re-render the date line and "today" column across midnight.
   const [now, setNow] = createSignal(new Date());
@@ -24,8 +26,9 @@ export default function Home() {
       return;
     }
     if (!item.source) {
-      // Not on disk: the show page can stream it if an extension is installed.
-      navigate(`/show/${item.mediaId}`);
+      // Not on disk: straight to the player, which streams it from the source last used for
+      // this kind of show (the show page's choice), in the preferred audio.
+      navigate(`/watch/${item.mediaId}/${item.episode}${prefs()?.audio === "en" ? "?dub=1" : ""}`);
       return;
     }
     void playLibraryEpisode(item.mediaId, item.episode, navigate, notify);
