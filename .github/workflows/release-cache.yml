@@ -6,6 +6,7 @@
 # them, leaving only B-Anime's own crates to compile.
 #
 # Runs when dependencies or the toolchain change, and by hand (Actions → Release cache → Run).
+# Skipped for "Version X" commits: a release bump changes no dependencies.
 name: Release cache
 
 on:
@@ -20,6 +21,8 @@ on:
 
 jobs:
   warm:
+    # A version bump edits Cargo.toml/Cargo.lock but no dependencies, so there's nothing to warm.
+    if: ${{ !startsWith(github.event.head_commit.message, 'Version ') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
