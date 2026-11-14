@@ -12,7 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-banime-core = { version = "0.1.0", path = "../../crates/core" }
+banime-core = { path = "../../crates/core" }
 chrono = "0.4.45"
 notify = "8"
 serde = { version = "1.0.229", features = ["derive"] }
