@@ -44,7 +44,17 @@ export const homeStore = createRoot(() => {
   /** Library scan progress, pushed by the backend. */
   const [scan, setScan] = createSignal<ScanStatus>({ running: false, phase: null, done: 0, total: 0 });
   void onEvent<ScanStatus>("scan-progress", setScan);
-  void onEvent("update-ready", () => void refetchUpdate());
+  // A new version: said once when it's found (it then downloads in the background), and again
+  // when it's ready to install. The sidebar keeps the notice and the restart button.
+  void onEvent<{ version: string }>("update-available", (u) => {
+    void refetchUpdate();
+    notify(`B-Anime ${u.version} is available. Downloading it in the background…`);
+  });
+  void onEvent("update-failed", () => void refetchUpdate());
+  void onEvent<{ version: string }>("update-ready", (u) => {
+    void refetchUpdate();
+    notify(`B-Anime ${u.version} is ready. Restart to update (in the sidebar).`);
+  });
   void onEvent<{ episode: number; title: string }>("player-watched", (w) =>
     notify(`Episode ${w.episode} of ${w.title} marked watched on AniList.`),
   );

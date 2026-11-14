@@ -58,13 +58,28 @@ export default function Shell(props: ParentProps) {
   );
 }
 
-/** Appears once a new version is downloaded and verified. */
+/** Appears as soon as a new version is found: downloading first, then ready to install. */
 function UpdateNotice() {
   const { update } = homeStore;
   const [restarting, setRestarting] = createSignal(false);
   return (
-    <Show when={update()?.ready && update()?.available}>
+    <Show when={update()?.available}>
       {(u) => (
+        <Show
+          when={update()?.ready}
+          fallback={
+            <div class="rail-update" role="status">
+              <p class="rail-update-text">
+                Version <span class="num">{u().version}</span> is available
+              </p>
+              <p class="rail-update-text rail-update-sub">
+                <Show when={update()?.error} fallback={<><i class="spin-dot" aria-hidden="true" /> Downloading…</>}>
+                  Download failed, will retry
+                </Show>
+              </p>
+            </div>
+          }
+        >
         <div class="rail-update" role="status">
           <p class="rail-update-text">
             Version <span class="num">{u().version}</span> is ready
@@ -83,6 +98,7 @@ function UpdateNotice() {
             <span class="rail-update-label">{restarting() ? "Restarting…" : "Restart to update"}</span>
           </button>
         </div>
+        </Show>
       )}
     </Show>
   );

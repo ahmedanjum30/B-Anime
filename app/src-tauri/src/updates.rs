@@ -11,8 +11,11 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{AppState, msg};
 
+const UPDATE_AVAILABLE: &str = "update-available";
 const UPDATE_READY: &str = "update-ready";
-const FIRST_CHECK: Duration = Duration::from_secs(20);
+const UPDATE_FAILED: &str = "update-failed";
+/// Soon after launch (once startup work has settled), so a new version is announced right away.
+const FIRST_CHECK: Duration = Duration::from_secs(3);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Default)]
@@ -62,9 +65,14 @@ async fn check_and_download(app: &AppHandle) {
             return set_error(Some(e.to_string()));
         }
     };
-    if let Ok(mut slot) = state.updates.available.lock() {
-        *slot = Some(update.clone());
+    let previous = state.updates.available.lock().ok().and_then(|mut slot| slot.replace(update.clone()));
+    // This version was already downloaded on an earlier check: nothing new to announce or fetch.
+    let ready = state.updates.ready.lock().map(|r| r.is_some()).unwrap_or(false);
+    if ready && previous.is_some_and(|p| p.version == update.version) {
+        return;
     }
+    // Announced before the download, so the user hears about it at once.
+    let _ = app.emit(UPDATE_AVAILABLE, &update);
     match updater::download(&update, &state.paths.cache.join("updates")).await {
         Ok(path) => {
             tracing::info!(version = update.version, "update downloaded and verified");
@@ -77,6 +85,7 @@ async fn check_and_download(app: &AppHandle) {
         Err(e) => {
             tracing::warn!(error = %e, "update download failed");
             set_error(Some(e.to_string()));
+            let _ = app.emit(UPDATE_FAILED, &update);
         }
     }
 }

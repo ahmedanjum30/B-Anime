@@ -2678,6 +2678,12 @@ a.slot:focus-visible {
 .rail-update .btn {
   justify-content: center;
 }
+.rail-update-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--z8);
+}
 .rail-update-icon {
   display: none;
 }
