@@ -616,7 +616,9 @@ export default function Player() {
 
 
   const onKey = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement)?.closest("input, select, textarea")) return;
+    // Text fields and dropdowns keep their keys. Sliders don't: after clicking the timeline it
+    // keeps focus, and its own arrow-key step (0.1 s) made arrows seem to do nothing.
+    if ((e.target as HTMLElement)?.closest("input:not([type=range]), select, textarea")) return;
     const k = e.key.toLowerCase();
     const handled = (() => {
       switch (k) {
