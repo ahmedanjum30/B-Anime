@@ -61,7 +61,7 @@ export default function UpNextCard(props: { item: UpNext; onPlay: (item: UpNext)
       </div>
     </button>
       <A href={`/show/${it().mediaId}`} class="upnext-info" aria-label={`Show details for ${it().title}`} title="Show details">
-        <Info size={16} stroke-width={2} aria-hidden="true" />
+        <Info size={18} stroke-width={2} aria-hidden="true" />
       </A>
     </div>
   );

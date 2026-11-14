@@ -276,18 +276,22 @@
   left: 10px;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: rgb(0 0 0 / 0.22);
   color: var(--z10);
-  /* The icon carries its own soft shadow, so it stays legible on bright art with a light backing. */
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
-  transition: background-color var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out);
+  /* No backing: the icon's own shadow keeps it legible on bright art. */
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.75));
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out);
+}
+/* Only while the card is hovered or has keyboard focus. */
+.upnext-item:hover .upnext-info,
+.upnext-item:focus-within .upnext-info {
+  opacity: 1;
 }
 .upnext-info:hover {
-  background: rgb(0 0 0 / 0.5);
-  transform: scale(1.06);
+  transform: scale(1.12);
 }
 .upnext-info:focus-visible {
   outline: 2px solid var(--z10);
