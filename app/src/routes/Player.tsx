@@ -85,14 +85,39 @@ export default function Player() {
   const has = (ep: number) => (local() ? !!localEps()?.includes(ep) : source.byNumber().has(ep));
   const hasNext = () => has(episode() + 1);
   const hasPrev = () => has(episode() - 1);
-  const goTo = (ep: number) =>
+  const goTo = (ep: number) => {
+    if (ep === episode()) return;
+    stopForSwitch();
     navigate(
       local()
         ? `/watch/${mediaId()}/${ep}?local=1`
         : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}${dubParam() ? "&dub=1" : ""}`,
       { replace: true },
     );
-  const back = () => navigate(`/show/${mediaId()}`);
+  };
+  /**
+   * Switching episodes answers at once: the current one's place is saved, it stops, and the
+   * spinner shows while the next one's video is looked up (which can take a few seconds).
+   * Otherwise the old episode kept playing until then and the click looked missed.
+   */
+  const stopForSwitch = () => {
+    persist();
+    destroy();
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    // Zeroed before the pause event's own save runs, so it can't file this position under the
+    // next episode.
+    setDuration(0);
+    setTime(0);
+    setBuffered(0);
+    setPlaying(false);
+    setVideoError(null);
+    setWaiting(true);
+    setTextCues({ top: [], bottom: [] });
+    setPictures((p) => ({ ...p, images: [] }));
+  };
+  const back =() => navigate(`/show/${mediaId()}`);
 
   const failure = () => {
     if (page.error) return `Couldn't load the show: ${errorText(page.error)}`;
