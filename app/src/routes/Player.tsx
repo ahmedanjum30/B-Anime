@@ -681,6 +681,24 @@ export default function Player() {
     idleTimer = window.setTimeout(() => playing() && !menu() && setIdle(true), 2600);
   };
   onCleanup(() => clearTimeout(idleTimer));
+  /**
+   * Mouse movement while the controls are hidden: only a deliberate move brings them back
+   * (40 px within 0.6 s), not a nudge or jitter (a mouse under a blanket). Clicks and keys still
+   * show them at once, and while they show any movement keeps them up.
+   */
+  let moveFrom: { x: number; y: number; t: number } | null = null;
+  const onPointerMove = (e: PointerEvent) => {
+    if (!(idle() && playing() && !menu())) return wake();
+    const now = performance.now();
+    if (!moveFrom || now - moveFrom.t > 600) {
+      moveFrom = { x: e.clientX, y: e.clientY, t: now };
+      return;
+    }
+    if (Math.hypot(e.clientX - moveFrom.x, e.clientY - moveFrom.y) >= 40) {
+      moveFrom = null;
+      wake();
+    }
+  };
 
 
   const onKey = (e: KeyboardEvent) => {
@@ -741,7 +759,7 @@ export default function Player() {
       classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu() }}
       data-subsize={subSize()}
       data-subpos={subPos()}
-      onPointerMove={wake}
+      onPointerMove={onPointerMove}
       onPointerDown={wake}
     >
       <video
