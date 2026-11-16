@@ -187,15 +187,6 @@ export default function Player() {
     setSubPosSignal(p);
     store("banime.subpos", ["low", "mid", "high"].indexOf(p));
   };
-  /** The box behind text subtitles: none, light, medium (default) or dark. */
-  const SUB_BGS = ["off", "light", "mid", "dark"] as const;
-  const [subBg, setSubBgSignal] = createSignal<(typeof SUB_BGS)[number]>(
-    SUB_BGS[Math.max(0, Math.min(3, stored("banime.subbg", 2)))],
-  );
-  const setSubBg = (b: (typeof SUB_BGS)[number]) => {
-    setSubBgSignal(b);
-    store("banime.subbg", SUB_BGS.indexOf(b));
-  };
   /** Subtitle timing correction in seconds (positive shows them later). */
   const [subOffset, setSubOffset] = createSignal(0);
   /** Alternate audio tracks inside an HLS stream (e.g. Japanese and English). */
@@ -718,7 +709,6 @@ export default function Player() {
       classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu() }}
       data-subsize={subSize()}
       data-subpos={subPos()}
-      data-subbg={subBg()}
       onPointerMove={wake}
       onPointerDown={wake}
     >
@@ -1090,15 +1080,6 @@ export default function Player() {
                     <For each={[["low", "Low"], ["mid", "Middle"], ["high", "High"]] as const}>
                       {([v, label]) => (
                         <button type="button" aria-pressed={subPos() === v} onClick={() => setSubPos(v)}>{label}</button>
-                      )}
-                    </For>
-                  </div>
-
-                  <p class="menu-head">Background</p>
-                  <div class="menu-row" role="group" aria-label="Subtitle background">
-                    <For each={[["off", "None"], ["light", "Light"], ["mid", "Medium"], ["dark", "Dark"]] as const}>
-                      {([v, label]) => (
-                        <button type="button" aria-pressed={subBg() === v} onClick={() => setSubBg(v)}>{label}</button>
                       )}
                     </For>
                   </div>

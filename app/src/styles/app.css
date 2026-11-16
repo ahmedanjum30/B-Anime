@@ -1928,26 +1928,9 @@ a.slot:focus-visible {
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
-/* Background (subtitles menu): how dark the box behind the text is. */
-.player {
-  --sub-bg: 0.55;
-}
-.player[data-subbg="off"] {
-  --sub-bg: 0;
-}
-/* No box: a firmer outline-like shadow keeps the text readable on bright scenes. */
-.player[data-subbg="off"] .sub-text {
-  text-shadow: 0 0 2px #000, 0 1px 3px #000, 0 0 8px rgb(0 0 0 / 0.8);
-}
-.player[data-subbg="light"] {
-  --sub-bg: 0.3;
-}
-.player[data-subbg="dark"] {
-  --sub-bg: 0.82;
-}
 .sub-text {
   padding: 0.04em 0.3em;
-  background: rgb(0 0 0 / var(--sub-bg));
+  background: rgb(0 0 0 / 0.55);
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
