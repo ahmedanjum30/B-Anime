@@ -21,6 +21,12 @@ import type { SkipTime } from "../lib/types";
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
 const WATCHED_AT = 0.8;
 const AUTO_NEXT_SECONDS = 8;
+/** At most this many sign / song / note lines at the top at once. */
+const TOP_CUES_MAX = 3;
+/** Dialogue lines shown at the bottom at once (two people talking over each other). */
+const BOTTOM_CUES_MAX = 2;
+/** This many lines sharing exact start and end times are sign text, not dialogue. */
+const SIGN_GROUP_MIN = 3;
 const FORMAT_NAME: Record<string, string> = {
   TV: "TV", TV_SHORT: "TV short", MOVIE: "Movie", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music",
 };
@@ -328,9 +334,46 @@ export default function Player() {
   function updateTextCues() {
     const t = tracks().find((x) => x.mode === "showing");
     const active = t && !pictureUrl.has(t) ? Array.from(t.activeCues ?? []) : [];
-    const cues = active.filter((c): c is VTTCue => c instanceof VTTCue);
-    const top = cues.filter(isTopCue);
-    const bottom = cues.filter((c) => !isTopCue(c));
+    // Exact duplicates showing together (some sources repeat a line, or add an outline copy)
+    // are shown once.
+    const seen = new Set<string>();
+    const cues = active
+      .filter((c): c is VTTCue => c instanceof VTTCue)
+      .filter((c) => {
+        const key = `${isTopCue(c) ? "t" : "b"}|${c.text.trim()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    // Stable order: the line that started first sits at the bottom of its stack and keeps its
+    // place; newer lines go above it instead of reshuffling everything.
+    const byStart = (a: VTTCue, b: VTTCue) => b.startTime - a.startTime || a.endTime - b.endTime;
+    let bottom = cues.filter((c) => !isTopCue(c));
+    const signs = cues.filter(isTopCue);
+    // Plain subtitles: three or more lines with exactly the same start and end are a block of
+    // sign text (a slide or notice translated line by line); dialogue doesn't come in groups
+    // like that. They go to the top.
+    const timing = (c: VTTCue) => `${c.startTime}|${c.endTime}`;
+    const groups = new Map<string, number>();
+    for (const c of bottom) groups.set(timing(c), (groups.get(timing(c)) ?? 0) + 1);
+    if ([...groups.values()].some((n) => n >= SIGN_GROUP_MIN)) {
+      signs.push(...bottom.filter((c) => groups.get(timing(c))! >= SIGN_GROUP_MIN));
+      bottom = bottom.filter((c) => groups.get(timing(c))! < SIGN_GROUP_MIN);
+    }
+    // Plain subtitles (no styles or positions) can't say what's a sign. When more lines are up
+    // at once than dialogue ever needs, the longest-lasting ones are signs (a sign's translation
+    // stays up for the whole shot; a spoken line lasts a few seconds): they go to the top.
+    if (bottom.length > BOTTOM_CUES_MAX) {
+      const length = (c: VTTCue) => c.endTime - c.startTime;
+      const ranked = [...bottom].sort((a, b) => length(a) - length(b));
+      const keep = new Set(ranked.slice(0, BOTTOM_CUES_MAX));
+      signs.push(...bottom.filter((c) => !keep.has(c)));
+      bottom = bottom.filter((c) => keep.has(c));
+    }
+    bottom.sort(byStart);
+    // Signs, songs and notes (everything that isn't dialogue) at the top, newest first, at most
+    // a few so they never cover the picture.
+    const top = signs.sort((a, b) => b.startTime - a.startTime).slice(0, TOP_CUES_MAX);
     const same = (a: VTTCue[], b: VTTCue[]) => a.length === b.length && a.every((c, i) => c === b[i]);
     const prev = textCues();
     if (!same(prev.top, top) || !same(prev.bottom, bottom)) setTextCues({ top, bottom });

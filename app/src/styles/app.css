@@ -1915,6 +1915,10 @@ a.slot:focus-visible {
   text-align: center;
 }
 .sub-bottom {
+  /* Never climbs past the lower ~40% of the picture, however long the lines. */
+  max-height: 40cqh;
+  overflow: hidden;
+  justify-content: flex-end;
   transform: translateY(calc(var(--sub-lift) * -1cqh));
   transition: transform var(--t-med) var(--ease-out);
 }
@@ -1923,7 +1927,7 @@ a.slot:focus-visible {
 }
 .sub-cue {
   max-width: 100%;
-  font: 600 clamp(18px, 2.4vw, 34px) / 1.35 var(--font-ui);
+  font: 600 var(--sub-font) / 1.35 var(--font-ui);
   color: #fff;
   white-space: pre-line;
   overflow-wrap: anywhere;
@@ -1934,6 +1938,16 @@ a.slot:focus-visible {
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+}
+/* Signs, songs and notes: smaller than dialogue, and kept to the top quarter of the picture so
+   they never cover it (the player also shows at most three). */
+.sub-top {
+  max-height: 25cqh;
+  overflow: hidden;
+}
+.sub-top .sub-cue {
+  font-size: calc(var(--sub-font) * 0.78);
+  font-weight: 500;
 }
 @media (prefers-reduced-motion: reduce) {
   .sub-bottom {
@@ -1974,11 +1988,14 @@ a.slot:focus-visible {
 .player:not(.is-idle) .pgs-screen .pgs-low {
   transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
 }
-.player[data-subsize="s"] .sub-cue {
-  font-size: clamp(14px, 1.8vw, 26px);
+.player {
+  --sub-font: clamp(18px, 2.4vw, 34px);
 }
-.player[data-subsize="l"] .sub-cue {
-  font-size: clamp(22px, 3.2vw, 46px);
+.player[data-subsize="s"] {
+  --sub-font: clamp(14px, 1.8vw, 26px);
+}
+.player[data-subsize="l"] {
+  --sub-font: clamp(22px, 3.2vw, 46px);
 }
 
 .player-top,

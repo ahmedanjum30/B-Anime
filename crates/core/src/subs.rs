@@ -98,8 +98,6 @@ fn finish_inline(s: &str) -> String {
 #[derive(Debug, Default, Clone)]
 pub struct AssHeader {
     top_styles: HashMap<String, bool>,
-    /// SSA (v4) numbers alignments differently from ASS (v4+).
-    legacy: bool,
 }
 
 impl AssHeader {
@@ -112,9 +110,6 @@ impl AssHeader {
             if line.starts_with('[') {
                 let section = line.to_ascii_lowercase();
                 in_styles = section.contains("styles");
-                if section == "[v4 styles]" {
-                    header.legacy = true;
-                }
                 if section == "[script info]" || section == "[events]" {
                     fields.clear();
                 }
@@ -129,21 +124,28 @@ impl AssHeader {
                 let parts: Vec<&str> = s.split(',').map(str::trim).collect();
                 let get = |name: &str| fields.iter().position(|f| f == name).and_then(|i| parts.get(i).copied());
                 if let (Some(name), Some(align)) = (get("name"), get("alignment").and_then(|a| a.parse::<u8>().ok())) {
-                    header.top_styles.insert(name.to_ascii_lowercase(), header.is_top(align, false));
+                    header.top_styles.insert(name.to_ascii_lowercase(), Self::is_top(align));
                 }
             }
         }
         header
     }
 
-    fn is_top(&self, align: u8, numpad: bool) -> bool {
-        if self.legacy && !numpad { matches!(align, 5..=7) } else { matches!(align, 7..=9) }
+    /// Anything not placed along the bottom (top or middle): signs, notes, typesetting. Both
+    /// numberings put the bottom at 1–3 (ASS numpad; SSA then has 5–7 top and 9–11 middle).
+    fn is_top(align: u8) -> bool {
+        !matches!(align, 1..=3)
     }
 
     /// One event's cue text and placement; `None` for drawings and lines with no text.
+    ///
+    /// Placement is "top" for everything that isn't dialogue: lines whose style or own tags put
+    /// them anywhere but the bottom, lines placed at an exact spot (`\pos`, `\move`), and styles
+    /// named for signs, songs or typesetting. Dialogue stays at the bottom.
     pub fn event(&self, style: &str, raw: &str) -> Option<(String, bool)> {
         let mut text = String::with_capacity(raw.len());
-        let mut top = self.top_styles.get(&style.trim().to_ascii_lowercase()).copied().unwrap_or(false);
+        let style = style.trim().to_ascii_lowercase();
+        let mut top = self.top_styles.get(&style).copied().unwrap_or(false) || non_dialogue_style(&style);
         let mut rest = raw;
         while let Some(open) = rest.find('{') {
             text.push_str(&rest[..open]);
@@ -154,14 +156,16 @@ impl AssHeader {
             let block = &rest[open + 1..open + close];
             for tag in block.split('\\').map(str::trim) {
                 if let Some(n) = tag.strip_prefix("an").and_then(|n| n.parse::<u8>().ok()) {
-                    top = self.is_top(n, true);
+                    top = Self::is_top(n);
                 } else if let Some(n) = tag.strip_prefix('a').and_then(|n| n.parse::<u8>().ok()) {
                     // Legacy \a uses the SSA numbering whatever the script version.
-                    top = matches!(n, 5..=7);
+                    top = Self::is_top(n);
                 } else if let Some(n) = tag.strip_prefix('p').and_then(|n| n.parse::<u8>().ok())
                     && n > 0
                 {
                     return None; // a vector drawing, not text
+                } else if tag.starts_with("pos(") || tag.starts_with("move(") {
+                    top = true; // placed at an exact spot: typesetting, not dialogue
                 }
             }
             rest = &rest[open + close + 1..];
@@ -171,6 +175,17 @@ impl AssHeader {
         let text = finish(&text);
         (!text.is_empty()).then_some((text, top))
     }
+}
+
+/// Style names fansubs use for things that aren't dialogue ("Sign", "OP-Romaji", "Song_EN",
+/// "TS", "Kara", "Title"…), matched as whole words.
+fn non_dialogue_style(style: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "sign", "signs", "song", "songs", "lyric", "lyrics", "kara", "karaoke", "op", "ed", "opening",
+        "ending", "insert", "title", "titles", "note", "notes", "tl", "caption", "captions", "ts",
+        "typeset", "typesetting", "screen", "romaji", "kanji",
+    ];
+    style.split(|c: char| !c.is_ascii_alphabetic()).any(|w| WORDS.contains(&w))
 }
 
 /// `H:MM:SS.cc` to milliseconds.
@@ -237,6 +252,16 @@ mod tests {
         assert!(!vtt.contains("m 0 0"), "drawings are dropped");
         assert_eq!(vtt.matches("Moving").count(), 1, "per-frame typesetting merges: {vtt}");
         assert!(vtt.contains("00:00:07.000 --> 00:00:07.080"), "{vtt}");
+    }
+
+    #[test]
+    fn only_dialogue_stays_at_the_bottom() {
+        let script = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Alignment\nStyle: Default,2\nStyle: OP-Romaji,2\nStyle: Mid,5\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Talk\nDialogue: 0,0:00:03.00,0:00:04.00,OP-Romaji,,0,0,0,,Lyric\nDialogue: 0,0:00:05.00,0:00:06.00,Mid,,0,0,0,,Middle\nDialogue: 0,0:00:07.00,0:00:08.00,Default,,0,0,0,,{\\pos(400,300)}Placed\n";
+        let vtt = ass_to_vtt(script);
+        assert!(vtt.contains("00:00:02.000\nTalk"), "dialogue stays at the bottom: {vtt}");
+        assert!(vtt.contains("line:1\nLyric"), "song styles go to the top: {vtt}");
+        assert!(vtt.contains("line:1\nMiddle"), "middle-aligned styles go to the top: {vtt}");
+        assert!(vtt.contains("line:1\nPlaced"), "\\pos lines go to the top: {vtt}");
     }
 
     #[test]
