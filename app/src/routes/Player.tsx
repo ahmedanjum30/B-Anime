@@ -246,8 +246,18 @@ export default function Player() {
       if (src.kind === "hls" && !HlsLib?.isSupported() && !video.canPlayType("application/vnd.apple.mpegurl")) {
         return setVideoError("This system can't play HLS streams.");
       }
+      // Where to start: the saved position, looked up before loading so streams begin there.
+      // Seeking only once the video's details arrived raced hls.js's own start (at 0:00), and
+      // auto-skip then jumped over an opening at the start instead of resuming.
+      const startAt = await resumePoint();
+      if (s !== stream() || idx !== sourceIndex()) return;
       if (HlsLib && HlsLib.isSupported()) {
-        const instance = new HlsLib({ enableWorker: true, backBufferLength: 90, maxBufferLength: 60 });
+        const instance = new HlsLib({
+          enableWorker: true,
+          backBufferLength: 90,
+          maxBufferLength: 60,
+          startPosition: startAt ?? -1,
+        });
         hls = instance;
         instance.on(HlsLib.Events.MANIFEST_PARSED, (_e, data) => {
           setLevels(data.levels.map((l) => ({ height: l.height, bitrate: l.bitrate })));
@@ -460,10 +470,25 @@ export default function Player() {
 
   // ── Resume, position saving, watched-at-80%, skip times
   let resumed = false;
+  /** The saved position this episode resumed from (also keeps auto-skip off sections before it). */
+  let resumeAt: number | null = null;
+  /** The resume still has to be confirmed (and announced) once the video's details are in. */
+  let resumePending = false;
   let marked = false;
   let lastSave = 0;
+  /** The saved position to start this episode at, looked up once per episode. */
+  const resumePoint = async () => {
+    if (resumed || !inTauri) return null;
+    resumed = true;
+    const pos = await getPosition(mediaId(), episode()).catch(() => null);
+    resumeAt = pos && pos > 30 ? pos : null;
+    resumePending = resumeAt !== null;
+    return resumeAt;
+  };
   createEffect(on(() => `${mediaId()}:${episode()}`, () => {
     resumed = false;
+    resumeAt = null;
+    resumePending = false;
     marked = false;
     setSkips([]);
     setCountdown(null);
@@ -478,12 +503,17 @@ export default function Player() {
   const onMeta = async () => {
     setDuration(video.duration || 0);
     video.volume = volume();
-    if (!resumed && inTauri) {
-      resumed = true;
-      const pos = await getPosition(mediaId(), episode()).catch(() => null);
-      if (pos && pos > 30 && pos < video.duration * 0.9) {
-        video.currentTime = pos;
+    if (resumePending && resumeAt !== null) {
+      resumePending = false;
+      const pos = resumeAt;
+      if (pos < video.duration * 0.9) {
+        // Streams already start there; plain files (and anything that drifted) seek now.
+        if (Math.abs(video.currentTime - pos) > 2) video.currentTime = pos;
         notify(`Resumed at ${fmtClock(pos)}.`);
+      } else {
+        // Saved near the very end: start over instead.
+        resumeAt = null;
+        video.currentTime = 0;
       }
     }
     const mal = media()?.idMal;
@@ -554,6 +584,8 @@ export default function Player() {
     const s = activeSkip();
     if (!s || !autoSkip() || !playing() || autoSkipped.has(s.start)) return;
     autoSkipped.add(s.start);
+    // A section before the resume point was passed last time; never jump because of it.
+    if (resumeAt !== null && s.start < resumeAt) return;
     video.currentTime = s.end;
     notify(`Skipped the ${(SECTION_NAME[s.kind] ?? "section").toLowerCase()}.`);
   });
@@ -738,7 +770,8 @@ export default function Player() {
               : "This video couldn't be played.",
           )
         }
-        onClick={toggle}
+        // With a menu or the episodes panel open, a click on the picture just closes it.
+        onClick={() => (menu() ? setMenu(null) : toggle())}
         onDblClick={() => void toggleFullscreen()}
       >
         <For each={stream()?.subtitles ?? []}>
