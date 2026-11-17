@@ -2,14 +2,20 @@
 
 ## Ship a version
 
-1. Bump the version in `app/src-tauri/tauri.conf.json` (and `version` under `[workspace.package]`
-   in `Cargo.toml`, to keep them in step).
-2. Commit, then tag and push:
+From a clean `main`:
 
-   ```
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
+```powershell
+scripts\release.ps1            # 0.2.5 -> 0.2.6
+scripts\release.ps1 minor      # 0.2.5 -> 0.3.0
+scripts\release.ps1 major      # 0.2.5 -> 1.0.0
+scripts\release.ps1 0.4.0      # an exact version
+scripts\release.ps1 -DryRun    # only print the next version
+```
+
+It pulls `main`, bumps the version in `Cargo.toml`, `app/package.json` and
+`app/src-tauri/tauri.conf.json`, refreshes `Cargo.lock` and `app/package-lock.json`, commits
+`Version X.Y.Z`, tags `vX.Y.Z` and pushes both. It stops without changing anything if you're not
+on `main`, have uncommitted changes, or the tag already exists.
 
 The **Release** workflow (`.github/workflows/release.yml`) builds the app in release mode,
 packs it with [B-Installer](https://github.com/ahmedanjum30/B-installer), writes
