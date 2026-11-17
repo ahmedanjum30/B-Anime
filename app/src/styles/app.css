@@ -1217,7 +1217,14 @@ code {
 }
 
 /* Episodes: a listings column */
+/* Episode ranges wrap onto more lines instead of scrolling sideways: the row's scrollbar is
+   hidden and a mouse wheel only scrolls vertically, so ranges off to the right were out of
+   reach on long shows. */
 .ep-ranges {
+  flex-wrap: wrap;
+  column-gap: calc(var(--u) * 3);
+  row-gap: 0;
+  overflow-x: visible;
   border-bottom: 1px solid var(--z3);
   margin-bottom: var(--u);
 }
