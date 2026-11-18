@@ -1,8 +1,8 @@
 import type { ParentProps } from "solid-js";
 import { Show, createSignal } from "solid-js";
-import { installUpdate } from "../lib/api";
+import { inTauri, installUpdate, openSupport } from "../lib/api";
 import { A } from "@solidjs/router";
-import { House, Library, CalendarDays, BookOpen, Compass, Puzzle, RefreshCw, Settings } from "../lib/icons";
+import { House, Heart, Library, CalendarDays, BookOpen, Compass, Puzzle, RefreshCw, Settings } from "../lib/icons";
 
 import { homeStore } from "../lib/store";
 import { trackPages } from "../lib/nav";
@@ -47,6 +47,20 @@ export default function Shell(props: ParentProps) {
             </li>
           ))}
         </ul>
+        {/* Support: looks like the menu's items, kept at the foot of the rail. Opens the
+            Patreon page in the browser. */}
+        <Show when={inTauri}>
+          <button
+            type="button"
+            class="rail-link rail-support"
+            aria-label="Support B-Anime on Patreon (opens your browser)"
+            title="Support B-Anime on Patreon"
+            onClick={() => void openSupport().catch(() => {})}
+          >
+            <Heart size={18} stroke-width={1.75} aria-hidden="true" />
+            <span class="rail-label">Support</span>
+          </button>
+        </Show>
         <UpdateNotice />
         <SyncFoot />
       </nav>

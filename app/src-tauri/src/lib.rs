@@ -351,6 +351,15 @@ fn open_anilist(app: AppHandle, id: u64, kind: banime_core::library::Kind) -> Re
         .map_err(|e| e.to_string())
 }
 
+/// The project's Patreon page (Support in the sidebar).
+const SUPPORT_URL: &str = "https://www.patreon.com/cw/ahmedanjum30";
+
+/// Opens the Patreon page in the browser. The address is fixed here, not passed in.
+#[tauri::command]
+fn open_support(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url(SUPPORT_URL, None::<&str>).map_err(|e| e.to_string())
+}
+
 /// Saves a list change to AniList and the local mirror; the UI refreshes via LIBRARY_CHANGED.
 #[tauri::command]
 async fn save_entry(
@@ -602,6 +611,7 @@ pub fn run() {
             set_extension_repos,
             read_extension_repo,
             open_anilist,
+            open_support,
             get_account,
             anilist_login,
             anilist_cancel_login,

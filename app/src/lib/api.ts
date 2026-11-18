@@ -132,6 +132,8 @@ export async function getMedia(id: number): Promise<MediaPage> {
 
 /** Opens the show's AniList page in the default browser. */
 export const openAniList = (id: number, type: LibraryKind) => call<void>("open_anilist", { id, kind: type });
+/** Opens the project's Patreon page in the browser. */
+export const openSupport = () => call<void>("open_support");
 
 /** Saves to AniList; resolves with the entry as AniList now has it. */
 export async function saveEntry(mediaId: number, change: EntryChange): Promise<ListEntry> {

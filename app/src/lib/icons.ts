@@ -12,6 +12,7 @@ export { default as Columns2 } from "lucide-solid/icons/columns-2";
 export { default as Compass } from "lucide-solid/icons/compass";
 export { default as ExternalLink } from "lucide-solid/icons/external-link";
 export { default as File } from "lucide-solid/icons/file";
+export { default as Heart } from "lucide-solid/icons/heart";
 export { default as House } from "lucide-solid/icons/house";
 export { default as Info } from "lucide-solid/icons/info";
 export { default as Library } from "lucide-solid/icons/library";
