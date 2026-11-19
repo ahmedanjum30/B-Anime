@@ -3,15 +3,15 @@
   "description": "Extensions made by the B-Anime project.",
   "extensions": [
     {
-      "manifestUrl": "sources/anime-heaven/manifest.json",
-      "id": "anime-heaven",
-      "name": "AnimeHeaven",
-      "version": "1.0.0",
+      "manifestUrl": "sources/ani-pm/manifest.json",
+      "id": "ani-pm",
+      "name": "AniPm",
+      "version": "1.0.1",
       "kind": "anime",
       "author": "you",
       "language": "en",
-      "icon": "https://animeheaven.me/ah_logo.png",
-      "description": "AnimeHeaven is an online streaming provider for subbed anime in english."
+      "icon": "https://ani.pm/favicon.ico?v=20260923b",
+      "description": "AniPm is an online streaming provider for subbed and dubbed anime in english."
     },
     {
       "manifestUrl": "sources/anime-village/manifest.json",
@@ -25,15 +25,15 @@
       "description": "AnimeVillage is an online streaming provider for subbed and dubbed anime in english."
     },
     {
-      "manifestUrl": "sources/ani-pm/manifest.json",
-      "id": "ani-pm",
-      "name": "AniPm",
-      "version": "1.0.1",
+      "manifestUrl": "sources/anime-heaven/manifest.json",
+      "id": "anime-heaven",
+      "name": "AnimeHeaven",
+      "version": "1.0.0",
       "kind": "anime",
       "author": "you",
       "language": "en",
-      "icon": "https://ani.pm/favicon.ico?v=20260923b",
-      "description": "AniPm is an online streaming provider for subbed and dubbed anime in english."
+      "icon": "https://animeheaven.me/ah_logo.png",
+      "description": "AnimeHeaven is an online streaming provider for subbed anime in english."
     }
   ]
 }
