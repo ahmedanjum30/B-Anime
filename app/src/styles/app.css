@@ -1997,11 +1997,6 @@ a.slot:focus-visible {
   font-size: calc(var(--sub-font) * 0.78);
   font-weight: 500;
 }
-@media (prefers-reduced-motion: reduce) {
-  .sub-bottom {
-    transition: none;
-  }
-}
 .player {
   --sub-lift: 6;
 }
@@ -2118,11 +2113,6 @@ a.slot:focus-visible {
   from {
     opacity: 0;
     transform: translateX(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .player-drawer {
-    animation: none;
   }
 }
 .drawer-head {

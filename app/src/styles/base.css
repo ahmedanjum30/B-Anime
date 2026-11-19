@@ -112,11 +112,7 @@ input[type="search"]::-webkit-search-decoration {
   white-space: nowrap;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
-  }
-}
+/* Animations play the same whatever Windows' "Animation effects" (reduced motion) setting says:
+   the app's motion is short and functional (loaders, fades, small slides). An earlier
+   reduced-motion rule squeezed every animation to 1 ms, which left looping ones (spinners,
+   loading shimmer) running 1,000 times a second. */
