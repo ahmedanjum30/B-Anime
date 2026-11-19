@@ -81,9 +81,16 @@ jobs:
         with:
           packages: platform-tools
 
+      # Up to 3 tries: the NDK download from Google sometimes arrives corrupt ("Error reading Zip
+      # content").
       - name: Android NDK and platform
         run: |
-          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37.0" > /dev/null
+          for try in 1 2 3; do
+            sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37.0" > /dev/null && break
+            [ "$try" = 3 ] && exit 1
+            echo "::warning::SDK download failed (try $try of 3); retrying"
+            sleep 10
+          done
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: libclang for bindgen
