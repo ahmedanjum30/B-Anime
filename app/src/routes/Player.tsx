@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import type Hls from "hls.js";
 
 import {
-  ArrowLeft, AudioLines, Captions, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
+  ArrowLeft, AudioLines, Captions, ChevronLeft, ChevronRight, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
   SkipBack, SkipForward, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
@@ -14,6 +14,7 @@ import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
+import { rememberDub } from "../lib/dub";
 import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
@@ -193,6 +194,10 @@ export default function Player() {
     setSubPosSignal(p);
     store("banime.subpos", ["low", "mid", "high"].indexOf(p));
   };
+  /** The subtitles menu's page: the main one, or the language list opened from it. */
+  const [subPage, setSubPage] = createSignal<"main" | "lang">("main");
+  // Each time the menu opens, it starts on its main page.
+  createEffect(on(menu, (m) => m !== "subs" && setSubPage("main")));
   /** Subtitle timing correction in seconds (positive shows them later). */
   const [subOffset, setSubOffset] = createSignal(0);
   /** Alternate audio tracks inside an HLS stream (e.g. Japanese and English). */
@@ -223,6 +228,9 @@ export default function Player() {
     const re = names[code] ?? new RegExp(`^${code}\\b`, "i");
     return re.test(lang) || re.test(label);
   };
+
+  // Watching streamed Sub or Dub makes that this show's choice next time (Home, show page).
+  createEffect(on(stream, (s) => s && !local() && rememberDub(mediaId(), dubParam())));
 
   // Several sources with known audio: start on the one in the preferred language.
   createEffect(
@@ -417,9 +425,24 @@ export default function Player() {
     const same = tracks().filter((x) => (x.label || x.language) === (t.label || t.language));
     return same.length > 1 ? `${base} (${same.indexOf(t) + 1})` : base;
   };
+  /**
+   * The chosen subtitle file is still downloading. Browsers fetch a <track> only once it's
+   * switched on, so this covers the moment between choosing a language and its lines arriving.
+   * (Subtitles inside an HLS stream have no <track> element and never show it.)
+   */
+  const [subLoading, setSubLoading] = createSignal(false);
+  /** The list of subtitle languages hasn't arrived yet (the episode's stream is still loading). */
+  const subListLoading = () => stream.loading || (!!stream() && duration() === 0 && tracks().length === 0);
+  const checkSubLoading = () => {
+    const t = tracks()[activeTrack()];
+    const el = t && Array.from(video.querySelectorAll("track")).find((e) => e.track === t);
+    // readyState: 0 not started, 1 loading, 2 loaded, 3 failed.
+    setSubLoading(!!el && el.readyState < 2);
+  };
   const chooseTrack = (i: number, close = true) => {
     tracks().forEach((t, j) => (t.mode = j === i ? "showing" : "disabled"));
     setActiveTrack(i);
+    checkSubLoading();
     updateTextCues();
     void updatePictures();
     if (close) setMenu(null);
@@ -843,12 +866,21 @@ export default function Player() {
               src={s.images ? `${s.url}?as=cues` : s.url}
               srclang={s.lang}
               label={s.label}
-              onLoad={refreshTracks}
+              onLoad={() => { refreshTracks(); checkSubLoading(); }}
+              onError={checkSubLoading}
             />
           )}
         </For>
         <For each={extraSubs()}>
-          {(s) => <track kind="subtitles" src={s.url} label={s.label} onLoad={refreshTracks} />}
+          {(s) => (
+            <track
+              kind="subtitles"
+              src={s.url}
+              label={s.label}
+              onLoad={() => { refreshTracks(); checkSubLoading(); }}
+              onError={checkSubLoading}
+            />
+          )}
         </For>
       </video>
 
@@ -1144,21 +1176,57 @@ export default function Player() {
                 <Captions size={20} stroke-width={2} />
               </button>
               <Show when={menu() === "subs"}>
-                <div class="menu menu-wide" role="menu">
+                <div class="menu menu-wide menu-paged" role="menu">
+                  {/* One menu, two pages: the main page has a Language row (showing the current
+                      track) that opens the (often long) language list in place, with a way back. */}
+                  <Show
+                    when={subPage() === "main"}
+                    fallback={
+                      <>
+                        <button type="button" class="menu-back" onClick={() => setSubPage("main")}>
+                          <ChevronLeft size={16} stroke-width={2} aria-hidden="true" /> Language
+                        </button>
+                        <div class="menu-scroll" aria-label="Subtitle language">
+                          <button type="button" role="menuitemradio" aria-checked={activeTrack() === -1} onClick={() => chooseTrack(-1)}>Off</button>
+                          <Show when={subListLoading()}>
+                            <p class="menu-loading menu-loading-row" role="status">
+                              <i class="spin-dot" aria-hidden="true" /> Loading subtitles…
+                            </p>
+                          </Show>
+                          <For each={tracks()}>
+                            {(t, i) => (
+                              <button type="button" role="menuitemradio" aria-checked={activeTrack() === i()} onClick={() => chooseTrack(i(), false)}>
+                                {trackName(t, i())}
+                                <Show when={activeTrack() === i() && subLoading()}>
+                                  <span class="menu-loading" role="status">
+                                    <i class="spin-dot" aria-hidden="true" /> Loading…
+                                  </span>
+                                </Show>
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                        <Show when={inTauri}>
+                          <button type="button" role="menuitem" class="menu-action" onClick={() => void loadSubtitleFile()}>
+                            Load from file…
+                          </button>
+                        </Show>
+                      </>
+                    }
+                  >
                   <p class="menu-head">Subtitles</p>
-                  <button type="button" role="menuitemradio" aria-checked={activeTrack() === -1} onClick={() => chooseTrack(-1)}>Off</button>
-                  <For each={tracks()}>
-                    {(t, i) => (
-                      <button type="button" role="menuitemradio" aria-checked={activeTrack() === i()} onClick={() => chooseTrack(i())}>
-                        {trackName(t, i())}
-                      </button>
-                    )}
-                  </For>
-                  <Show when={inTauri}>
-                    <button type="button" role="menuitem" class="menu-action" onClick={() => void loadSubtitleFile()}>
-                      Load from file…
-                    </button>
-                  </Show>
+                  <button type="button" role="menuitem" class="menu-next" aria-haspopup="menu" onClick={() => setSubPage("lang")}>
+                    <span>Language</span>
+                    <span class="menu-next-value">
+                      <Show
+                        when={!subLoading() && !(subListLoading() && activeTrack() < 0)}
+                        fallback={<><i class="spin-dot" aria-hidden="true" /> Loading…</>}
+                      >
+                        {activeTrack() >= 0 && tracks()[activeTrack()] ? trackName(tracks()[activeTrack()], activeTrack()) : "Off"}
+                      </Show>
+                      <ChevronRight size={16} stroke-width={2} aria-hidden="true" />
+                    </span>
+                  </button>
 
                   <p class="menu-head">Size</p>
                   <div class="menu-row" role="group" aria-label="Subtitle size">
@@ -1186,6 +1254,7 @@ export default function Player() {
                     </button>
                     <button type="button" onClick={() => nudgeSubs(0.5)} aria-label="Show subtitles 0.5 seconds later">+0.5 s</button>
                   </div>
+                  </Show>
                 </div>
               </Show>
             </div>

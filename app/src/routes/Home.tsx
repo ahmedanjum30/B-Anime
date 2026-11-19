@@ -9,6 +9,7 @@ import { fmtDateLine } from "../lib/format";
 import type { UpNext } from "../lib/types";
 import { playLibraryEpisode } from "../lib/play";
 import { getPlayerPrefs, inTauri } from "../lib/api";
+import { recallDub } from "../lib/dub";
 
 export default function Home() {
   const { home, refetch, notify } = homeStore;
@@ -27,8 +28,10 @@ export default function Home() {
     }
     if (!item.source) {
       // Not on disk: straight to the player, which streams it from the source last used for
-      // this kind of show (the show page's choice), in the preferred audio.
-      navigate(`/watch/${item.mediaId}/${item.episode}${prefs()?.audio === "en" ? "?dub=1" : ""}`);
+      // this kind of show (the show page's choice), in Sub or Dub as last watched for this show
+      // (else the preferred audio).
+      const dub = recallDub(item.mediaId) ?? prefs()?.audio === "en";
+      navigate(`/watch/${item.mediaId}/${item.episode}${dub ? "?dub=1" : ""}`);
       return;
     }
     void playLibraryEpisode(item.mediaId, item.episode, navigate, notify);

@@ -2402,6 +2402,64 @@ a.slot:focus-visible {
 .menu-wide {
   min-width: 240px;
 }
+/* Subtitles menu: one menu with two pages. The main page's Language row (current track on the
+   right) opens the language list in place; only that list scrolls, so the back row and
+   "Load from file…" stay in view however many tracks there are. */
+.menu-paged {
+  overflow: hidden;
+}
+.menu .menu-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--z10);
+}
+.menu-next-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--z6);
+}
+.menu .menu-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--z3);
+  border-radius: 2px 2px 0 0;
+  font: 700 11px/16px var(--font-head);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--z10);
+}
+.menu-next-value .spin-dot,
+.menu-loading .spin-dot {
+  flex: none;
+}
+.menu-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--z6);
+}
+.menu-loading-row {
+  margin: 0;
+  padding: 8px 12px;
+}
+.menu-scroll {
+  display: grid;
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 /* An on/off setting inside a menu: label (with a hint line) and a small switch. */
 .menu .menu-toggle {
   display: flex;

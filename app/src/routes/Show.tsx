@@ -6,6 +6,7 @@ import EpisodeList from "../components/EpisodeList";
 import ChapterList from "../components/ChapterList";
 import SourcePanel from "../components/SourcePanel";
 import { createSource } from "../lib/source";
+import { recallDub, rememberDub } from "../lib/dub";
 import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
 import { ArrowLeft, ExternalLink } from "../lib/icons";
@@ -70,9 +71,15 @@ export default function Show() {
     return m ? (m.type === "ANIME" ? m.episodes : m.chapters) : null;
   };
   const navigate = useNavigate();
-  // Sub or dub for online sources: starts from the audio preference (Settings → Playback).
+  // Sub or dub for online sources: what was last picked or watched for this show, else the
+  // audio preference (Settings → Playback). Related links reuse this page, so it follows the id.
   const [prefs] = createResource(getPlayerPrefs);
-  const [dubChoice, setDubChoice] = createSignal<boolean | null>(null);
+  const [dubChoice, setDubChoiceSignal] = createSignal<boolean | null>(recallDub(id()));
+  createEffect(on(id, (i) => setDubChoiceSignal(recallDub(i)), { defer: true }));
+  const setDubChoice = (d: boolean) => {
+    rememberDub(id(), d);
+    setDubChoiceSignal(d);
+  };
   const dub = () => dubChoice() ?? prefs()?.audio === "en";
   const source = createSource(() => page()?.media, undefined, dub);
 
