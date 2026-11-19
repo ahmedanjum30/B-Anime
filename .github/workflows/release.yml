@@ -181,7 +181,8 @@ jobs:
           PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # Stray CR/LF/spaces (a secret set from Windows) would make base64 refuse the input.
+          printf '%s' "$KEYSTORE" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/release.jks"
           cat > app/src-tauri/gen/android/keystore.properties <<EOF
           storeFile=$RUNNER_TEMP/release.jks
           storePassword=$PASSWORD
