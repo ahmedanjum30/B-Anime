@@ -25,9 +25,9 @@ jobs:
     if: ${{ !startsWith(github.event.head_commit.message, 'Version ') }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -43,7 +43,13 @@ jobs:
           shared-key: release
 
       # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly.
-      - uses: ilammy/setup-nasm@v1
+      - name: NASM (BoringSSL's x86_64 assembly)
+        shell: pwsh
+        run: |
+          $v = "2.16.03"
+          Invoke-WebRequest "https://www.nasm.us/pub/nasm/releasebuilds/$v/win64/nasm-$v-win64.zip" -OutFile "$env:RUNNER_TEMP\nasm.zip"
+          Expand-Archive "$env:RUNNER_TEMP\nasm.zip" "$env:RUNNER_TEMP\nasm"
+          "$env:RUNNER_TEMP\nasm\nasm-$v" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       - name: Install frontend dependencies
         working-directory: app

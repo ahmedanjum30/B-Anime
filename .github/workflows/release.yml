@@ -30,7 +30,7 @@ jobs:
       BI_VERSION: v0.1.1
       HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches the app version
         shell: pwsh
@@ -40,7 +40,7 @@ jobs:
           if ($tag -ne $conf) { throw "Tag v$tag doesn't match tauri.conf.json version $conf" }
           "VERSION=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -58,7 +58,13 @@ jobs:
           save-if: false
 
       # mozillafetch builds BoringSSL; NASM assembles its x86_64 assembly (cached with target/).
-      - uses: ilammy/setup-nasm@v1
+      - name: NASM (BoringSSL's x86_64 assembly)
+        shell: pwsh
+        run: |
+          $v = "2.16.03"
+          Invoke-WebRequest "https://www.nasm.us/pub/nasm/releasebuilds/$v/win64/nasm-$v-win64.zip" -OutFile "$env:RUNNER_TEMP\nasm.zip"
+          Expand-Archive "$env:RUNNER_TEMP\nasm.zip" "$env:RUNNER_TEMP\nasm"
+          "$env:RUNNER_TEMP\nasm\nasm-$v" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       - name: Install frontend dependencies
         working-directory: app
@@ -93,7 +99,7 @@ jobs:
           BANIME_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: ./installer/build.ps1 -Bi "$env:GITHUB_WORKSPACE\tools\bi.exe" -Version $env:VERSION
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -121,7 +127,7 @@ jobs:
     env:
       NDK_VERSION: 27.1.12297006
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches the app version
         run: |
@@ -132,14 +138,14 @@ jobs:
           fi
           echo "VERSION=$conf" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
 
       # The runner has the SDK; this only sets up sdkmanager and accepts the licences. (The
       # action's default also asks for the long-removed "tools" package, which fails.)
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
 
@@ -165,7 +171,7 @@ jobs:
         with:
           shared-key: android
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -200,7 +206,7 @@ jobs:
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify "$apk"
           mkdir -p dist && cp "$apk" "dist/B-Anime-$VERSION-arm64.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist/B-Anime-${{ env.VERSION }}-arm64.apk
@@ -212,7 +218,7 @@ jobs:
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -248,8 +254,8 @@ jobs:
       group: gh-pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: release
           merge-multiple: true
