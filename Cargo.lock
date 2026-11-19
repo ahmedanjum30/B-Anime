@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "banime-app"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "banime-core",
  "chrono",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "banime-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "aes",
  "axum",
