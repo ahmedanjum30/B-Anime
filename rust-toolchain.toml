@@ -1,3 +1,6 @@
+# An exact version, not "stable": CI machines come with different stable versions depending on
+# their image, and a different compiler can't reuse the pre-compiled release cache (a release on
+# a newer image missed it and compiled everything). Raise this deliberately to update Rust.
 [toolchain]
-channel = "stable"
+channel = "1.100.0"
 targets = ["x86_64-pc-windows-msvc"]
