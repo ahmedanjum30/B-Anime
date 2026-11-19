@@ -9,7 +9,7 @@ use banime_core::updater::{self, Update};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{AppState, msg};
+use crate::AppState;
 
 const UPDATE_AVAILABLE: &str = "update-available";
 const UPDATE_READY: &str = "update-ready";
@@ -132,7 +132,7 @@ pub fn install_update(app: AppHandle, state: tauri::State<'_, AppState>) -> Resu
     }
     #[cfg(not(target_os = "android"))]
     {
-        updater::launch_installer(&path).map_err(msg)?;
+        updater::launch_installer(&path).map_err(crate::msg)?;
         app.exit(0);
         Ok(())
     }
