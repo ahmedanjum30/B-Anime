@@ -1,4 +1,5 @@
-# Pre-compiles the release build's dependencies on main, so release tags don't start from zero.
+# Pre-compiles the release builds' dependencies on main (Windows and Android), so release tags
+# don't start from zero.
 #
 # GitHub keeps caches per branch/tag: a run for a new tag can only read caches saved on its own
 # tag or on main. Releases used to find none and compiled every crate from scratch. This saves
@@ -60,3 +61,56 @@ jobs:
       - name: Release build
         working-directory: app
         run: npx tauri build --no-bundle
+
+  # The same for the Android APK (shared key "android"). Mirrors release.yml's android job up to
+  # the build; no signing key needed (an unsigned build compiles the same Rust), nothing uploaded.
+  warm-android:
+    if: ${{ !startsWith(github.event.head_commit.message, 'Version ') }}
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.1.12297006
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Android NDK and platform
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37.0" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: libclang for bindgen
+        run: |
+          sudo apt-get install -y -qq libclang-dev > /dev/null
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot" >> "$GITHUB_ENV"
+
+      - name: Rust with the Android target
+        run: |
+          rustup show
+          rustup target add aarch64-linux-android
+
+      # Must match release.yml's android rust-cache settings so the key lines up.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Android build (unsigned)
+        working-directory: app
+        run: npx tauri android build --target aarch64 --apk
