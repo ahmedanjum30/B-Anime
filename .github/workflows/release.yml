@@ -15,12 +15,16 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Run by hand on a branch to try the Android build without publishing anything (only the
+  # android job runs; Windows, publish and pages need a version tag).
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   windows:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     env:
       BI_VERSION: v0.1.1
@@ -121,17 +125,23 @@ jobs:
 
       - name: Check the tag matches the app version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           conf=$(jq -r .version app/src-tauri/tauri.conf.json)
-          [ "$tag" = "$conf" ] || { echo "Tag v$tag doesn't match tauri.conf.json version $conf"; exit 1; }
-          echo "VERSION=$tag" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            [ "$tag" = "$conf" ] || { echo "Tag v$tag doesn't match tauri.conf.json version $conf"; exit 1; }
+          fi
+          echo "VERSION=$conf" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
+      # The runner has the SDK; this only sets up sdkmanager and accepts the licences. (The
+      # action's default also asks for the long-removed "tools" package, which fails.)
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Android NDK and platform
         run: |
@@ -197,7 +207,7 @@ jobs:
   # One release with every platform's file. Windows is required; Android joins when it built.
   publish:
     needs: [windows, android]
-    if: always() && needs.windows.result == 'success'
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
