@@ -4,7 +4,7 @@
   The Release workflow on GitHub then builds and publishes the installer.
 
 .EXAMPLE
-  scripts\release.ps1            # 0.2.5 -> 0.2.6
+  scripts\release.ps1            # 0.2.5 -> 0.2.6, 0.2.9 -> 0.3.0 (parts stay single digits)
   scripts\release.ps1 minor      # 0.2.5 -> 0.3.0
   scripts\release.ps1 major      # 0.2.5 -> 1.0.0
   scripts\release.ps1 0.4.0      # exact version
@@ -43,8 +43,13 @@ if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "Can't read the current 
 $major, $minor, $patch = [int]$Matches[1], [int]$Matches[2], [int]$Matches[3]
 
 switch -Regex ($Bump) {
-  '^patch$' { $next = "$major.$minor.$($patch + 1)" }
-  '^minor$' { $next = "$major.$($minor + 1).0" }
+  # Each part stays a single digit: 0.3.9 -> 0.4.0, 0.9.9 -> 1.0.0.
+  '^patch$' {
+    if ($patch -lt 9) { $next = "$major.$minor.$($patch + 1)" }
+    elseif ($minor -lt 9) { $next = "$major.$($minor + 1).0" }
+    else { $next = "$($major + 1).0.0" }
+  }
+  '^minor$' { $next = if ($minor -lt 9) { "$major.$($minor + 1).0" } else { "$($major + 1).0.0" } }
   '^major$' { $next = "$($major + 1).0.0" }
   '^v?\d+\.\d+\.\d+$' { $next = $Bump.TrimStart("v") }
   default { throw "Use patch, minor, major or a version like 0.3.0 (got '$Bump')." }
