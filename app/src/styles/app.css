@@ -1967,11 +1967,11 @@ a.slot:focus-visible {
   max-height: 40cqh;
   overflow: hidden;
   justify-content: flex-end;
-  transform: translateY(calc(var(--sub-lift) * -1cqh));
+  transform: translateY(calc(-1 * max(var(--sub-lift) * 1cqh, var(--sub-floor))));
   transition: transform var(--t-med) var(--ease-out);
 }
 .player:not(.is-idle) .sub-bottom {
-  transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
+  transform: translateY(calc(-1 * max(var(--sub-lift) * 1cqh, var(--sub-floor)) - 88px));
 }
 .sub-cue {
   max-width: 100%;
@@ -1999,6 +1999,10 @@ a.slot:focus-visible {
 }
 .player {
   --sub-lift: 6;
+  /* Bottom subtitles never sit lower than this above the bottom edge. On some PCs "Low"
+     subtitles at the very bottom vanished whenever the controls hid (and reappeared when the
+     controls lifted them); something covered the bottom strip there. */
+  --sub-floor: 56px;
 }
 .player[data-subpos="low"] {
   --sub-lift: 2;
@@ -2028,10 +2032,10 @@ a.slot:focus-visible {
 }
 /* Picture subtitles in the lower half follow the same lift (cqh: the picture's height). */
 .pgs-screen .pgs-low {
-  transform: translateY(calc(var(--sub-lift) * -1cqh));
+  transform: translateY(calc(-1 * max(var(--sub-lift) * 1cqh, var(--sub-floor))));
 }
 .player:not(.is-idle) .pgs-screen .pgs-low {
-  transform: translateY(calc(var(--sub-lift) * -1cqh - 88px));
+  transform: translateY(calc(-1 * max(var(--sub-lift) * 1cqh, var(--sub-floor)) - 88px));
 }
 .player {
   --sub-font: clamp(18px, 2.4vw, 34px);
