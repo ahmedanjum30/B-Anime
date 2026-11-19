@@ -2,3 +2,5 @@
 *.png binary
 *.ico binary
 *.icns binary
+# Windows batch files need CRLF.
+*.bat text eol=crlf
