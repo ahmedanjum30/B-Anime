@@ -24,7 +24,7 @@ pub struct Client {
 
 impl Client {
     pub fn new(token: Option<String>) -> Result<Self> {
-        let http = reqwest::Client::builder()
+        let http = crate::http::client_builder()
             .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(30))
             .build()

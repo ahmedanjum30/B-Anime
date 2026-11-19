@@ -91,7 +91,7 @@ pub fn newer(candidate: &str, current: &str) -> bool {
 
 async fn download(url: &reqwest::Url, cap: usize, limits: Limits) -> Result<String> {
     runtime::check_url(url, limits.allow_private_hosts).map_err(Error::Extension)?;
-    let client = reqwest::Client::builder()
+    let client = crate::http::client_builder()
         .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(30))
         .build()

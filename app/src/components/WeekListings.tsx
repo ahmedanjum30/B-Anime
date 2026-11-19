@@ -50,7 +50,65 @@ export default function WeekListings(props: {
   });
   const cell = (time: string, day: Date) => cells().get(`${time}|${day.toDateString()}`) ?? [];
 
+  // Phones: the same week as a column of days, each listing its slots by time. Only days with
+  // something on, plus today.
+  const byDay = createMemo(() =>
+    days()
+      .map((d) => ({
+        day: d,
+        today: sameDay(d, props.now),
+        slots: placed()
+          .filter((s) => sameDay(s.at, d))
+          .sort((a, b) => a.at.getTime() - b.at.getTime()),
+      }))
+      .filter((g) => g.slots.length || g.today),
+  );
+
   return (
+    <>
+    <ol class="week-days" aria-label={props.caption ?? "Episodes airing this week for shows on your Watching list"}>
+      <For each={byDay()}>
+        {(g) => (
+          <li class="week-day" data-today={g.today ? "" : undefined}>
+            <h3 class="week-day-head">
+              {fmtDay(g.day)} <span class="num">{g.day.getDate()}</span>
+              <Show when={g.today}>
+                <span class="week-day-today">Today</span>
+              </Show>
+            </h3>
+            <Show when={g.slots.length} fallback={<p class="week-day-empty">Nothing airs today.</p>}>
+              <ul class="week-slots">
+                <For each={g.slots}>
+                  {(s) => (
+                    <li>
+                      <A
+                        href={`/show/${s.mediaId}`}
+                        class="slot week-slot"
+                        data-watched={s.watched ? "" : undefined}
+                        data-offlist={s.onList === false ? "" : undefined}
+                      >
+                        <span class="week-slot-time num">{fmtTime(s.at)}</span>
+                        <span class="slot-title">
+                          <i class="swatch" style={{ "background-color": s.color ?? "var(--z5)" }} aria-hidden="true" />
+                          <span class="slot-name">{s.title}</span>
+                        </span>
+                        <span class="slot-line">
+                          <Show when={s.mark}>{(m) => <Mark kind={m()} />}</Show>
+                          <span class="num">Ep {s.episode}</span>
+                          <Show when={s.watched}>
+                            <span class="slot-stamp">watched</span>
+                          </Show>
+                        </span>
+                      </A>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </li>
+        )}
+      </For>
+    </ol>
     <table class="listings">
       <caption class="sr-only">{props.caption ?? "Episodes airing this week for shows on your Watching list"}</caption>
       <thead>
@@ -109,5 +167,6 @@ export default function WeekListings(props: {
         </For>
       </tbody>
     </table>
+    </>
   );
 }

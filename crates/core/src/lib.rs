@@ -6,6 +6,7 @@ pub mod db;
 pub mod error;
 pub mod extensions;
 pub mod home;
+pub mod http;
 pub mod library;
 pub mod mkv;
 pub mod paths;

@@ -22,6 +22,29 @@ packs it with [B-Installer](https://github.com/ahmedanjum30/B-installer), writes
 `SHA256SUMS.txt`, and publishes a GitHub release with both files. It refuses to run when the
 tag doesn't match the version in `tauri.conf.json`.
 
+## What a release contains
+
+The **Release** workflow builds, in parallel:
+
+- the Windows setup, `B-Anime-Setup-<version>.exe`;
+- the Android APK, `B-Anime-<version>-arm64.apk`, signed with the release key. This needs the
+  repository secrets `ANDROID_KEYSTORE` (the `.jks`, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`
+  and `ANDROID_KEY_ALIAS`; without them the release goes out with Windows only.
+
+Then it publishes one GitHub release with both files and a combined `SHA256SUMS.txt`, and updates
+the website (below). The Windows release still goes out if the Android build fails.
+
+## Website
+
+`site/` is the website, published to the `gh-pages` branch and served by GitHub Pages at
+https://ahmedanjum30.github.io/B-Anime/. Every release also puts its downloads at fixed links
+there: `download/B-Anime-Setup.exe` and `download/B-Anime-arm64.apk` (the site's buttons). Only
+the latest are kept.
+
+Changes to `site/` on `main` publish on their own (the **Website** workflow, or run it by hand
+from Actions). The first time, turn on Pages in the repository's Settings → Pages: deploy from
+the `gh-pages` branch, `/ (root)`.
+
 ## How installed copies update
 
 - B-Anime checks the latest GitHub release 20 seconds after launch and every 6 hours

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-19T00:00:00Z",
+  "title": "Design System: B-Anime",
+  "extensions": {
+    "colorMeta": {
+      "listings-red": { "role": "primary", "displayName": "Listings Red", "canonical": "#e5483b", "tonalRamp": ["#3a120e", "#5c1c16", "#86281f", "#b23428", "#e5483b", "#ec7366", "#f3a097", "#f9cfca"] },
+      "final-amber": { "role": "secondary", "displayName": "Final Amber", "canonical": "#e2a43b", "tonalRamp": ["#3a280b", "#5a3f11", "#7e5818", "#a8771f", "#e2a43b", "#e9bb69", "#f0d197", "#f8e8c9"] },
+      "synced-teal": { "role": "tertiary", "displayName": "Synced Teal", "canonical": "#3fa79c", "tonalRamp": ["#0f2b28", "#16413c", "#1f5c55", "#2c7d74", "#3fa79c", "#6bbdb4", "#9ad3cc", "#cbe9e5"] },
+      "channel-violet": { "role": "tertiary", "displayName": "Channel Violet", "canonical": "#8d7be3", "tonalRamp": ["#221c3f", "#332a5e", "#473b82", "#6352ad", "#8d7be3", "#a899ea", "#c4baf1", "#e1dcf8"] },
+      "ink-black": { "role": "neutral", "displayName": "Ink Black", "canonical": "#121318", "tonalRamp": ["#121318", "#191b22", "#20232c", "#2a2e3a", "#3a3f4e", "#555b6d", "#878da1", "#ece7dc"] },
+      "graphite": { "role": "neutral", "displayName": "Graphite", "canonical": "#191b22" },
+      "graphite-raised": { "role": "neutral", "displayName": "Graphite Raised", "canonical": "#20232c" },
+      "graphite-line": { "role": "neutral", "displayName": "Graphite Line", "canonical": "#2a2e3a" },
+      "graphite-strong": { "role": "neutral", "displayName": "Graphite Strong", "canonical": "#3a3f4e" },
+      "slate-muted": { "role": "neutral", "displayName": "Slate Muted", "canonical": "#555b6d" },
+      "slate-text": { "role": "neutral", "displayName": "Slate Text", "canonical": "#878da1" },
+      "pewter-text": { "role": "neutral", "displayName": "Pewter Text", "canonical": "#b9bcc6" },
+      "newsprint-white": { "role": "neutral", "displayName": "Newsprint White", "canonical": "#ece7dc" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Show titles on the show page." },
+      "headline": { "displayName": "Section head", "purpose": "Uppercase section heads over a 2px rule." },
+      "title": { "displayName": "Card title", "purpose": "Up next and cover card titles." },
+      "body": { "displayName": "Body", "purpose": "Text and controls." },
+      "label": { "displayName": "Label", "purpose": "Select labels, marks, ep chips." }
+    },
+    "shadows": [
+      { "name": "cover-lift", "value": "0 16px 40px rgb(0 0 0 / 0.45)", "purpose": "Show page cover over the banner." },
+      { "name": "play-badge", "value": "0 4px 12px rgb(0 0 0 / 0.35)", "purpose": "Red play disc on Up next cards." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "All state transitions." },
+      { "name": "t-fast", "value": "120ms", "purpose": "Hover and colour changes." },
+      { "name": "t-med", "value": "240ms", "purpose": "Reveals, image filters, controls fading." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "1100px" },
+      { "name": "wide", "value": "1900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one primary action in a view.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Play</button>",
+      "css": ".ds-btn{height:32px;padding:0 14px;border-radius:4px;border:0;font:600 14px/20px Archivo,system-ui,sans-serif;cursor:pointer;transition:background-color 120ms cubic-bezier(0.16,1,0.3,1)} .ds-btn-primary{background:#e5483b;color:#fff} .ds-btn-primary:hover{background:color-mix(in srgb,#e5483b 88%,white)} .ds-btn:focus-visible{outline:2px solid #e5483b;outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Every other action.",
+      "html": "<button class=\"ds-btn2\">Mark watched</button>",
+      "css": ".ds-btn2{height:32px;padding:0 14px;border-radius:4px;border:0;background:#2a2e3a;color:#ece7dc;font:600 14px/20px Archivo,system-ui,sans-serif;cursor:pointer;transition:background-color 120ms cubic-bezier(0.16,1,0.3,1)} .ds-btn2:hover{background:#3a3f4e} .ds-btn2:focus-visible{outline:2px solid #e5483b;outline-offset:2px}"
+    },
+    {
+      "name": "Search",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Search field.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></svg><input placeholder=\"Search AniList\"></label>",
+      "css": ".ds-search{display:flex;align-items:center;gap:8px;width:320px;height:40px;padding:0 14px;background:#20232c;border:1px solid #2a2e3a;border-radius:4px;color:#878da1} .ds-search:focus-within{border-color:#555b6d} .ds-search input{flex:1;background:none;border:0;outline:none;color:#ece7dc;font:400 14px Archivo,system-ui,sans-serif} .ds-search input::placeholder{color:#878da1}"
+    },
+    {
+      "name": "Section head",
+      "kind": "custom",
+      "description": "Uppercase section head over a 2px newsprint rule.",
+      "html": "<h2 class=\"ds-head\">Up next <small>4 shows with unwatched episodes</small></h2>",
+      "css": ".ds-head{display:flex;align-items:baseline;gap:16px;padding-bottom:8px;border-bottom:2px solid #ece7dc;font:700 13px/16px 'Archivo Narrow',Archivo,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#ece7dc;margin:0} .ds-head small{font:400 12px/16px Archivo,sans-serif;letter-spacing:0;text-transform:none;color:#878da1}"
+    },
+    {
+      "name": "Rail link",
+      "kind": "nav",
+      "description": "Left rail navigation item.",
+      "html": "<a class=\"ds-rail is-active\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\"><path d=\"M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z\"/></svg><span>Home</span></a>",
+      "css": ".ds-rail{display:flex;align-items:center;gap:12px;height:36px;padding:0 8px;border-radius:4px;color:#b9bcc6;font:500 14px Archivo,sans-serif;text-decoration:none;width:200px} .ds-rail svg{color:#878da1} .ds-rail:hover,.ds-rail.is-active{background:#20232c;color:#ece7dc} .ds-rail.is-active svg{color:#e5483b}"
+    },
+    {
+      "name": "Boxed mark",
+      "kind": "chip",
+      "description": "NEW / FINAL glyph mark, one per item.",
+      "html": "<span class=\"ds-mark ds-new\">NEW</span> <span class=\"ds-mark ds-final\">FINAL</span>",
+      "css": ".ds-mark{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 4px;border:1.5px solid currentColor;border-radius:2px;font:700 11px/1 'Archivo Narrow',sans-serif;letter-spacing:.04em} .ds-new{color:#e5483b} .ds-final{color:#e2a43b}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Broadcast Listings",
+    "overview": "Your library is your own broadcast schedule. Screens read like an evening's TV listings: what's on next, then the week set in a listings-column rhythm. The system refuses the streaming-service banner-and-rows wall; the user's cover art and banners are the only imagery, and the chrome recedes into a dark graphite scene built for evening, lean-back use.",
+    "keyCharacteristics": ["Fixed graphite tonal ramp; no ad-hoc greys.", "Each accent colour does exactly one job.", "Newsprint rules: 2px under section heads, 1px between columns.", "Boxed glyph marks (NEW, FINAL), at most one per item.", "Artwork leads; chrome is flat and quiet."],
+    "rules": [
+      { "name": "The One Job Rule", "body": "Each accent colour means one thing. Red is NEW/now/progress/primary action; amber is FINAL/warning; teal is synced. Never use an accent for decoration.", "section": "colors" },
+      { "name": "The Fixed Ramp Rule", "body": "Neutrals come only from the ramp (Ink Black → Newsprint White). Never introduce an ad-hoc grey.", "section": "colors" },
+      { "name": "The Tabular Numbers Rule", "body": "Episode numbers, counts, times and dates use tabular numerals.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest; shadows only lift artwork over artwork.", "section": "elevation" }
+    ],
+    "dos": ["Do keep every neutral on the graphite ramp.", "Do set section heads in uppercase Archivo Narrow over a 2px Newsprint White rule.", "Do let cover art and banners be the only imagery; fall back to the show's AniList colour.", "Do show status with its evidence (time since sync, files matched)."],
+    "donts": ["Don't build a streaming-service banner-and-rows wall.", "Don't use an accent colour for decoration or give an item more than one mark.", "Don't add shadows to flat surfaces."]
+  }
+}

@@ -26,7 +26,7 @@ pub struct Updates {
     checking: tokio::sync::Mutex<()>,
 }
 
-/// Development builds never update themselves.
+/// Development builds never update themselves. Windows installs the setup; Android the APK.
 fn enabled() -> bool {
     !cfg!(debug_assertions)
 }
@@ -119,11 +119,21 @@ pub async fn check_for_update(app: AppHandle, state: tauri::State<'_, AppState>)
     Ok(update_status(app.clone(), state))
 }
 
-/// Runs the verified installer in update mode and quits; the installer relaunches B-Anime.
+/// Desktop: runs the verified installer in update mode and quits; the installer relaunches
+/// B-Anime. Android: opens the system installer on the verified APK; Android replaces the app
+/// once the user confirms, so B-Anime keeps running until then.
 #[tauri::command]
 pub fn install_update(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let path = state.updates.ready.lock().ok().and_then(|r| r.clone()).ok_or("No update is ready yet.")?;
-    updater::launch_installer(&path).map_err(msg)?;
-    app.exit(0);
-    Ok(())
+    #[cfg(target_os = "android")]
+    {
+        let authority = format!("{}.fileprovider", app.config().identifier);
+        return crate::android_install::install_apk(&path, &authority);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        updater::launch_installer(&path).map_err(msg)?;
+        app.exit(0);
+        Ok(())
+    }
 }

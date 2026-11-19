@@ -129,7 +129,7 @@ impl Proxy {
                 attempt.follow()
             }
         });
-        let client = reqwest::Client::builder()
+        let client = crate::http::client_builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36")
             .connect_timeout(Duration::from_secs(15))
             .redirect(redirect)

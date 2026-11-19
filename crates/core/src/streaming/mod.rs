@@ -648,7 +648,7 @@ pub async fn skip_times(mal_id: i64, episode: i64, episode_length: f64) -> Resul
         "https://api.aniskip.com/v2/skip-times/{mal_id}/{episode}?types[]=op&types[]=ed&types[]=recap&types[]=mixed-op&types[]=mixed-ed&episodeLength={}",
         episode_length.max(0.0).round()
     );
-    let client = reqwest::Client::builder()
+    let client = crate::http::client_builder()
         .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(8))
         .build()

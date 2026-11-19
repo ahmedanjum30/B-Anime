@@ -12,6 +12,16 @@
   border-right: 1px solid var(--z3);
   padding: calc(var(--u) * 3) calc(var(--u) * 2);
   min-height: 0;
+  /* Short windows (a phone on its side): scroll instead of squeezing the items together. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar {
+  display: none;
+}
+.rail > * {
+  flex-shrink: 0;
 }
 
 .wordmark {
@@ -75,6 +85,13 @@
 }
 .rail-support:hover {
   background: var(--z2);
+}
+/* Android app sits right above Support; it takes the push to the foot, Support follows it. */
+.rail-android {
+  margin-bottom: 2px;
+}
+.rail-android + .rail-support {
+  margin-top: 0;
 }
 .rail-support ~ .rail-update,
 .rail-support ~ .sync {
@@ -2968,5 +2985,507 @@ a.slot:focus-visible {
   .home,
   .pending {
     padding-inline: calc(var(--u) * 3);
+  }
+}
+
+/* ───────── Phones ───────── */
+/* Desktop-only by default: the phone's More button and the day-by-day week. */
+.rail-more-item,
+.week-days {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --bar-h: 56px;
+    --gutter: calc(var(--u) * 2);
+  }
+
+  /* Shell: the rail becomes a bottom bar of five; the rest live in the More sheet. */
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .main {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
+    scrollbar-gutter: auto;
+  }
+  .rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    padding: 0 0 env(safe-area-inset-bottom);
+    border-right: 0;
+    border-top: 1px solid var(--z3);
+    overflow: visible;
+  }
+  .wordmark,
+  .rail > .rail-support,
+  .rail > .rail-update,
+  .rail > .sync,
+  .rail-nav > li:not([data-bar], .rail-more-item) {
+    display: none;
+  }
+  .rail-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+  }
+  .rail-more-item {
+    display: block;
+  }
+  .rail-nav .rail-link {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    height: var(--bar-h);
+    padding: 0;
+    border-radius: 0;
+    font: 600 11px/14px var(--font-head);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--z6);
+  }
+  .rail-nav .rail-link svg {
+    width: 20px;
+    height: 20px;
+  }
+  .rail-nav .rail-link.is-active,
+  .rail-nav .rail-link:hover {
+    background: none;
+    color: var(--z10);
+  }
+  .rail-nav .rail-label {
+    display: block;
+    flex: none;
+  }
+  .rail-nav .rail-count {
+    display: none;
+  }
+  /* The player and the reader take the whole screen. */
+  .shell:has(.player, .reader) .rail {
+    display: none;
+  }
+  .shell:has(.player, .reader) .main {
+    padding: 0;
+  }
+
+  .rail-more {
+    position: relative;
+  }
+  .more-badge {
+    position: absolute;
+    top: 8px;
+    left: calc(50% + 8px);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+  }
+  .more-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 18;
+    background: rgb(0 0 0 / 0.5);
+    animation: fade-in var(--t-med) var(--ease-out);
+  }
+  .more-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
+    z-index: 19;
+    display: grid;
+    gap: var(--u);
+    padding: var(--u) var(--u) calc(var(--u) * 2);
+    background: var(--z0);
+    border-top: 1px solid var(--z3);
+    border-radius: var(--radius) var(--radius) 0 0;
+    animation: sheet-in var(--t-med) var(--ease-out);
+  }
+  .more-nav {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+  }
+  /* The More sheet undoes the narrow-window icon-only rail (max-width: 1100px). */
+  .more-nav .rail-link {
+    justify-content: flex-start;
+    width: 100%;
+    height: 48px;
+    padding: 0 12px;
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+  }
+  .more-nav .rail-label {
+    display: block;
+  }
+  .more-sheet .rail-update,
+  .more-sheet .sync {
+    margin: 0;
+  }
+  .more-sheet .sync {
+    padding: var(--u) 12px 0;
+  }
+  .more-sheet .sync-state {
+    justify-content: flex-start;
+    font-size: 12px;
+  }
+  .more-sheet .sync-evidence,
+  .more-sheet .sync-link {
+    display: inline;
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(16px);
+      opacity: 0;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  .toast {
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u) * 2);
+    max-width: calc(100% - var(--gutter) * 2);
+  }
+
+  /* Pages: a 16px gutter everywhere. */
+  .home,
+  .pending,
+  .page,
+  .library {
+    padding-inline: var(--gutter);
+  }
+  .home,
+  .pending,
+  .page {
+    padding-top: calc(var(--u) * 2);
+  }
+  .page-title {
+    font-size: 22px;
+    line-height: 28px;
+    margin-bottom: calc(var(--u) * 3);
+  }
+
+  /* Home: search on top, the date under it. */
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--u);
+    margin-bottom: calc(var(--u) * 3);
+  }
+  .search {
+    width: 100%;
+  }
+  .notice {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .section-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .section + .section {
+    margin-top: calc(var(--u) * 4);
+  }
+
+  /* Up next: one card and a peek of the next, swiped sideways. */
+  .upnext-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 84%;
+    grid-template-columns: none;
+    gap: 12px;
+    margin-inline: calc(var(--gutter) * -1);
+    padding-inline: var(--gutter);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--gutter);
+    scrollbar-width: none;
+  }
+  .upnext-grid::-webkit-scrollbar {
+    display: none;
+  }
+  .upnext-grid > * {
+    scroll-snap-align: start;
+  }
+  .upnext-grid .upnext-art {
+    aspect-ratio: 16 / 9;
+  }
+
+  /* This week: a column of days instead of the 7-day grid. */
+  .listings-wrap {
+    overflow: visible;
+  }
+  .listings {
+    display: none;
+  }
+  .week-days {
+    display: grid;
+    gap: calc(var(--u) * 2);
+    list-style: none;
+    padding: 0;
+  }
+  .week-day-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--z4);
+    font: 700 13px/16px var(--font-head);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--z8);
+  }
+  .week-day[data-today] .week-day-head {
+    color: var(--z10);
+    border-bottom: 2px solid var(--red);
+  }
+  .week-day-today {
+    margin-left: auto;
+    color: var(--red);
+  }
+  .week-day-empty {
+    padding: var(--u) 0;
+    color: var(--z6);
+  }
+  .week-slots {
+    list-style: none;
+    padding: 0;
+  }
+  .week-slot {
+    grid-template-columns: 48px minmax(0, 1fr);
+    column-gap: 4px;
+    min-height: 48px;
+    align-content: center;
+    padding: 6px 4px;
+  }
+  .week-slot-time {
+    grid-row: span 2;
+    font: 600 13px/20px var(--font-head);
+    color: var(--z6);
+  }
+  .week-slot .slot-line {
+    padding-left: 16px;
+  }
+
+  /* Library and Manga */
+  .lib-head {
+    padding-top: calc(var(--u) * 2);
+  }
+  .toolbar {
+    flex-wrap: wrap;
+    gap: var(--u);
+  }
+  .toolbar .search-sm {
+    width: 100%;
+  }
+  .toolbar-count {
+    margin-left: 0;
+  }
+  .alpha-rail {
+    height: calc(100dvh - var(--lib-head-h) - 48px - var(--bar-h));
+  }
+
+  /* Show page: cover beside the title, then one column. */
+  .show-hero {
+    height: 200px;
+  }
+  .show-hero-inner {
+    padding: var(--u) var(--gutter);
+  }
+  .show-body {
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: calc(var(--u) * 2);
+    margin-top: -88px;
+    padding: 0 var(--gutter) calc(var(--u) * 6);
+  }
+  .show-side,
+  .show-main {
+    display: contents;
+  }
+  .show-body > * > * {
+    grid-column: 1 / -1;
+    order: 4;
+  }
+  .show-cover {
+    grid-column: 1;
+    order: 0;
+  }
+  .show-titles {
+    grid-column: 2;
+    order: 1;
+    align-self: end;
+    margin-bottom: 0;
+  }
+  .list-editor {
+    order: 2;
+  }
+  .facts {
+    order: 5;
+  }
+  .show-title {
+    font-size: 22px;
+    line-height: 26px;
+  }
+  .show-meta {
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .show-genres {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  /* Episodes: number, title with its state under it, actions on the right. */
+  .ep-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num text action"
+      "num state action";
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: var(--u) 4px;
+  }
+  .ep-num {
+    grid-area: num;
+  }
+  .ep-text {
+    grid-area: text;
+  }
+  .ep-state {
+    grid-area: state;
+  }
+  .ep-state:empty {
+    display: none;
+  }
+  .ep-action {
+    grid-area: action;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  /* Schedule and Discover */
+  .schedule-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .schedule-controls .segmented {
+    align-self: flex-start;
+  }
+  .coming-up {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 72%;
+    grid-template-columns: none;
+    margin-inline: calc(var(--gutter) * -1);
+    padding-inline: var(--gutter);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .coming-up > * {
+    scroll-snap-align: start;
+  }
+  .coming-up > :nth-child(n + 4) {
+    display: flex;
+  }
+  .discover-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: calc(var(--u) * 3) calc(var(--u) * 2);
+  }
+
+  /* Settings and Extensions rows stack their actions under the text. */
+  .setting-row,
+  .install-row {
+    flex-wrap: wrap;
+  }
+
+  /* Player: the whole screen, wider margins for thumbs. */
+  .player {
+    height: 100dvh;
+  }
+  .player-top {
+    padding: max(var(--u), env(safe-area-inset-top)) var(--gutter) calc(var(--u) * 4);
+  }
+  .player-controls {
+    padding: calc(var(--u) * 5) var(--gutter) max(var(--u), env(safe-area-inset-bottom));
+  }
+  .player-drawer {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 70%;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 0;
+  }
+}
+
+/* Touch screens: no hover, so nothing may hide behind it; targets grow to finger size. */
+@media (hover: none) {
+  .upnext-info,
+  .quick-add {
+    opacity: 1;
+    transform: none;
+  }
+  .upnext-info {
+    width: 36px;
+    height: 36px;
+    top: 4px;
+    left: 4px;
+  }
+  .play-badge {
+    opacity: 1;
+    transform: scale(1);
+  }
+  .ep-row:not([data-next]) .ep-action .btn {
+    opacity: 1;
+  }
+  .cover-card:hover .cover img,
+  .upnext-card:hover .upnext-art img {
+    transform: none;
+    filter: none;
+  }
+}
+@media (pointer: coarse) {
+  .btn {
+    height: 40px;
+  }
+  .btn-sm {
+    height: 36px;
+    padding-inline: 12px;
+  }
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .step {
+    width: 36px;
+    height: 36px;
+  }
+  .step-input {
+    height: 36px;
+  }
+  .tab {
+    height: 44px;
+    line-height: 44px;
+  }
+  .select {
+    height: 44px;
+  }
+  .search-sm {
+    height: 44px;
   }
 }

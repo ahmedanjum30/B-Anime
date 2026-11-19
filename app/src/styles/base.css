@@ -88,6 +88,16 @@ input[type="search"]::-webkit-search-decoration {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+/* Touch screens keep the system's own overlay scrollbars. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
 
 .num {
   font-variant-numeric: tabular-nums;

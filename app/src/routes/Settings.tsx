@@ -2,8 +2,8 @@ import { For, Match, Show, Switch, createResource, createSignal, onCleanup } fro
 
 import {
   addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, libraryStatus, login, logout, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
-  setPlayerPref, unmatchedFiles,
+  installUpdate, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
+  setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
@@ -476,6 +476,8 @@ function About() {
     setInstalling(true);
     try {
       await installUpdate();
+      // Android: the system installer is open; B-Anime stays (the user may cancel there).
+      if (onAndroid) setInstalling(false);
     } catch {
       setInstalling(false);
     }
@@ -490,7 +492,7 @@ function About() {
             B-Anime <span class="ext-version num">{update()?.current}</span>
           </p>
           <p class="setting-desc">
-            <Switch fallback="Updates install automatically when you restart. You're up to date.">
+            <Switch fallback={onAndroid ? "Updates download automatically. You're up to date." : "Updates install automatically when you restart. You're up to date."}>
               <Match when={!inTauri || (update() && !update()!.enabled)}>Updates are off in development builds.</Match>
               <Match when={update()?.ready && update()?.available}>
                 {(u) => <>Version {(u() as { version: string }).version} is downloaded and ready.</>}
@@ -516,7 +518,7 @@ function About() {
             }
           >
             <button type="button" class="btn btn-primary" disabled={installing()} onClick={() => void install()}>
-              {installing() ? "Restarting…" : "Restart to update"}
+              {installing() ? UPDATE_BUSY : UPDATE_ACTION}
             </button>
           </Show>
         </div>

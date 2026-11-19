@@ -1,5 +1,5 @@
 import { createResource, createRoot, createSignal } from "solid-js";
-import { getAccount, getHome, onEvent, onLibraryChanged, syncIfStale, updateStatus } from "./api";
+import { getAccount, getHome, onAndroid, onEvent, onLibraryChanged, syncIfStale, updateStatus } from "./api";
 import type { ScanStatus } from "./types";
 
 // App-wide state. Home data and the AniList account are fetched once and refreshed whenever
@@ -53,7 +53,11 @@ export const homeStore = createRoot(() => {
   void onEvent("update-failed", () => void refetchUpdate());
   void onEvent<{ version: string }>("update-ready", (u) => {
     void refetchUpdate();
-    notify(`B-Anime ${u.version} is ready. Restart to update (in the sidebar).`);
+    notify(
+      onAndroid
+        ? `B-Anime ${u.version} is ready. Install it from More.`
+        : `B-Anime ${u.version} is ready. Restart to update (in the sidebar).`,
+    );
   });
   void onEvent<{ episode: number; title: string }>("player-watched", (w) =>
     notify(`Episode ${w.episode} of ${w.title} marked watched on AniList.`),

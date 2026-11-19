@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+mod android_install;
 mod library;
 mod playback;
 mod updates;
@@ -245,16 +247,18 @@ async fn install_local_extension(
         return Err(LOCAL_ONLY_IN_DEV.into());
     }
     use tauri_plugin_dialog::DialogExt;
+    #[cfg(desktop)]
     let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
     let handle = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        handle
+        let dialog = handle
             .dialog()
             .file()
             .set_title("Install an extension from a manifest")
-            .add_filter("Extension manifest", &["json"])
-            .set_parent(&window)
-            .blocking_pick_file()
+            .add_filter("Extension manifest", &["json"]);
+        #[cfg(desktop)]
+        let dialog = dialog.set_parent(&window);
+        dialog.blocking_pick_file()
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -358,6 +362,15 @@ const SUPPORT_URL: &str = "https://www.patreon.com/cw/ahmedanjum30";
 #[tauri::command]
 fn open_support(app: AppHandle) -> Result<(), String> {
     app.opener().open_url(SUPPORT_URL, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Where the Android APK is published (Android app in the sidebar).
+const ANDROID_URL: &str = "https://github.com/ahmedanjum30/B-Anime/releases/latest";
+
+/// Opens the latest release (with the Android APK) in the browser. The address is fixed here.
+#[tauri::command]
+fn open_android_download(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url(ANDROID_URL, None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Saves a list change to AniList and the local mirror; the UI refreshes via LIBRARY_CHANGED.
@@ -512,6 +525,8 @@ async fn run_sync(
     Ok(report)
 }
 
+// On Android the app starts from this library (no main.rs), through the mobile entry point.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -521,6 +536,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Phones have no OS config folder: use the app's private storage there.
+            #[cfg(mobile)]
+            let paths = AppPaths::resolve(Some(app.path().app_data_dir()?))?;
+            #[cfg(desktop)]
             let paths = AppPaths::resolve(None)?;
             paths.ensure()?;
             tracing::info!(data_dir = %paths.root.display(), version = %app.package_info().version, "starting B-Anime");
@@ -540,6 +559,7 @@ pub fn run() {
             updates::start(app.handle());
 
             // Open maximized. The config flag alone doesn't stick on every Windows setup.
+            #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.maximize();
             }
@@ -612,6 +632,7 @@ pub fn run() {
             read_extension_repo,
             open_anilist,
             open_support,
+            open_android_download,
             get_account,
             anilist_login,
             anilist_cancel_login,

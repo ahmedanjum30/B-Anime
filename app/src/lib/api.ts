@@ -134,6 +134,14 @@ export async function getMedia(id: number): Promise<MediaPage> {
 export const openAniList = (id: number, type: LibraryKind) => call<void>("open_anilist", { id, kind: type });
 /** Opens the project's Patreon page in the browser. */
 export const openSupport = () => call<void>("open_support");
+export const openAndroidDownload = () => call<void>("open_android_download");
+
+/** True inside the Android app (desktop-only items hide there). */
+export const onAndroid = /Android/i.test(navigator.userAgent);
+
+/** Desktop restarts into the update; Android opens its installer and B-Anime keeps running. */
+export const UPDATE_ACTION = onAndroid ? "Install update" : "Restart to update";
+export const UPDATE_BUSY = onAndroid ? "Opening installer…" : "Restarting…";
 
 /** Saves to AniList; resolves with the entry as AniList now has it. */
 export async function saveEntry(mediaId: number, change: EntryChange): Promise<ListEntry> {

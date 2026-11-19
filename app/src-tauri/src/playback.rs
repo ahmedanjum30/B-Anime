@@ -103,16 +103,18 @@ pub struct PickedSubtitle {
 #[tauri::command]
 pub async fn pick_subtitle_file(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Option<PickedSubtitle>, String> {
     use tauri_plugin_dialog::DialogExt;
+    #[cfg(desktop)]
     let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
     let handle = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        handle
+        let dialog = handle
             .dialog()
             .file()
             .set_title("Load subtitles")
-            .add_filter("Subtitles", &["srt", "ass", "ssa", "vtt"])
-            .set_parent(&window)
-            .blocking_pick_file()
+            .add_filter("Subtitles", &["srt", "ass", "ssa", "vtt"]);
+        #[cfg(desktop)]
+        let dialog = dialog.set_parent(&window);
+        dialog.blocking_pick_file()
     })
     .await
     .map_err(|e| e.to_string())?;

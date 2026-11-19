@@ -8,8 +8,11 @@
 node_modules/
 /app/dist/
 
-# Tauri generated
-/app/src-tauri/gen/
+# Tauri generated (schemas are rebuilt every build). The Android project under gen/android is
+# kept: it holds the icon, signing setup, permissions and Gradle settings. Its own .gitignore
+# leaves out build output and keystore.properties.
+/app/src-tauri/gen/*
+!/app/src-tauri/gen/android/
 
 # Impeccable: machine-local and review captures
 /.impeccable/config.local.json

@@ -1,13 +1,15 @@
-# Builds the Windows installer and publishes a GitHub release when a version tag is pushed:
+# Builds the Windows installer and the Android APK and publishes a GitHub release when a version
+# tag is pushed (scripts/release.ps1 does the bump, tag and push).
 #
-#   1. Bump the version in app/src-tauri/tauri.conf.json (and Cargo.toml's workspace version).
-#   2. git tag v0.2.0 && git push origin v0.2.0
+# Installed copies of B-Anime find the release, download their file (the setup on Windows, the
+# APK on Android), check it against SHA256SUMS.txt, and offer to update.
 #
-# Installed copies of B-Anime find the release, download the setup, check it against
-# SHA256SUMS.txt, and offer "Restart to update".
+# Optional Windows code signing: repository secrets WINDOWS_CERT_PFX (the .pfx file,
+# base64-encoded) and WINDOWS_CERT_PASSWORD. Without them, the setup is unsigned.
 #
-# Optional code signing: add the repository secrets WINDOWS_CERT_PFX (the .pfx file,
-# base64-encoded) and WINDOWS_CERT_PASSWORD. Without them, builds are unsigned.
+# Android needs the release signing key, or the APK is skipped: repository secrets
+# ANDROID_KEYSTORE (the .jks, base64-encoded), ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS.
+# The same key must sign every release, or installed copies can't update.
 name: Release
 
 on:
@@ -87,10 +89,159 @@ jobs:
           BANIME_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: ./installer/build.ps1 -Bi "$env:GITHUB_WORKSPACE\tools\bi.exe" -Version $env:VERSION
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/B-Anime-Setup-${{ env.VERSION }}.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  # Whether the Android signing key is configured (secrets can't gate a job directly).
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.key.outputs.android }}
+    steps:
+      - id: key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then echo "android=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::ANDROID_KEYSTORE isn't set; this release has no Android APK."; fi
+
+  android:
+    needs: config
+    if: needs.config.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.1.12297006
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version app/src-tauri/tauri.conf.json)
+          [ "$tag" = "$conf" ] || { echo "Tag v$tag doesn't match tauri.conf.json version $conf"; exit 1; }
+          echo "VERSION=$tag" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Android NDK and platform
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      # rquickjs generates its QuickJS bindings for Android with bindgen (libclang), against the
+      # NDK's headers.
+      - name: libclang for bindgen
+        run: |
+          sudo apt-get install -y -qq libclang-dev > /dev/null
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot" >> "$GITHUB_ENV"
+
+      - name: Rust with the Android target
+        run: |
+          rustup show
+          rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          cat > app/src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=$PASSWORD
+          keyAlias=$ALIAS
+          keyPassword=$PASSWORD
+          EOF
+
+      - name: Build the APK (arm64-v8a)
+        working-directory: app
+        run: npx tauri android build --target aarch64 --apk
+
+      - name: Check the signature and name the APK
+        run: |
+          apk=app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify "$apk"
+          mkdir -p dist && cp "$apk" "dist/B-Anime-$VERSION-arm64.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/B-Anime-${{ env.VERSION }}-arm64.apk
+          if-no-files-found: error
+
+  # One release with every platform's file. Windows is required; Android joins when it built.
+  publish:
+    needs: [windows, android]
+    if: always() && needs.windows.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$env:VERSION" "dist/B-Anime-Setup-$env:VERSION.exe" dist/SHA256SUMS.txt `
-            --title "B-Anime $env:VERSION" --generate-notes
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          files=("B-Anime-Setup-$version.exe")
+          apk="B-Anime-$version-arm64.apk"
+          if [ -f "$apk" ]; then
+            # The Windows checksum file may lack a final newline.
+            [ -z "$(tail -c1 SHA256SUMS.txt)" ] || echo >> SHA256SUMS.txt
+            sha256sum "$apk" >> SHA256SUMS.txt
+            files+=("$apk")
+          else
+            echo "::warning::No Android APK in this release."
+          fi
+          files+=(SHA256SUMS.txt)
+          cat SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" \
+            --title "B-Anime $version" --generate-notes
+
+  # The website (site/) on GitHub Pages, with this release's downloads at fixed links:
+  # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
+  pages:
+    needs: publish
+    runs-on: ubuntu-latest
+    # One writer to gh-pages at a time (site.yml uses the same group).
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish the site and downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-site.sh "${GITHUB_REF_NAME#v}" release

@@ -1,9 +1,10 @@
 //! Self-update from GitHub Releases.
 //!
-//! A release carries the B-Installer setup (`B-Anime-Setup-<version>.exe`) and `SHA256SUMS.txt`.
-//! The setup is downloaded only from GitHub's own hosts, its SHA-256 must match the release's
-//! checksum file, and then it runs silently with `/UPDATE=1` (the installer closes B-Anime,
-//! replaces it, and starts it again).
+//! A release carries the B-Installer setup (`B-Anime-Setup-<version>.exe`), the Android APK
+//! (`B-Anime-<version>-arm64.apk`) and `SHA256SUMS.txt` covering both. Each platform picks its own
+//! file. It's downloaded only from GitHub's own hosts and its SHA-256 must match the checksum file.
+//! Windows then runs the setup silently with `/UPDATE=1` (the installer closes B-Anime, replaces
+//! it, and starts it again); Android hands the APK to the system installer (the app does that).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -51,7 +52,7 @@ struct Asset {
 }
 
 fn client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    crate::http::client_builder()
         .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION"), " (updater)"))
         .timeout(Duration::from_secs(60))
         .build()
@@ -65,6 +66,15 @@ fn trusted(url: &reqwest::Url) -> bool {
             url.host_str(),
             Some("github.com" | "objects.githubusercontent.com" | "release-assets.githubusercontent.com")
         )
+}
+
+/// The release file this platform installs from.
+pub fn asset_name(version: &str) -> String {
+    if cfg!(target_os = "android") {
+        format!("B-Anime-{version}-arm64.apk")
+    } else {
+        format!("B-Anime-Setup-{version}.exe")
+    }
 }
 
 /// The latest release, when it's newer than `current`.
@@ -88,7 +98,7 @@ pub async fn check(current: &str) -> Result<Option<Update>> {
         return Ok(None);
     }
 
-    let setup_name = format!("B-Anime-Setup-{version}.exe");
+    let setup_name = asset_name(&version);
     let setup = rel
         .assets
         .iter()
@@ -141,7 +151,7 @@ pub async fn download(update: &Update, dir: &Path) -> Result<PathBuf> {
     if !trusted(&url) {
         return Err(Error::Config("the update isn't hosted on GitHub; not downloading".into()));
     }
-    let http = reqwest::Client::builder()
+    let http = crate::http::client_builder()
         .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION"), " (updater)"))
         .connect_timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::custom(|a| {
@@ -204,6 +214,11 @@ mod tests {
         let result = check("0.0.1").await;
         println!("update check: {result:?}");
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn desktop_installs_the_setup() {
+        assert_eq!(asset_name("0.3.0"), "B-Anime-Setup-0.3.0.exe");
     }
 
     #[test]

@@ -157,14 +157,25 @@ pub async fn library_status(state: tauri::State<'_, AppState>) -> Result<Library
 /// Opens the system folder picker over the main window. `None` when cancelled.
 #[tauri::command]
 pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    // Android has no folder picker in the dialog plugin, and reading media folders there needs
+    // storage permissions that aren't set up yet.
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("Library folders aren't available on Android yet. Streaming from extensions still works.".into());
+    }
+    #[cfg(desktop)]
     use tauri_plugin_dialog::DialogExt;
-    let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog().file().set_title("Add a library folder").set_parent(&window).blocking_pick_folder()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+    #[cfg(desktop)]
+    {
+        let window = app.get_webview_window("main").ok_or("The main window isn't open.")?;
+        let picked = tauri::async_runtime::spawn_blocking(move || {
+            app.dialog().file().set_title("Add a library folder").set_parent(&window).blocking_pick_folder()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+    }
 }
 
 #[tauri::command]

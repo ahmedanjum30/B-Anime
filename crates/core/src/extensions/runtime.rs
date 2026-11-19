@@ -79,7 +79,7 @@ const CALL: &str = r#"
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        crate::http::client_builder()
             .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION"), " (extension)"))
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())

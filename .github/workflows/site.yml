@@ -1,0 +1,30 @@
+name: Website
+
+# Publishes the website (site/) to the gh-pages branch when it changes on main, or when run by
+# hand (Actions > Website > Run workflow), without a release. The downloads stay as the release
+# workflow left them.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - scripts/publish-site.sh
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One writer to gh-pages at a time (the release workflow uses the same group).
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-site.sh
