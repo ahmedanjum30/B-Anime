@@ -23,7 +23,8 @@ val keystoreProperties = Properties().apply {
     }
 }
 
-android {
+// The typed extension, not the deprecated `android { }` accessor (gone in AGP 10).
+configure<com.android.build.api.dsl.ApplicationExtension> {
     signingConfigs {
         if (keystoreProperties.getProperty("storeFile") != null) {
             create("release") {
