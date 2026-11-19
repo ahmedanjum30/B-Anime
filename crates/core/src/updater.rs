@@ -180,6 +180,29 @@ pub async fn download(update: &Update, dir: &Path) -> Result<PathBuf> {
     Ok(target)
 }
 
+/// The version in an update file's name (the setup or the APK), if it's one of ours.
+fn version_in(name: &str) -> Option<&str> {
+    name.strip_prefix("B-Anime-Setup-")
+        .and_then(|r| r.strip_suffix(".exe"))
+        .or_else(|| name.strip_prefix("B-Anime-").and_then(|r| r.strip_suffix("-arm64.apk")))
+}
+
+/// Deletes downloaded updates that are already installed (not newer than `current`) and
+/// unfinished downloads. A newer one that's downloaded but not yet installed stays, so it isn't
+/// fetched again. Returns how many files went.
+pub fn clean_downloads(dir: &Path, current: &str) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let stale = name.ends_with(".part") || version_in(&name).is_some_and(|v| !crate::extensions::newer(v, current));
+        if stale && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -214,6 +237,27 @@ mod tests {
         let result = check("0.0.1").await;
         println!("update check: {result:?}");
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn installed_updates_are_cleaned_up() {
+        let dir = std::env::temp_dir().join(format!("banime-updates-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in [
+            "B-Anime-0.2.7-arm64.apk",      // older: installed long ago
+            "B-Anime-0.2.8-arm64.apk",      // the version now running
+            "B-Anime-Setup-0.2.8.exe",      // the version now running
+            "B-Anime-0.2.9-arm64.apk.part", // an unfinished download
+            "B-Anime-0.2.9-arm64.apk",      // newer, not installed yet: keep
+            "notes.txt",                    // not ours: keep
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        assert_eq!(clean_downloads(&dir, "0.2.8"), 4);
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["B-Anime-0.2.9-arm64.apk", "notes.txt"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

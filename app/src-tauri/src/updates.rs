@@ -36,6 +36,12 @@ fn current(app: &AppHandle) -> String {
 }
 
 pub fn start(app: &AppHandle) {
+    // The update that brought us here (and anything older) is installed: free the space.
+    let dir = app.state::<AppState>().paths.cache.join("updates");
+    let removed = updater::clean_downloads(&dir, &current(app));
+    if removed > 0 {
+        tracing::info!(removed, "deleted installed update downloads");
+    }
     if !enabled() {
         return;
     }

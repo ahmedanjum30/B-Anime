@@ -5,9 +5,14 @@
 //! reaches a server, so the callback page posts it back to us from the browser. The token (valid
 //! for a year) goes to the OS credential store (Windows Credential Manager, macOS Keychain,
 //! Secret Service on Linux), never to disk in plain text.
+//!
+//! Android has no credential store the `keyring` crate can use, so there the app names a token
+//! file in its private storage ([`use_token_file`]), which the Android sandbox keeps from other
+//! apps.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::extract::{Query, State};
@@ -46,22 +51,73 @@ pub fn authorize_url(client_id: &str) -> String {
     format!("https://anilist.co/api/v2/oauth/authorize?client_id={client_id}&response_type=token")
 }
 
+/// Set on platforms without a usable credential store (Android): the token lives in this file.
+static TOKEN_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep the token in `path` (inside the app's private storage) instead of the OS credential
+/// store. Call once at startup, before any sign-in.
+pub fn use_token_file(path: PathBuf) {
+    let _ = TOKEN_FILE.set(path);
+}
+
+fn credentials(e: impl std::fmt::Display) -> Error {
+    Error::Credentials(e.to_string())
+}
+
 pub fn load_token() -> Result<Option<String>> {
+    if let Some(file) = TOKEN_FILE.get() {
+        return read_token_file(file);
+    }
     match entry()?.get_password() {
         Ok(t) => Ok(Some(t)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(Error::Credentials(e.to_string())),
+        Err(e) => Err(credentials(e)),
     }
 }
 
 pub fn save_token(token: &str) -> Result<()> {
-    entry()?.set_password(token).map_err(|e| Error::Credentials(e.to_string()))
+    if let Some(file) = TOKEN_FILE.get() {
+        return write_token_file(file, token);
+    }
+    entry()?.set_password(token).map_err(credentials)
 }
 
 pub fn delete_token() -> Result<()> {
+    if let Some(file) = TOKEN_FILE.get() {
+        return remove_token_file(file);
+    }
     match entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(Error::Credentials(e.to_string())),
+        Err(e) => Err(credentials(e)),
+    }
+}
+
+fn read_token_file(file: &std::path::Path) -> Result<Option<String>> {
+    match std::fs::read_to_string(file) {
+        Ok(t) if !t.trim().is_empty() => Ok(Some(t.trim().to_owned())),
+        Ok(_) => Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(credentials(e)),
+    }
+}
+
+/// Written beside, then renamed over: a crash never leaves half a token. Owner-only on Unix.
+fn write_token_file(file: &std::path::Path, token: &str) -> Result<()> {
+    let part = file.with_extension("part");
+    std::fs::write(&part, token).map_err(credentials)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o600)).map_err(credentials)?;
+    }
+    std::fs::rename(&part, file).map_err(credentials)
+}
+
+fn remove_token_file(file: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(file) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(credentials(e)),
     }
 }
 
@@ -191,3 +247,27 @@ const CALLBACK_HTML: &str = r#"<!doctype html>
     m.innerHTML = "<h1>B-Anime isn't listening</h1><p>Start the sign-in again from B-Anime's Settings.</p>";
   });
 </script></body></html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_file_round_trip() {
+        let dir = std::env::temp_dir().join(format!("banime-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("anilist-token");
+
+        assert_eq!(read_token_file(&file).unwrap(), None, "no file yet: signed out");
+        write_token_file(&file, "abc.def").unwrap();
+        assert_eq!(read_token_file(&file).unwrap().as_deref(), Some("abc.def"));
+        write_token_file(&file, "ghi").unwrap();
+        assert_eq!(read_token_file(&file).unwrap().as_deref(), Some("ghi"), "a new sign-in replaces it");
+        assert!(!file.with_extension("part").exists(), "no half-written file is left behind");
+        remove_token_file(&file).unwrap();
+        assert_eq!(read_token_file(&file).unwrap(), None);
+        remove_token_file(&file).unwrap(); // signing out twice is fine
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

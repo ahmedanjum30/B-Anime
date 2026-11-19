@@ -404,7 +404,12 @@ async fn get_account(state: tauri::State<'_, AppState>) -> Result<Account, Strin
 }
 
 async fn account(state: &AppState) -> banime_core::Result<Account> {
-    let viewer = anilist::sync::stored_viewer(&state.db).await?;
+    // The saved profile only counts while there's a token to go with it; without one, nothing
+    // would sync, so show the account as signed out instead of a stale profile.
+    let viewer = match auth::load_token() {
+        Ok(None) => None,
+        _ => anilist::sync::stored_viewer(&state.db).await?,
+    };
     let last_synced: Option<String> =
         sqlx_scalar(&state.db, "SELECT value FROM setting WHERE key = 'anilist.last_synced'").await?;
     let sync_error = state.sync_error.lock().ok().and_then(|e| e.clone());
@@ -539,6 +544,9 @@ pub fn run() {
             // Phones have no OS config folder: use the app's private storage there.
             #[cfg(mobile)]
             let paths = AppPaths::resolve(Some(app.path().app_data_dir()?))?;
+            // No credential store on phones: the AniList token lives in the app's private storage.
+            #[cfg(mobile)]
+            auth::use_token_file(paths.root.join("anilist-token"));
             #[cfg(desktop)]
             let paths = AppPaths::resolve(None)?;
             paths.ensure()?;
