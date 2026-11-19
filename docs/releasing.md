@@ -5,22 +5,26 @@
 From a clean `main`:
 
 ```powershell
-scripts\release.ps1            # 0.2.5 -> 0.2.6
-scripts\release.ps1 minor      # 0.2.5 -> 0.3.0
-scripts\release.ps1 major      # 0.2.5 -> 1.0.0
-scripts\release.ps1 0.4.0      # an exact version
+scripts\release.ps1            # 0.3.0 -> 0.3.1, 0.3.9 -> 0.4.0 (parts stay single digits)
+scripts\release.ps1 minor      # 0.3.4 -> 0.4.0
+scripts\release.ps1 major      # 0.3.4 -> 1.0.0
+scripts\release.ps1 0.5.0      # an exact version
 scripts\release.ps1 -DryRun    # only print the next version
 ```
 
-It pulls `main`, bumps the version in `Cargo.toml`, `app/package.json` and
-`app/src-tauri/tauri.conf.json`, refreshes `Cargo.lock` and `app/package-lock.json`, commits
-`Version X.Y.Z`, tags `vX.Y.Z` and pushes both. It stops without changing anything if you're not
-on `main`, have uncommitted changes, or the tag already exists.
+**The tag is the version.** The script reads the newest `vX.Y.Z` tag, picks the next version,
+tags `main` and pushes the tag; there's no version-bump commit. It stops without changing
+anything if you're not on `main`, have uncommitted changes, or the tag already exists.
 
-The **Release** workflow (`.github/workflows/release.yml`) builds the app in release mode,
-packs it with [B-Installer](https://github.com/ahmedanjum30/B-installer), writes
-`SHA256SUMS.txt`, and publishes a GitHub release with both files. It refuses to run when the
-tag doesn't match the version in `tauri.conf.json`.
+The **Release** workflow (`.github/workflows/release.yml`) writes the tag's version into
+`Cargo.toml`, `Cargo.lock`, `tauri.conf.json`, `package.json` and `package-lock.json` on the
+build machine (`scripts/set-version.mjs`; nothing is committed), builds the app in release mode,
+packs it with [B-Installer](https://github.com/ahmedanjum30/B-installer), and publishes the
+release.
+
+So the version in the repository's files isn't kept current: local builds (`npm run tauri dev`,
+`scripts\android-build.ps1`) show whatever those files say. To build a specific version locally,
+run `node scripts/set-version.mjs 0.3.1` first and `git checkout` the files afterwards.
 
 ## What a release contains
 

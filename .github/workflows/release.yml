@@ -1,5 +1,8 @@
 # Builds the Windows installer and the Android APK and publishes a GitHub release when a version
-# tag is pushed (scripts/release.ps1 does the bump, tag and push).
+# tag is pushed (scripts/release.ps1 picks the next version, tags main and pushes the tag).
+#
+# The tag is the version: each build writes it into the version files (scripts/set-version.mjs)
+# before building, so releases need no version-bump commits.
 #
 # Installed copies of B-Anime find the release, download their file (the setup on Windows, the
 # APK on Android), check it against SHA256SUMS.txt, and offer to update.
@@ -32,12 +35,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check the tag matches the app version
+      - name: Version from the tag
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
-          $conf = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          if ($tag -ne $conf) { throw "Tag v$tag doesn't match tauri.conf.json version $conf" }
+          if ($tag -notmatch '^\d+\.\d+\.\d+$') { throw "Tag ${{ github.ref_name }} isn't a version like v0.3.1" }
           "VERSION=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - uses: actions/setup-node@v7
@@ -69,6 +71,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: app
         run: npm ci
+
+      # After the Rust cache is restored, so its key matches the one warmed on main.
+      - name: Stamp the version
+        run: node scripts/set-version.mjs ${{ env.VERSION }}
 
       - name: Download B-Installer
         shell: pwsh
@@ -129,14 +135,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check the tag matches the app version
+      # A tag is the version; a manual run on a branch keeps the version in the files.
+      - name: Version from the tag
         run: |
-          conf=$(jq -r .version app/src-tauri/tauri.conf.json)
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            tag="${GITHUB_REF_NAME#v}"
-            [ "$tag" = "$conf" ] || { echo "Tag v$tag doesn't match tauri.conf.json version $conf"; exit 1; }
+            version="${GITHUB_REF_NAME#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Tag $GITHUB_REF_NAME isn't a version like v0.3.1"; exit 1; }
+          else
+            version=$(jq -r .version app/src-tauri/tauri.conf.json)
           fi
-          echo "VERSION=$conf" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v6
         with:
@@ -180,6 +188,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: app
         run: npm ci
+
+      # After the Rust cache is restored, so its key doesn't change with every version. Also sets
+      # the APK's versionCode (derived from the version).
+      - name: Stamp the version
+        run: node scripts/set-version.mjs "$VERSION"
 
       - name: Signing key
         env:
