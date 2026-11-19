@@ -145,7 +145,8 @@ jobs:
 
       - name: Android NDK and platform
         run: |
-          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37" > /dev/null
+          # API 37's platform package is named with its minor version.
+          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-37.0" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       # rquickjs generates its QuickJS bindings for Android with bindgen (libclang), against the
