@@ -1944,6 +1944,10 @@ a.slot:focus-visible {
 .sub-layer {
   position: absolute;
   inset: 0;
+  /* Its own GPU layer. While a video plays, WebView2 can hand it to the graphics card as a
+     hardware overlay; on some drivers, page content above that overlay then stops being drawn
+     until something repaints (subtitles vanished until the mouse moved or playback paused). */
+  will-change: transform;
   container-type: size;
   display: flex;
   flex-direction: column;
@@ -2015,6 +2019,8 @@ a.slot:focus-visible {
   place-items: center;
   container-type: size;
   pointer-events: none;
+  /* Same as .sub-layer: its own GPU layer, so it stays drawn over a hardware video overlay. */
+  will-change: transform;
 }
 .pgs-screen {
   position: relative;
