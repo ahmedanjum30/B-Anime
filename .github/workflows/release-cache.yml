@@ -76,6 +76,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - uses: android-actions/setup-android@v4
         with:
