@@ -276,6 +276,46 @@ struct ExtensionUpdate {
     version: String,
 }
 
+const EXTENSIONS_UPDATED: &str = "extensions-updated";
+
+/// One extension updated at launch, for the UI's notice.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UpdatedExtension {
+    id: String,
+    name: String,
+    version: String,
+}
+
+/// At launch: installs the newer version of every installed extension whose source offers one,
+/// then tells the UI which were updated. Extensions installed from a file (development) are left
+/// alone, and an unreachable source or a failed install just keeps the installed version.
+async fn auto_update_extensions(app: &AppHandle) {
+    // Let startup (window, first sync) go first.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let state = app.state::<AppState>();
+    let Ok(installed) = extensions::list(&state.db).await else { return };
+    let mut updated = Vec::new();
+    for ext in installed {
+        if extensions::local_source(&ext).is_some() {
+            continue;
+        }
+        let Ok(Some(version)) = extensions::available_update(&ext, extensions::Limits::default()).await else {
+            continue;
+        };
+        match extensions::install(&state.db, &state.paths.extensions, &ext.source_url, extensions::Limits::default()).await {
+            Ok(new) => {
+                tracing::info!(id = %ext.manifest.id, from = %ext.manifest.version, to = %version, "extension updated");
+                updated.push(UpdatedExtension { id: new.manifest.id, name: new.manifest.name, version: new.manifest.version });
+            }
+            Err(e) => tracing::warn!(id = %ext.manifest.id, error = %e, "extension update failed"),
+        }
+    }
+    if !updated.is_empty() {
+        let _ = app.emit(EXTENSIONS_UPDATED, &updated);
+    }
+}
+
 /// Checks every installed extension's source for a newer version. Unreachable sources are skipped.
 #[tauri::command]
 async fn check_extension_updates(state: tauri::State<'_, AppState>) -> Result<Vec<ExtensionUpdate>, String> {
@@ -571,6 +611,10 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.maximize();
             }
+
+            // Installed extensions update themselves at launch (alongside the sync below).
+            let ext_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move { auto_update_extensions(&ext_handle).await });
 
             // Sync at launch, then keep lists fresh while the app is open. The UI shows the
             // cached copy meanwhile and adds focus / back-online triggers.

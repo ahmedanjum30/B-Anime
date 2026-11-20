@@ -56,6 +56,9 @@ pub struct Manifest {
     pub language: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// Shown under "Recommended" at the top of the Extensions page. Optional, false when absent.
+    #[serde(default)]
+    pub recommended: bool,
     /// Where the script lives; relative URLs resolve against the manifest's URL.
     pub code_url: String,
     pub api_version: u32,
@@ -337,6 +340,8 @@ pub struct RepoEntry {
     pub description: Option<String>,
     pub icon: Option<String>,
     pub language: Option<String>,
+    /// Listed under "Recommended" on the Extensions page (`"recommended": true` in the listing).
+    pub recommended: bool,
     /// "converted" when the listing is in the single-manifest format (it converts on install).
     pub origin: Option<String>,
 }
@@ -399,6 +404,7 @@ pub async fn read_repo(url: &str, limits: Limits) -> Result<Repo> {
                 description: s(&v, "description"),
                 icon: s(&v, "icon").filter(|i| !i.is_empty()).and_then(|i| absolute(&i)),
                 language,
+                recommended: v.get("recommended").and_then(Value::as_bool).unwrap_or(false),
                 origin: (foreign_type.is_some() || url_list).then(|| convert::ORIGIN.to_owned()),
                 manifest_url,
             })

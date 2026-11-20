@@ -15,13 +15,15 @@ import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
 import { rememberDub } from "../lib/dub";
-import { createSource } from "../lib/source";
+import { createSource, recallServer, rememberServer, rememberShowSource, serverName } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
 
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
 const WATCHED_AT = 0.8;
 const AUTO_NEXT_SECONDS = 8;
+/** A stream that hasn't delivered any video by then gets an error instead of an endless spinner. */
+const STALL_SECONDS = 30;
 /** At most this many sign / song / note lines at the top at once. */
 const TOP_CUES_MAX = 3;
 /** Dialogue lines shown at the bottom at once (two people talking over each other). */
@@ -171,6 +173,9 @@ export default function Player() {
   const [volume, setVolume] = createSignal(stored("banime.volume", 1));
   const [muted, setMuted] = createSignal(false);
   const [waiting, setWaiting] = createSignal(true);
+  /** Started per stream; cleared once the video has data (see the stream effect). */
+  let stallTimer: number | undefined;
+  onCleanup(() => clearTimeout(stallTimer));
   const [videoError, setVideoError] = createSignal<string | null>(null);
   const [tracks, setTracks] = createSignal<TextTrack[]>([]);
   const [activeTrack, setActiveTrack] = createSignal(-1);
@@ -229,19 +234,36 @@ export default function Player() {
     return re.test(lang) || re.test(label);
   };
 
-  // Watching streamed Sub or Dub makes that this show's choice next time (Home, show page).
-  createEffect(on(stream, (s) => s && !local() && rememberDub(mediaId(), dubParam())));
-
-  // Several sources with known audio: start on the one in the preferred language.
+  // Watching a streamed episode makes its Sub or Dub, and its source, this show's choice next
+  // time (Home, show page, player).
   createEffect(
     on(stream, (s) => {
+      if (!s || local()) return;
+      rememberDub(mediaId(), dubParam());
+      const ext = source.ext();
+      if (ext) rememberShowSource(mediaId(), ext);
+    }),
+  );
+
+  // Which server (stream) to start on: the one last picked for this show when the episode offers
+  // it again, else the one in the preferred audio language, else the first.
+  createEffect(
+    on(stream, (s) => {
+      const server = recallServer(mediaId());
+      const byServer = s && server ? s.sources.findIndex((x) => serverName(x) === server) : -1;
       const want = prefs()?.audio;
-      const i = s && want ? s.sources.findIndex((x) => x.audio === want) : -1;
-      setSourceIndex(i > 0 ? i : 0);
+      const byAudio = s && want ? s.sources.findIndex((x) => x.audio === want) : -1;
+      setSourceIndex(byServer >= 0 ? byServer : byAudio > 0 ? byAudio : 0);
       setExtraSubs([]);
       setSubOffset(0);
     }),
   );
+  /** Picks a server by hand (Source / Audio menus) and remembers it for this show. */
+  const chooseServer = (i: number) => {
+    setSourceIndex(i);
+    const src = stream()?.sources[i];
+    if (src && !local()) rememberServer(mediaId(), serverName(src));
+  };
 
   createEffect(
     on([stream, sourceIndex], async ([s, idx]) => {
@@ -252,8 +274,19 @@ export default function Player() {
       setAudioTracks([]);
       setAudioTrack(-1);
       setWaiting(true);
+      clearTimeout(stallTimer);
       if (!s || !video) return;
       const src = s.sources[Math.min(idx, s.sources.length - 1)];
+      // Watchdog: whatever goes wrong (a source that never answers, a stream nothing reports an
+      // error for), the player ends with a message instead of loading forever.
+      stallTimer = window.setTimeout(() => {
+        if (s !== stream() || idx !== sourceIndex() || videoError() || video.readyState >= 2) return;
+        destroy();
+        setVideoError(
+          `The video didn't start after ${STALL_SECONDS} seconds: the source may be down or blocking it.` +
+            (s.sources.length > idx + 1 ? " Try another source." : ""),
+        );
+      }, STALL_SECONDS * 1000);
       // HLS goes through hls.js whenever Media Source Extensions exist: newer WebView2 builds
       // claim native HLS support but play proxied streams unreliably, and hls.js gives us levels.
       const HlsLib = src.kind === "hls" ? (await import("hls.js")).default : null;
@@ -289,9 +322,30 @@ export default function Player() {
         let recovered = 0;
         instance.on(HlsLib.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
+          // The playlist itself didn't load (refused, missing, not a playlist). startLoad() can't
+          // resume a stream whose playlist never arrived: it did nothing, no further error came,
+          // and the spinner ran forever. Say what the server answered instead.
+          const playlistFailed = [
+            HlsLib.ErrorDetails.MANIFEST_LOAD_ERROR,
+            HlsLib.ErrorDetails.MANIFEST_LOAD_TIMEOUT,
+            HlsLib.ErrorDetails.MANIFEST_PARSING_ERROR,
+          ].includes(data.details);
+          const another = s.sources.length > idx + 1 ? " Try another source." : "";
+          if (playlistFailed) {
+            const status = data.response?.code;
+            const why =
+              status === 403 || status === 401
+                ? `the source refused the video (HTTP ${status})`
+                : status === 404 || status === 410
+                  ? `the source no longer has this video (HTTP ${status})`
+                  : status
+                    ? `the source answered HTTP ${status}`
+                    : "the video's playlist couldn't be loaded";
+            return setVideoError(`Playback failed: ${why}.${another}`);
+          }
           if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR && recovered++ < 2) return instance.recoverMediaError();
           if (data.type === HlsLib.ErrorTypes.NETWORK_ERROR && recovered++ < 3) return instance.startLoad();
-          setVideoError(`Playback failed (${data.details}).${s.sources.length > idx + 1 ? " Try another source." : ""}`);
+          setVideoError(`Playback failed (${data.details}).${another}`);
         });
         instance.loadSource(src.url);
         instance.attachMedia(video);
@@ -843,8 +897,8 @@ export default function Player() {
         onPlay={() => { setPlaying(true); wake(); }}
         onPause={() => { setPlaying(false); setIdle(false); persist(); }}
         onWaiting={() => setWaiting(true)}
-        onPlaying={() => setWaiting(false)}
-        onCanPlay={() => setWaiting(false)}
+        onPlaying={() => { setWaiting(false); clearTimeout(stallTimer); }}
+        onCanPlay={() => { setWaiting(false); clearTimeout(stallTimer); }}
         onEnded={onEnded}
         onError={() =>
           !hls &&
@@ -922,7 +976,7 @@ export default function Player() {
             <p>{msg()}</p>
             <div class="setting-actions">
               <Show when={videoError() && (stream()?.sources.length ?? 0) > sourceIndex() + 1}>
-                <button type="button" class="btn btn-primary" onClick={() => setSourceIndex(sourceIndex() + 1)}>Try next source</button>
+                <button type="button" class="btn btn-primary" onClick={() => chooseServer(sourceIndex() + 1)}>Try next source</button>
               </Show>
               <For each={videoError() && stream() ? players() ?? [] : []}>
                 {(p) => (
@@ -1151,7 +1205,7 @@ export default function Player() {
                       fallback={
                         <For each={audioSources()}>
                           {(s) => (
-                            <button type="button" role="menuitemradio" aria-checked={sourceIndex() === s.i} onClick={() => { setSourceIndex(s.i); setMenu(null); }}>
+                            <button type="button" role="menuitemradio" aria-checked={sourceIndex() === s.i} onClick={() => { chooseServer(s.i); setMenu(null); }}>
                               {audioName(s.audio)}
                             </button>
                           )}
@@ -1293,7 +1347,7 @@ export default function Player() {
                       <p class="menu-head">Source</p>
                       <For each={stream()!.sources}>
                         {(s, i) => (
-                          <button type="button" role="menuitemradio" aria-checked={sourceIndex() === i()} onClick={() => { setSourceIndex(i()); setMenu(null); }}>
+                          <button type="button" role="menuitemradio" aria-checked={sourceIndex() === i()} onClick={() => { chooseServer(i()); setMenu(null); }}>
                             {s.label}
                           </button>
                         )}

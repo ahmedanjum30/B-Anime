@@ -1,0 +1,12 @@
+{
+  "id": "anime-4i",
+  "name": "Anime4i",
+  "version": "1.0.0",
+  "kind": "anime",
+  "author": "you",
+  "icon": "https://i3.wp.com/anime4i.com/wp-content/uploads/2024/09/cropped-anime4i-2-1-192x192.png",
+  "description": "Anime4i is an online streaming provider for subbed donghua (Chinese anime) in english.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1
+}

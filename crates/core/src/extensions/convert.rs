@@ -152,6 +152,7 @@ pub async fn convert(raw: &Value, manifest_url: &reqwest::Url, limits: Limits) -
         description: s("description"),
         language: Some(lang(raw)),
         icon: Some(s("icon")).filter(|i| !i.is_empty()),
+        recommended: raw.get("recommended").and_then(Value::as_bool).unwrap_or(false),
         code_url,
         api_version: super::API_VERSION,
         origin: Some(ORIGIN.into()),

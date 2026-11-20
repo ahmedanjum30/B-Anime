@@ -51,6 +51,14 @@ export const homeStore = createRoot(() => {
     notify(`B-Anime ${u.version} is available. Downloading it in the background…`);
   });
   void onEvent("update-failed", () => void refetchUpdate());
+  // Installed extensions updated themselves at launch.
+  void onEvent<{ id: string; name: string; version: string }[]>("extensions-updated", (list) => {
+    notify(
+      list.length === 1
+        ? `Extension updated: ${list[0].name} ${list[0].version}.`
+        : `${list.length} extensions updated: ${list.map((e) => e.name).join(", ")}.`,
+    );
+  });
   void onEvent<{ version: string }>("update-ready", (u) => {
     void refetchUpdate();
     notify(

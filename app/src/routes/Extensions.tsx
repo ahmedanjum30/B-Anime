@@ -1,9 +1,9 @@
-import { For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 
 import {
   checkExtensionUpdates, errorText, getExtensionRepos, inTauri, installExtension, listExtensions, previewExtension,
   readExtensionRepo, removeExtension, setExtensionEnabled, setExtensionRepos, tryExtension, updateExtension,
-  installLocalExtension, isLocalExtension, officialExtensionRepo,
+  installLocalExtension, isLocalExtension, officialExtensionRepo, onEvent,
 } from "../lib/api";
 import { Plus, Search } from "../lib/icons";
 import { homeStore } from "../lib/store";
@@ -30,6 +30,12 @@ export default function Extensions() {
   const [installed, { refetch, mutate }] = createResource(listExtensions);
   const [updates, { refetch: recheck }] = createResource(checkExtensionUpdates);
   const updateFor = (id: string) => updates()?.find((u) => u.id === id)?.version;
+  // Launch-time auto-updates can land while this page is open: show the new versions.
+  const unlisten = onEvent("extensions-updated", () => {
+    void refetch();
+    void recheck();
+  });
+  onCleanup(() => void unlisten.then((stop) => stop()));
 
   // Repositories and their listings, shared by Browse and Repositories.
   const [repoUrls, { mutate: setRepoUrls }] = createResource(getExtensionRepos);
@@ -238,8 +244,11 @@ function Browse(props: {
       (!q || c.name.toLowerCase().includes(q) || (c.description ?? "").toLowerCase().includes(q) || (c.author ?? "").toLowerCase().includes(q))
     );
   };
-  const officialShown = createMemo(() => officialCards().filter(matches));
-  const shown = createMemo(() => cards().filter(matches));
+  // "recommended": true in a listing puts it in the Recommended section at the top (from B-Anime's
+  // repository and the user's), and out of the sections below so nothing shows twice.
+  const recommendedShown = createMemo(() => [...officialCards(), ...cards()].filter((c) => c.recommended && matches(c)));
+  const officialShown = createMemo(() => officialCards().filter((c) => !c.recommended && matches(c)));
+  const shown = createMemo(() => cards().filter((c) => !c.recommended && matches(c)));
   const failed = () => props.repos.filter((r) => r.error);
   const cardProps = () => ({
     installed: props.installed,
@@ -261,8 +270,20 @@ function Browse(props: {
           <button type="button" aria-pressed={kind() === "anime"} onClick={() => setKind("anime")}>Anime</button>
           <button type="button" aria-pressed={kind() === "manga"} onClick={() => setKind("manga")}>Manga</button>
         </div>
-        <p class="toolbar-count num">{officialShown().length + shown().length} shown</p>
+        <p class="toolbar-count num">{recommendedShown().length + officialShown().length + shown().length} shown</p>
       </div>
+
+      <Show when={recommendedShown().length}>
+        <section class="ext-panel ext-panel-recommended" aria-labelledby="recommended-h">
+          <div class="ext-panel-head">
+            <h2 id="recommended-h" class="subhead subhead-plain">Recommended</h2>
+            <p class="setting-desc">Picked by the repositories that list them.</p>
+          </div>
+          <ul class="ext-grid">
+            <For each={recommendedShown()}>{(c) => <ExtCard card={c} {...cardProps()} />}</For>
+          </ul>
+        </section>
+      </Show>
 
       <section class="ext-panel ext-panel-official" aria-labelledby="official-h">
         <div class="ext-panel-head">
@@ -285,7 +306,11 @@ function Browse(props: {
           </Match>
           <Match when={!officialShown().length}>
             <p class="empty">
-              {query().trim() || kind() !== "all" ? "No B-Anime extensions match." : "B-Anime hasn't published extensions yet."}
+              {query().trim() || kind() !== "all"
+                ? "No B-Anime extensions match."
+                : officialCards().length
+                  ? "All of B-Anime's extensions are under Recommended."
+                  : "B-Anime hasn't published extensions yet."}
             </p>
           </Match>
           <Match when={officialShown().length}>

@@ -6,12 +6,13 @@
       "manifestUrl": "sources/ani-pm/manifest.json",
       "id": "ani-pm",
       "name": "AniPm",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "anime",
       "author": "you",
       "language": "en",
       "icon": "https://ani.pm/favicon.ico?v=20260923b",
-      "description": "AniPm is an online streaming provider for subbed and dubbed anime in english."
+      "description": "AniPm is an online streaming provider for subbed and dubbed anime in english.",
+      "recommended": true
     },
     {
       "manifestUrl": "sources/anime-village/manifest.json",
@@ -34,6 +35,17 @@
       "language": "en",
       "icon": "https://animeheaven.me/ah_logo.png",
       "description": "AnimeHeaven is an online streaming provider for subbed anime in english."
+    },
+    {
+      "manifestUrl": "sources/anime-4i/manifest.json",
+      "id": "anime-4i",
+      "name": "Anime4i",
+      "version": "1.0.0",
+      "kind": "anime",
+      "author": "you",
+      "language": "en",
+      "icon": "https://i3.wp.com/anime4i.com/wp-content/uploads/2024/09/cropped-anime4i-2-1-192x192.png",
+      "description": "Anime4i is an online streaming provider for subbed donghua (Chinese anime) in english."
     }
   ]
 }

@@ -23,6 +23,7 @@ Users install it by pasting the manifest's URL into **Extensions → Install fro
   "description": "One sentence about what it provides.",
   "language": "en",
   "icon": "https://example.com/icon.png",
+  "recommended": false,
   "codeUrl": "main.js",
   "apiVersion": 1
 }
@@ -36,6 +37,7 @@ Users install it by pasting the manifest's URL into **Extensions → Install fro
 | `codeUrl` | yes | The script. Relative URLs resolve against the manifest's URL. Max 4 MB. |
 | `apiVersion` | yes | `1`. |
 | `author`, `description`, `language`, `icon` | no | Shown in the Extensions screen. |
+| `recommended` | no | `true` or `false` (default). The Extensions page's Browse tab reads it from the **repository listing**: put `"recommended": true` on the extension's entry in `repository.json` to show it under **Recommended** at the top. Keep it the same in the manifest. |
 
 Updates are checked at the manifest URL the user installed from.
 

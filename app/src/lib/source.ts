@@ -19,6 +19,47 @@ const recall = (kind: ExtKind) => {
   }
 };
 
+// Per show: the source it was last watched or read on, so a show watched on one source and
+// another on a second each open on their own (the per-kind value above is only the fallback
+// for shows never opened).
+const SHOW_KEY = (mediaId: number) => `banime.source.show.${mediaId}`;
+/** Remembers the source a show was watched/read on (the player and reader call this too). */
+export function rememberShowSource(mediaId: number, ext: string) {
+  try {
+    localStorage.setItem(SHOW_KEY(mediaId), ext);
+  } catch {
+    /* storage unavailable: just don't remember */
+  }
+}
+// Per show: the server (one of an episode's streams, e.g. "Server 2") last picked in the
+// player, by name, since a stream's URL changes every episode.
+const SERVER_KEY = (mediaId: number) => `banime.server.show.${mediaId}`;
+/** A stream's name for remembering it: its label, else its kind. */
+export const serverName = (s: { label: string; kind: string }) => s.label.trim() || s.kind;
+export function rememberServer(mediaId: number, name: string) {
+  try {
+    localStorage.setItem(SERVER_KEY(mediaId), name);
+  } catch {
+    /* storage unavailable: just don't remember */
+  }
+}
+export function recallServer(mediaId: number): string | null {
+  try {
+    return localStorage.getItem(SERVER_KEY(mediaId));
+  } catch {
+    return null;
+  }
+}
+
+/** The source this show was last watched/read on, if any. */
+export function recallShowSource(mediaId: number): string | null {
+  try {
+    return localStorage.getItem(SHOW_KEY(mediaId));
+  } catch {
+    return null;
+  }
+}
+
 // ── Session cache ───────────────────────────────────────────────────────────────
 // Matches and episode lists are kept until the app closes, so switching sources (or Sub/Dub)
 // back and forth, or opening the same show again, doesn't repeat the calls. A lookup that's
@@ -89,16 +130,24 @@ export function createSource(
   const usable = createMemo(() => (exts() ?? []).filter((e) => e.enabled && e.kind === kind()));
 
   const [ext, setExtSignal] = createSignal<string | null>(null);
+  /** The show the current source was picked for. */
+  let pickedFor: number | undefined;
   createEffect(() => {
     const list = usable();
     if (!list.length) return setExtSignal(null);
+    const id = media()?.id;
     const current = ext();
-    if (current && list.some((e) => e.id === current)) return;
-    const want = preferred?.() ?? recall(kind());
+    // Keep the current source unless the show changed (a related show opened on this page) or
+    // the source went away.
+    if (current && id === pickedFor && list.some((e) => e.id === current)) return;
+    pickedFor = id;
+    const want = preferred?.() ?? (id !== undefined ? recallShowSource(id) : null) ?? recall(kind());
     setExtSignal(list.find((e) => e.id === want)?.id ?? list[0].id);
   });
   const setExt = (id: string) => {
     rememberExt(kind(), id);
+    const m = media();
+    if (m) rememberShowSource(m.id, id);
     setExtSignal(id);
   };
 
