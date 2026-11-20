@@ -1,4 +1,7 @@
-/src/main/**/generated
+# The Kotlin glue tauri/wry generate (src/main/java/**/generated) is committed on purpose: their
+# build scripts write these files and watch them, so on a fresh CI checkout the first Rust pass
+# created them and Gradle's second pass then rebuilt tauri, wry and the app (~2 min). Commit
+# any changes they show after a Tauri update.
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /tauri.build.gradle.kts
