@@ -7,9 +7,12 @@ edition = "2024"
 version = "0.3.0"
 license = "UNLICENSED"
 
+# Thin LTO with parallel codegen: nearly the same speed and size as fat LTO with one codegen
+# unit, but the final optimisation runs in parallel instead of on one core (minutes off every
+# release build).
 [profile.release]
-lto = "fat"
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 panic = "abort"
 strip = true
 opt-level = 3
