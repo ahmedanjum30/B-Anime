@@ -1657,6 +1657,19 @@ a.slot:focus-visible {
   font-weight: 500;
   color: var(--z6);
 }
+/* "recommended": true in a repository listing. */
+.ext-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in oklab, var(--red) 55%, transparent);
+  border-radius: 2px;
+  color: var(--red);
+  font: 600 10px/14px var(--font-head);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
 .ext-meta {
   margin-top: 2px;
   font-size: 12px;

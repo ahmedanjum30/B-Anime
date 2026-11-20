@@ -212,7 +212,7 @@ export interface RepoEntry {
   description: string | null;
   icon: string | null;
   language: string | null;
-  /** Listed under "Recommended" on the Extensions page. */
+  /** Tagged "Recommended" on the Extensions page. */
   recommended: boolean;
   /** "converted" when listed in the single-manifest format (converted on install). */
   origin: string | null;

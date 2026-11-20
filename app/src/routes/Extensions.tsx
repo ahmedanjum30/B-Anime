@@ -244,11 +244,8 @@ function Browse(props: {
       (!q || c.name.toLowerCase().includes(q) || (c.description ?? "").toLowerCase().includes(q) || (c.author ?? "").toLowerCase().includes(q))
     );
   };
-  // "recommended": true in a listing puts it in the Recommended section at the top (from B-Anime's
-  // repository and the user's), and out of the sections below so nothing shows twice.
-  const recommendedShown = createMemo(() => [...officialCards(), ...cards()].filter((c) => c.recommended && matches(c)));
-  const officialShown = createMemo(() => officialCards().filter((c) => !c.recommended && matches(c)));
-  const shown = createMemo(() => cards().filter((c) => !c.recommended && matches(c)));
+  const officialShown = createMemo(() => officialCards().filter(matches));
+  const shown = createMemo(() => cards().filter(matches));
   const failed = () => props.repos.filter((r) => r.error);
   const cardProps = () => ({
     installed: props.installed,
@@ -270,20 +267,8 @@ function Browse(props: {
           <button type="button" aria-pressed={kind() === "anime"} onClick={() => setKind("anime")}>Anime</button>
           <button type="button" aria-pressed={kind() === "manga"} onClick={() => setKind("manga")}>Manga</button>
         </div>
-        <p class="toolbar-count num">{recommendedShown().length + officialShown().length + shown().length} shown</p>
+        <p class="toolbar-count num">{officialShown().length + shown().length} shown</p>
       </div>
-
-      <Show when={recommendedShown().length}>
-        <section class="ext-panel ext-panel-recommended" aria-labelledby="recommended-h">
-          <div class="ext-panel-head">
-            <h2 id="recommended-h" class="subhead subhead-plain">Recommended</h2>
-            <p class="setting-desc">Picked by the repositories that list them.</p>
-          </div>
-          <ul class="ext-grid">
-            <For each={recommendedShown()}>{(c) => <ExtCard card={c} {...cardProps()} />}</For>
-          </ul>
-        </section>
-      </Show>
 
       <section class="ext-panel ext-panel-official" aria-labelledby="official-h">
         <div class="ext-panel-head">
@@ -308,9 +293,7 @@ function Browse(props: {
             <p class="empty">
               {query().trim() || kind() !== "all"
                 ? "No B-Anime extensions match."
-                : officialCards().length
-                  ? "All of B-Anime's extensions are under Recommended."
-                  : "B-Anime hasn't published extensions yet."}
+                : "B-Anime hasn't published extensions yet."}
             </p>
           </Match>
           <Match when={officialShown().length}>
@@ -380,6 +363,7 @@ function ExtCard(props: {
                       <div class="setting-text">
                         <p class="setting-title">
                           {c.name} <Show when={c.version}><span class="ext-version num">{c.version}</span></Show>
+                          <Show when={c.recommended}><span class="ext-tag">Recommended</span></Show>
                         </p>
                         <p class="ext-meta">
                           {[
