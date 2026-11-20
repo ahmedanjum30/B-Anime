@@ -11,6 +11,16 @@ import type { ExtCallOutput, ExtKind, ExtManifest, InstalledExtension, Repo, Rep
 
 const KIND_LABEL = { anime: "Anime", manga: "Manga" } as const;
 
+/** Numeric-aware: "1.10.0" is newer than "1.9.2". */
+const newer = (a: string, b: string) => {
+  const p = (v: string) => v.split(/\D+/).filter(Boolean).map(Number);
+  const [x, y] = [p(a), p(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  }
+  return false;
+};
+
 type Tab = "browse" | "installed" | "repos";
 // The tab survives navigating away and back.
 const [tab, setTab] = createSignal<Tab>("browse");
@@ -118,18 +128,12 @@ export default function Extensions() {
               loading={repos.loading}
               installed={installed() ?? []}
               installing={installing()}
-              updateFor={updateFor}
               onInstall={install}
               onUpdate={async (id) => {
                 setInstalling(id);
-                const before = installed()?.find((x) => x.id === id)?.version;
                 try {
                   const ext = await updateExtension(id);
-                  notify(
-                    ext.version === before
-                      ? `${ext.name} is already on the latest version its source offers (${ext.version}).`
-                      : `Updated ${ext.name} to ${ext.version}.`,
-                  );
+                  notify(`Updated ${ext.name} to ${ext.version}.`);
                   await refetch();
                   void recheck();
                 } catch (e) {
@@ -209,7 +213,6 @@ function Browse(props: {
   loading: boolean;
   installed: InstalledExtension[];
   installing: string | null;
-  updateFor: (id: string) => string | undefined;
   onInstall: (manifestUrl: string, name: string) => Promise<boolean>;
   onUpdate: (id: string) => Promise<void>;
   onAddRepos: () => void;
@@ -250,7 +253,6 @@ function Browse(props: {
   const cardProps = () => ({
     installed: props.installed,
     installing: props.installing,
-    updateFor: props.updateFor,
     onInstall: props.onInstall,
     onUpdate: props.onUpdate,
   });
@@ -359,16 +361,12 @@ function ExtCard(props: {
   card: RepoCard;
   installed: InstalledExtension[];
   installing: string | null;
-  updateFor: (id: string) => string | undefined;
   onInstall: (manifestUrl: string, name: string) => Promise<boolean>;
   onUpdate: (id: string) => Promise<void>;
 }) {
   const c = props.card;
   const mine = () => props.installed.find((x) => x.id === c.id);
-  // The update comes from the installed extension's manifest, not the listing: a listing can
-  // claim a newer version than the manifest it points to, and "updating" would change nothing.
-  const updateTo = () => (mine() && c.id ? props.updateFor(c.id) : undefined);
-  const canUpdate = () => !!updateTo();
+  const canUpdate = () => !!mine() && !!c.version && newer(c.version, mine()!.version);
   const busy = () => props.installing === c.manifestUrl || props.installing === c.id;
   return (
                   <li class="ext-card">
@@ -401,7 +399,7 @@ function ExtCard(props: {
                       <Switch>
                         <Match when={canUpdate()}>
                           <button type="button" class="btn btn-primary btn-sm" disabled={busy()} onClick={() => void props.onUpdate(c.id!)}>
-                            {busy() ? "Updating…" : `Update to ${updateTo()}`}
+                            {busy() ? "Updating…" : `Update to ${c.version}`}
                           </button>
                         </Match>
                         <Match when={mine()}>
