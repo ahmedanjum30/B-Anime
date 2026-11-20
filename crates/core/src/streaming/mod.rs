@@ -78,6 +78,18 @@ struct RawSource {
     /// Audio language of this source: "ja" / "en", or "sub" / "dub".
     #[serde(default)]
     audio: Option<String>,
+    /// This source's own headers, over the stream's (sources from different servers need
+    /// different Referer/Origin).
+    #[serde(default)]
+    headers: HashMap<String, String>,
+}
+
+/// The stream's headers with one source's on top (names compared without case).
+fn source_headers(common: &HashMap<String, String>, own: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> =
+        common.iter().filter(|(k, _)| !own.keys().any(|o| o.eq_ignore_ascii_case(k))).map(|(k, v)| (k.clone(), v.clone())).collect();
+    out.extend(own.iter().map(|(k, v)| (k.clone(), v.clone())));
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -579,8 +591,9 @@ pub async fn stream(db: &Db, dir: &Path, proxy: &Proxy, ext: &str, episode_id: &
     let session = proxy.session(&raw.headers);
     let mut sources = Vec::new();
     for (i, s) in raw.sources.iter().enumerate() {
+        let own = if s.headers.is_empty() { session.clone() } else { proxy.session(&source_headers(&raw.headers, &s.headers)) };
         sources.push(StreamSource {
-            url: proxy.url(&session, &s.url, None)?,
+            url: proxy.url(&own, &s.url, None)?,
             kind: guess_kind(&s.url, s.kind.as_deref()),
             label: s.label.clone().or_else(|| s.quality.clone()).unwrap_or_else(|| format!("Source {}", i + 1)),
             audio: audio_code(s.audio.as_deref()),
@@ -691,6 +704,15 @@ pub async fn position(db: &Db, media_id: i64, episode: i64) -> Result<Option<i64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sources_own_headers_win() {
+        let common = HashMap::from([("Referer".to_string(), "https://a/".to_string()), ("Accept-Language".to_string(), "en".to_string())]);
+        let own = HashMap::from([("referer".to_string(), "https://b/".to_string())]);
+        let mut got: Vec<_> = source_headers(&common, &own).into_iter().collect();
+        got.sort();
+        assert_eq!(got, [("Accept-Language".into(), "en".into()), ("referer".into(), "https://b/".into())]);
+    }
 
     #[test]
     fn titles_match_across_spellings() {

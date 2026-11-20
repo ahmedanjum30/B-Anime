@@ -261,9 +261,24 @@ async fn handle(
     }
     let res = match req.send().await {
         Ok(r) => r,
-        Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("source unreachable: {e}")),
+        Err(e) => {
+            tracing::warn!(host = target.host_str().unwrap_or(""), error = %e, "proxy: source unreachable");
+            return fail(StatusCode::BAD_GATEWAY, format!("source unreachable: {e}"));
+        }
     };
     let status = StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    tracing::debug!(host = target.host_str().unwrap_or(""), path = target.path(), status = status.as_u16(), "proxy: fetched");
+    if !status.is_success() {
+        let h = |n: &str| res.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        tracing::warn!(
+            host = target.host_str().unwrap_or(""),
+            status = status.as_u16(),
+            http = ?res.version(),
+            server = h("server"),
+            cf_mitigated = h("cf-mitigated"),
+            "proxy: source refused"
+        );
+    }
     let content_type = res
         .headers()
         .get(reqwest::header::CONTENT_TYPE)

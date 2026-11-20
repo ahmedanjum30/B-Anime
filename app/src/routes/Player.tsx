@@ -14,7 +14,7 @@ import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
-import { rememberDub } from "../lib/dub";
+import { audioId, recallAudio, rememberAudio, rememberDub } from "../lib/dub";
 import { createSource, recallServer, rememberServer, rememberShowSource, serverName } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
@@ -265,8 +265,14 @@ export default function Player() {
     if (src && !local()) rememberServer(mediaId(), serverName(src));
   };
 
+  /** The stream last loaded, so a server switch (same stream, new index) is told from a new episode. */
+  let loadedStream: ReturnType<typeof stream>;
   createEffect(
     on([stream, sourceIndex], async ([s, idx]) => {
+      // Switching servers mid-episode continues from here, not from the saved position.
+      const carry = s && s === loadedStream && video && video.currentTime > 1 ? video.currentTime : null;
+      loadedStream = s;
+      switchedAt = carry;
       destroy();
       setVideoError(null);
       setLevels([]);
@@ -296,7 +302,7 @@ export default function Player() {
       // Where to start: the saved position, looked up before loading so streams begin there.
       // Seeking only once the video's details arrived raced hls.js's own start (at 0:00), and
       // auto-skip then jumped over an opening at the start instead of resuming.
-      const startAt = await resumePoint();
+      const startAt = carry ?? (await resumePoint());
       if (s !== stream() || idx !== sourceIndex()) return;
       if (HlsLib && HlsLib.isSupported()) {
         const instance = new HlsLib({
@@ -312,9 +318,8 @@ export default function Player() {
         instance.on(HlsLib.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
           const list = data.audioTracks.map((t) => ({ name: t.name, lang: t.lang ?? "" }));
           setAudioTracks(list);
-          // Switch to the preferred audio language when the stream carries it.
-          const want = prefs()?.audio;
-          const i = want ? list.findIndex((t) => langMatches(t.lang, t.name, want)) : -1;
+          // Switch to this show's audio, else the preferred language, when the stream carries it.
+          const i = preferredAudio(list);
           if (i >= 0 && i !== instance.audioTrack) instance.audioTrack = i;
           setAudioTrack(instance.audioTrack);
         });
@@ -551,11 +556,19 @@ export default function Player() {
     const list = nativeAudio();
     if (hls || !list || list.length < 2) return;
     const all = Array.from(list);
-    setAudioTracks(all.map((t) => ({ name: t.label, lang: t.language })));
-    const want = prefs()?.audio;
-    const i = want ? all.findIndex((t) => langMatches(t.language, t.label, want)) : -1;
+    const tracks = all.map((t) => ({ name: t.label, lang: t.language }));
+    setAudioTracks(tracks);
+    const i = preferredAudio(tracks);
     if (i >= 0) all.forEach((t, j) => (t.enabled = j === i));
     setAudioTrack(all.findIndex((t) => t.enabled));
+  };
+  /** The track this show was last listened in, else the one in the preferred language (-1: none). */
+  const preferredAudio = (list: { name: string; lang: string }[]) => {
+    const saved = recallAudio(mediaId());
+    const mine = saved ? list.findIndex((t) => audioId(t) === saved) : -1;
+    if (mine >= 0) return mine;
+    const want = prefs()?.audio;
+    return want ? list.findIndex((t) => langMatches(t.lang, t.name, want)) : -1;
   };
 
   const chooseAudio = (i: number) => {
@@ -565,6 +578,8 @@ export default function Player() {
       if (list) Array.from(list).forEach((t, j) => (t.enabled = j === i));
     }
     setAudioTrack(i);
+    const t = audioTracks()[i];
+    if (t) rememberAudio(mediaId(), audioId(t));
     setMenu(null);
   };
   /** A track's menu name: its own name unless that's generic ("stream_5"), else its language. */
@@ -594,6 +609,8 @@ export default function Player() {
   let resumeAt: number | null = null;
   /** The resume still has to be confirmed (and announced) once the video's details are in. */
   let resumePending = false;
+  /** Where a server switch left off; the new server's video starts there. */
+  let switchedAt: number | null = null;
   let marked = false;
   let lastSave = 0;
   /** The saved position to start this episode at, looked up once per episode. */
@@ -623,7 +640,12 @@ export default function Player() {
   const onMeta = async () => {
     setDuration(video.duration || 0);
     video.volume = volume();
-    if (resumePending && resumeAt !== null) {
+    if (switchedAt !== null) {
+      // HLS already starts there; plain files seek now.
+      const pos = switchedAt;
+      switchedAt = null;
+      if (Math.abs(video.currentTime - pos) > 2) video.currentTime = pos;
+    } else if (resumePending && resumeAt !== null) {
       resumePending = false;
       const pos = resumeAt;
       if (pos < video.duration * 0.9) {

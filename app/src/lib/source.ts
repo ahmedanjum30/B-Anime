@@ -31,21 +31,25 @@ export function rememberShowSource(mediaId: number, ext: string) {
     /* storage unavailable: just don't remember */
   }
 }
-// Per show: the server (one of an episode's streams, e.g. "Server 2") last picked in the
-// player, by name, since a stream's URL changes every episode.
+// The server (one of an episode's streams, e.g. "Settlar") last picked in the player, by name,
+// since a stream's URL changes every episode. Kept per show, and the last pick anywhere is the
+// default for shows that have none, like the source itself.
 const SERVER_KEY = (mediaId: number) => `banime.server.show.${mediaId}`;
+const LAST_SERVER_KEY = "banime.server.last";
 /** A stream's name for remembering it: its label, else its kind. */
 export const serverName = (s: { label: string; kind: string }) => s.label.trim() || s.kind;
 export function rememberServer(mediaId: number, name: string) {
   try {
     localStorage.setItem(SERVER_KEY(mediaId), name);
+    localStorage.setItem(LAST_SERVER_KEY, name);
   } catch {
     /* storage unavailable: just don't remember */
   }
 }
+/** This show's server, else the last one picked anywhere. */
 export function recallServer(mediaId: number): string | null {
   try {
-    return localStorage.getItem(SERVER_KEY(mediaId));
+    return localStorage.getItem(SERVER_KEY(mediaId)) ?? localStorage.getItem(LAST_SERVER_KEY);
   } catch {
     return null;
   }
