@@ -1,6 +1,6 @@
 import type { ParentProps } from "solid-js";
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
-import { inTauri, installUpdate, onAndroid, openAndroidDownload, openSupport, UPDATE_ACTION, UPDATE_BUSY } from "../lib/api";
+import { errorText, inTauri, installUpdate, onAndroid, openAndroidDownload, openSupport, UPDATE_ACTION, UPDATE_BUSY } from "../lib/api";
 import { A, useLocation } from "@solidjs/router";
 import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzle, RefreshCw, Settings, Smartphone } from "../lib/icons";
 
@@ -184,7 +184,10 @@ function UpdateNotice() {
               void installUpdate()
                 // Android: the system installer is open and B-Anime stays (the user may cancel).
                 .then(() => onAndroid && setRestarting(false))
-                .catch(() => setRestarting(false));
+                .catch((e) => {
+                  setRestarting(false);
+                  homeStore.notify(errorText(e));
+                });
             }}
           >
             <RefreshCw size={14} stroke-width={2} aria-hidden="true" class="rail-update-icon" />

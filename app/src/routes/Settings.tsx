@@ -478,8 +478,9 @@ function About() {
       await installUpdate();
       // Android: the system installer is open; B-Anime stays (the user may cancel there).
       if (onAndroid) setInstalling(false);
-    } catch {
+    } catch (e) {
       setInstalling(false);
+      homeStore.notify(errorText(e));
     }
   };
 
