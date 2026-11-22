@@ -25,7 +25,13 @@ export default function WeekListings(props: {
     return Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
   });
 
-  const placed = createMemo<Placed[]>(() => props.slots.map((s) => ({ ...s, at: new Date(s.airsAt) })));
+  // Only what airs in the week shown: anything else would add empty time rows to the grid and
+  // match no day on phones.
+  const placed = createMemo<Placed[]>(() => {
+    const from = days()[0].getTime();
+    const to = new Date(from).setDate(days()[0].getDate() + 7);
+    return props.slots.map((s) => ({ ...s, at: new Date(s.airsAt) })).filter((s) => s.at.getTime() >= from && s.at.getTime() < to);
+  });
 
   // One row per distinct local time slot, earliest first.
   const rows = createMemo(() => {

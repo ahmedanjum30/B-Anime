@@ -249,11 +249,25 @@ fn file_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
-/// Monday 00:00 UTC of the current week, and the following Monday.
+/// Monday 00:00 of the current week in the device's time zone, and the following Monday: the
+/// week the screen lays out. (In UTC, the first hours of a Monday east of Greenwich still fell
+/// in the previous week, and the screen showed none of its episodes.)
 fn week_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
-    let monday = now.date_naive() - Duration::days(now.weekday().num_days_from_monday() as i64);
-    let start = Utc.from_utc_datetime(&monday.and_hms_opt(0, 0, 0).expect("valid midnight"));
-    (start, start + Duration::days(7))
+    week_bounds_in(now, &chrono::Local)
+}
+
+fn week_bounds_in<Tz: TimeZone>(now: DateTime<Utc>, tz: &Tz) -> (DateTime<Utc>, DateTime<Utc>) {
+    let local = now.with_timezone(tz);
+    let monday = local.date_naive() - Duration::days(local.weekday().num_days_from_monday() as i64);
+    // Midnight can be skipped or repeated by a clock change; take its earliest instant.
+    let midnight = |day: chrono::NaiveDate| {
+        let naive = day.and_hms_opt(0, 0, 0).expect("valid midnight");
+        tz.from_local_datetime(&naive)
+            .earliest()
+            .map(|t| t.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc.from_utc_datetime(&naive))
+    };
+    (midnight(monday), midnight(monday + Duration::days(7)))
 }
 
 /// Labelled sample shown before the user connects AniList and adds a library.
@@ -325,6 +339,16 @@ pub fn sample(now: DateTime<Utc>) -> HomeData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_week_is_the_local_one() {
+        // Monday 02:00 in UTC+5 is still Sunday in UTC: the week starts that local Monday.
+        let tz = chrono::FixedOffset::east_opt(5 * 3600).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 11, 22, 21, 0, 0).unwrap();
+        let (start, end) = week_bounds_in(now, &tz);
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 11, 22, 19, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2026, 11, 29, 19, 0, 0).unwrap());
+    }
 
     #[tokio::test]
     async fn empty_db_returns_labelled_sample() {

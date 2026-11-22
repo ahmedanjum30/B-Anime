@@ -2711,6 +2711,8 @@ a.slot:focus-visible {
   background: rgb(18 19 24 / 0.72);
   color: var(--z10);
   font: 600 15px / 1 var(--font-ui);
+  /* Near the edge the box is squeezed; "+10 s" stays on one line. */
+  white-space: nowrap;
   pointer-events: none;
   transform: translate(-50%, -50%);
   animation: tap-seek-in var(--t-med) var(--ease-out);

@@ -11,6 +11,13 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-23
+
+### Fixed
+- **This week** showed none of the week's episodes in the first hours of Monday east of
+  Greenwich (on phones only "Today" was listed). The week now follows your own time zone.
+- Double-tap to seek: "+10 s" stays on one line near the edge of the screen.
+
 ## [0.3.9] - 2026-11-23
 
 ### Added
