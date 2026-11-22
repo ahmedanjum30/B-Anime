@@ -163,6 +163,8 @@ export default function Player() {
   let video!: HTMLVideoElement;
   let shell!: HTMLDivElement;
   let hls: Hls | null = null;
+  /** A pending reload after a network error (see the stream effect). */
+  let netRetry: number | undefined;
   const [sourceIndex, setSourceIndex] = createSignal(0);
   const [levels, setLevels] = createSignal<{ height: number; bitrate: number }[]>([]);
   const [level, setLevel] = createSignal(-1); // -1 = auto
@@ -222,6 +224,7 @@ export default function Player() {
   };
 
   const destroy = () => {
+    clearTimeout(netRetry);
     hls?.destroy();
     hls = null;
   };
@@ -307,7 +310,9 @@ export default function Player() {
       if (HlsLib && HlsLib.isSupported()) {
         const instance = new HlsLib({
           enableWorker: true,
-          backBufferLength: 90,
+          // Phones have less room for buffered video; a full buffer stalled playback after a
+          // quality change.
+          backBufferLength: onAndroid ? 30 : 90,
           maxBufferLength: 60,
           startPosition: startAt ?? -1,
         });
@@ -324,7 +329,15 @@ export default function Player() {
           setAudioTrack(instance.audioTrack);
         });
         instance.on(HlsLib.Events.AUDIO_TRACK_SWITCHED, (_e, data) => setAudioTrack(data.id));
-        let recovered = 0;
+        // Recovery attempts since the video last made progress. A slow connection may hiccup many
+        // times in an episode; it gives up only when several tries in a row get nowhere. (One
+        // count for the whole episode stopped playback after the third hiccup.)
+        let mediaTries = 0;
+        let netTries = 0;
+        instance.on(HlsLib.Events.FRAG_BUFFERED, () => {
+          mediaTries = 0;
+          netTries = 0;
+        });
         instance.on(HlsLib.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
           // The playlist itself didn't load (refused, missing, not a playlist). startLoad() can't
@@ -348,8 +361,14 @@ export default function Player() {
                     : "the video's playlist couldn't be loaded";
             return setVideoError(`Playback failed: ${why}.${another}`);
           }
-          if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR && recovered++ < 2) return instance.recoverMediaError();
-          if (data.type === HlsLib.ErrorTypes.NETWORK_ERROR && recovered++ < 3) return instance.startLoad();
+          if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR && mediaTries++ < 2) return instance.recoverMediaError();
+          if (data.type === HlsLib.ErrorTypes.NETWORK_ERROR && netTries < 5) {
+            // Waits longer each time (2, 4, 6… seconds), so a dropped connection has time to return.
+            netTries++;
+            clearTimeout(netRetry);
+            netRetry = window.setTimeout(() => hls === instance && instance.startLoad(), netTries * 2000);
+            return;
+          }
           setVideoError(`Playback failed (${data.details}).${another}`);
         });
         instance.loadSource(src.url);
