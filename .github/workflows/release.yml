@@ -249,11 +249,46 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # CHANGELOG.md, for this version's section in the release notes.
+      - uses: actions/checkout@v7
+        with:
+          path: source
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
+          # The notes: this version's section of CHANGELOG.md, then how to
+          # install. --generate-notes adds the list of changes below them.
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' source/CHANGELOG.md > changes.md
+          {
+            echo "## What's new in $version"
+            if grep -q '[^[:space:]]' changes.md; then
+              cat changes.md
+            else
+              echo "::warning::CHANGELOG.md has no entry for $version" >&2
+            fi
+          } > notes.md
+          cat >> notes.md <<'EOF'
+
+          ## Install
+
+          **Windows:** download **B-Anime-Setup-__VERSION__.exe** below and run it. It installs for your user only, without admin rights. Already have B-Anime? It updates itself.
+
+          > **Windows says "Windows protected your PC"?** Click **More info**, then **Run anyway**. B-Anime isn't code-signed yet, so Windows doesn't know the publisher. The installer is the one built by this repository's release workflow; you can check it against `SHA256SUMS.txt`.
+
+          **Android:** download **B-Anime-__VERSION__-arm64.apk** below (arm64, for most phones). The first time, your phone asks you to allow installing from this source. Installed copies update themselves.
+          EOF
+          sed -i "s/__VERSION__/$version/g" notes.md
+          cat notes.md
+
           cd dist
           files=("B-Anime-Setup-$version.exe")
           apk="B-Anime-$version-arm64.apk"
@@ -268,7 +303,7 @@ jobs:
           files+=(SHA256SUMS.txt)
           cat SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" \
-            --title "B-Anime $version" --generate-notes
+            --title "B-Anime $version" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
 
   # The website (site/) on GitHub Pages, with this release's downloads at fixed links:
   # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
