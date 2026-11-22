@@ -11,8 +11,26 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-23
+
 ### Added
-- Sponsor button (Patreon).
+- Android: **Full screen** really is full screen. The status and navigation bars hide and
+  the screen turns to landscape, and both come back when you leave full screen.
+- The player remembers the server and the audio language you pick. Your last server
+  becomes the default for shows you haven't picked one for.
+- Sponsor button (Patreon) on the GitHub page.
+
+### Fixed
+- The next episode starts playing by itself (on Android, and whenever AniSkip was slow).
+- Playback no longer stops partway through an episode on a slow connection. Network
+  retries also wait longer each time, so a dropped connection has time to come back.
+- Switching servers mid-episode keeps your place.
+- Phones: subtitle **Position** (Low, Normal, High) changes the height again.
+- Phones held upright: the **Full screen** button shows (the controls wrap to two lines).
+- Phones held sideways: the subtitles menu scrolls, so all its settings can be reached.
+
+### Removed
+- Android: the picture-in-picture button, which did nothing there.
 
 ## [0.3.7] - 2026-11-20
 
