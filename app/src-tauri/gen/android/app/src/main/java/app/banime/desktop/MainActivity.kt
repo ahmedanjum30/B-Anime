@@ -1,15 +1,22 @@
 package app.banime.desktop
 
+import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 
 class MainActivity : TauriActivity() {
+  private var webView: WebView? = null
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
@@ -17,6 +24,7 @@ class MainActivity : TauriActivity() {
 
   // The player asks for what a web page can't do itself, through window.BAnimeAndroid.
   override fun onWebViewCreate(webView: WebView) {
+    this.webView = webView
     webView.addJavascriptInterface(Player(), "BAnimeAndroid")
     // The next episode starts by itself, like on the PC. By default Android's WebView only plays
     // a video after a tap, so play() at the start of each episode was refused.
@@ -41,5 +49,43 @@ class MainActivity : TauriActivity() {
         }
       }
     }
+
+    /**
+     * Picture in picture: the app shrinks to a small window over other apps, showing the video.
+     * Android's WebView has none of its own, so the activity does it. False before Android 8.
+     */
+    @JavascriptInterface
+    fun enterPip(width: Int, height: Int): Boolean {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+      runOnUiThread {
+        // Android accepts ratios between 1:2.39 and 2.39:1.
+        val ratio = if (width > 0 && height > 0) width.toDouble() / height else 16.0 / 9
+        val clamped = ratio.coerceIn(1 / 2.39, 2.39)
+        val params = PictureInPictureParams.Builder()
+          .setAspectRatio(Rational((clamped * 1000).toInt(), 1000))
+          .build()
+        runCatching { enterPictureInPictureMode(params) }
+      }
+      return true
+    }
+  }
+
+  // In picture in picture the activity is paused but still on screen. The generated activity
+  // pauses the WebView then, which would stop the video, so it's resumed straight away.
+  override fun onPause() {
+    super.onPause()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) webView?.onResume()
+  }
+
+  // Tells the page: "on" (shrunk), "off" (back to full size) or "closed" (the small window was
+  // dismissed, so playback stops).
+  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    val state = when {
+      isInPictureInPictureMode -> "on"
+      !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) -> "closed"
+      else -> "off"
+    }
+    webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('banime-pip', { detail: '$state' }))", null)
   }
 }

@@ -13,6 +13,12 @@ without one, the release still gets the install notes and the commit list.
 
 ## [0.3.9] - 2026-11-23
 
+### Added
+- Touch screens: double-tap the right side of the video to jump 10 seconds ahead, the left
+  side to go 10 seconds back. Keep tapping to jump further.
+- Android: **Picture in picture** works, from the player's settings menu (the gear). The video
+  keeps playing in a small window over your other apps; closing that window stops it.
+
 ### Fixed
 - Phones held upright: the player's controls stay on one line however long the time gets
   (they split over two uneven lines once it reached 10:00). Previous episode is in the

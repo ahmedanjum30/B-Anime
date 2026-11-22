@@ -2034,6 +2034,19 @@ a.slot:focus-visible {
     display: none;
   }
 }
+/* Picture in picture on Android: the whole app is the small window (~240px wide), so it shows
+   only the video, with subtitles sized for it. */
+.player.is-pip .player-top,
+.player.is-pip .player-controls,
+.player.is-pip .player-drawer,
+.player.is-pip .tap-seek {
+  display: none;
+}
+.player.is-pip,
+.player.is-pip[data-subsize] {
+  --sub-font: 11px;
+  --sub-floor: 4px;
+}
 /* A phone held upright: every control on one line (finger-sized buttons left Full screen off the
    edge). Previous episode goes (the episode list has it), buttons are a little narrower, and the
    time never wraps. */
@@ -2684,6 +2697,43 @@ a.slot:focus-visible {
   border-top-color: var(--red);
   animation: spin 800ms linear infinite;
   pointer-events: none;
+}
+
+/* Double-tap to seek: a quiet label on the tapped side, centred in that third of the picture. */
+.tap-seek {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 8px 10px;
+  border-radius: 999px;
+  background: rgb(18 19 24 / 0.72);
+  color: var(--z10);
+  font: 600 15px / 1 var(--font-ui);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: tap-seek-in var(--t-med) var(--ease-out);
+}
+/* Arrows point the way it went: « −10 s on the left, +10 s » on the right. */
+.tap-seek[data-side="l"] {
+  left: 20%;
+}
+.tap-seek[data-side="r"] {
+  left: 80%;
+  padding: 8px 10px 8px 14px;
+  flex-direction: row-reverse;
+}
+@keyframes tap-seek-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tap-seek {
+    animation: none;
+  }
 }
 
 /* ───────── Reader ───────── */

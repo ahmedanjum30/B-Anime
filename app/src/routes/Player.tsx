@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import type Hls from "hls.js";
 
 import {
-  ArrowLeft, AudioLines, Captions, ChevronLeft, ChevronRight, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
+  ArrowLeft, AudioLines, Captions, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
   SkipBack, SkipForward, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
@@ -780,6 +780,47 @@ export default function Player() {
   // ── Controls
   const toggle = () => (video.paused ? void video.play() : video.pause());
   const seekBy = (d: number) => (video.currentTime = Math.max(0, Math.min(duration(), video.currentTime + d)));
+
+  // ── Double-tap to seek (touch screens)
+  // A quick second tap on the right side jumps 10 s ahead, on the left 10 s back; more taps keep
+  // adding. A tap on a side waits a moment for a second one before it pauses or plays; the middle
+  // answers at once.
+  const TAP_SECONDS = 10;
+  const DOUBLE_TAP_MS = 300;
+  const [tapSeek, setTapSeek] = createSignal<{ side: "l" | "r"; total: number } | null>(null);
+  let tapChain: { side: "l" | "r"; at: number } | null = null;
+  let tapTimer: number | undefined;
+  let tapHide: number | undefined;
+  /** When the last touch ended: the click the browser makes from it is ignored (handled here). */
+  let lastTouch = 0;
+  onCleanup(() => {
+    clearTimeout(tapTimer);
+    clearTimeout(tapHide);
+  });
+  const onPictureTap = (e: PointerEvent) => {
+    if (e.pointerType !== "touch") return;
+    const now = performance.now();
+    lastTouch = now;
+    const box = video.getBoundingClientRect();
+    const x = (e.clientX - box.left) / box.width;
+    const side = x < 0.4 ? "l" : x > 0.6 ? "r" : null;
+    if (side && tapChain?.side === side && now - tapChain.at < DOUBLE_TAP_MS * 1.5) {
+      clearTimeout(tapTimer);
+      tapChain = { side, at: now };
+      const d = side === "r" ? TAP_SECONDS : -TAP_SECONDS;
+      seekBy(d);
+      const shown = tapSeek();
+      setTapSeek({ side, total: (shown?.side === side ? shown.total : 0) + d });
+      clearTimeout(tapHide);
+      tapHide = window.setTimeout(() => setTapSeek(null), 700);
+      return;
+    }
+    tapChain = side ? { side, at: now } : null;
+    clearTimeout(tapTimer);
+    tapTimer = window.setTimeout(() => (menu() ? setMenu(null) : toggle()), side ? DOUBLE_TAP_MS : 0);
+  };
+  /** A click the browser made from a touch: already handled by onPictureTap. */
+  const fromTouch = () => performance.now() - lastTouch < 600;
   const setVol = (v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     video.volume = clamped;
@@ -797,8 +838,23 @@ export default function Player() {
     setLevel(i);
     setMenu(null);
   };
-  /** Android: full screen is done by the app's activity (MainActivity.kt). */
-  const androidBars = () => (window as unknown as { BAnimeAndroid?: { setImmersive(on: boolean): void } }).BAnimeAndroid;
+  /** Android: what the app's activity does for the player (MainActivity.kt). */
+  const androidBars = () =>
+    (window as unknown as { BAnimeAndroid?: { setImmersive(on: boolean): void; enterPip(w: number, h: number): boolean } })
+      .BAnimeAndroid;
+  /** Android picture in picture: the whole app is the small window, so only the video shows. */
+  const [pip, setPip] = createSignal(false);
+  if (onAndroid) {
+    const onPip = (e: Event) => {
+      const state = (e as CustomEvent<string>).detail;
+      setPip(state === "on");
+      if (state === "on") setMenu(null);
+      // The small window was dismissed: stop, as closing a player does.
+      if (state === "closed") video.pause();
+    };
+    window.addEventListener("banime-pip", onPip);
+    onCleanup(() => window.removeEventListener("banime-pip", onPip));
+  }
   const toggleFullscreen = async () => {
     const next = !fullscreen();
     setFullscreen(next);
@@ -815,6 +871,8 @@ export default function Player() {
     else if (fullscreen() && inTauri) void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setFullscreen(false));
   });
   const togglePip = () => {
+    // Android's WebView has no picture in picture of its own; the app's activity does it.
+    if (onAndroid) return void androidBars()?.enterPip(video.videoWidth, video.videoHeight);
     if (document.pictureInPictureElement) void document.exitPictureInPicture();
     else void video.requestPictureInPicture?.().catch(() => {});
   };
@@ -924,7 +982,7 @@ export default function Player() {
     <div
       ref={shell}
       class="player"
-      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu() }}
+      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu(), "is-pip": pip() }}
       data-subsize={subSize()}
       data-subpos={subPos()}
       onPointerMove={onPointerMove}
@@ -957,8 +1015,9 @@ export default function Player() {
           )
         }
         // With a menu or the episodes panel open, a click on the picture just closes it.
-        onClick={() => (menu() ? setMenu(null) : toggle())}
-        onDblClick={() => void toggleFullscreen()}
+        onClick={() => !fromTouch() && (menu() ? setMenu(null) : toggle())}
+        onDblClick={() => !fromTouch() && void toggleFullscreen()}
+        onPointerUp={onPictureTap}
       >
         <For each={stream()?.subtitles ?? []}>
           {(s) => (
@@ -985,6 +1044,18 @@ export default function Player() {
           )}
         </For>
       </video>
+
+      {/* Double-tap feedback: how far the taps jumped, on the side that was tapped. */}
+      <Show when={tapSeek()}>
+        {(t) => (
+          <div class="tap-seek" data-side={t().side} aria-hidden="true">
+            <Show when={t().side === "r"} fallback={<ChevronsLeft size={22} stroke-width={2} />}>
+              <ChevronsRight size={22} stroke-width={2} />
+            </Show>
+            <span class="num">{t().total > 0 ? "+" : "−"}{Math.abs(t().total)} s</span>
+          </div>
+        )}
+      </Show>
 
       <Show when={textCues().top.length || textCues().bottom.length}>
         <div class="sub-layer" aria-live="off">
@@ -1380,6 +1451,12 @@ export default function Player() {
                       </span>
                       <span class="menu-switch" aria-hidden="true" />
                     </button>
+                    {/* Phones: here rather than its own button, so the control bar fits held upright. */}
+                    <Show when={onAndroid}>
+                      <button type="button" role="menuitem" onClick={() => { setMenu(null); togglePip(); }}>
+                        Picture in picture
+                      </button>
+                    </Show>
                     <Show when={levels().length > 1}>
                       <p class="menu-head">Quality</p>
                       <button type="button" role="menuitemradio" aria-checked={level() === -1} onClick={() => chooseLevel(-1)}>Auto</button>
@@ -1421,7 +1498,7 @@ export default function Player() {
               </div>
             </Show>
 
-            {/* Android's WebView has no picture in picture, so the button would do nothing there. */}
+            {/* Android: in the settings menu instead (the bar must fit a phone held upright). */}
             <Show when={!onAndroid}>
               <button type="button" class="icon-btn" onClick={togglePip} aria-label="Picture in picture">
                 <PictureInPicture size={18} stroke-width={2} />

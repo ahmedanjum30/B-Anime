@@ -8,6 +8,8 @@ export { default as CalendarDays } from "lucide-solid/icons/calendar-days";
 export { default as Captions } from "lucide-solid/icons/captions";
 export { default as ChevronLeft } from "lucide-solid/icons/chevron-left";
 export { default as ChevronRight } from "lucide-solid/icons/chevron-right";
+export { default as ChevronsLeft } from "lucide-solid/icons/chevrons-left";
+export { default as ChevronsRight } from "lucide-solid/icons/chevrons-right";
 export { default as Columns2 } from "lucide-solid/icons/columns-2";
 export { default as Compass } from "lucide-solid/icons/compass";
 export { default as Ellipsis } from "lucide-solid/icons/ellipsis";
