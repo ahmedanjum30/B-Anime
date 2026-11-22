@@ -797,7 +797,7 @@ export default function Player() {
     setLevel(i);
     setMenu(null);
   };
-  /** Android: the app's activity hides the status and navigation bars (MainActivity.kt). */
+  /** Android: full screen is done by the app's activity (MainActivity.kt). */
   const androidBars = () => (window as unknown as { BAnimeAndroid?: { setImmersive(on: boolean): void } }).BAnimeAndroid;
   const toggleFullscreen = async () => {
     const next = !fullscreen();
@@ -1421,9 +1421,12 @@ export default function Player() {
               </div>
             </Show>
 
-            <button type="button" class="icon-btn" onClick={togglePip} aria-label="Picture in picture">
-              <PictureInPicture size={18} stroke-width={2} />
-            </button>
+            {/* Android's WebView has no picture in picture, so the button would do nothing there. */}
+            <Show when={!onAndroid}>
+              <button type="button" class="icon-btn" onClick={togglePip} aria-label="Picture in picture">
+                <PictureInPicture size={18} stroke-width={2} />
+              </button>
+            </Show>
             <button type="button" class="icon-btn" onClick={() => void toggleFullscreen()} aria-label={fullscreen() ? "Exit full screen (F)" : "Full screen (F)"}>
               <Show when={fullscreen()} fallback={<Maximize size={18} stroke-width={2} />}>
                 <Minimize size={18} stroke-width={2} />

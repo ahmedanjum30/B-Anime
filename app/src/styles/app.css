@@ -2029,6 +2029,10 @@ a.slot:focus-visible {
   .player {
     --sub-floor: 8px;
   }
+  /* Phones have volume keys, and the slider only opens on hover. */
+  .player .volume {
+    display: none;
+  }
 }
 /* Picture subtitles (PGS): a box matching the video's picture, images placed in percentages. */
 .pgs-layer {
@@ -2420,7 +2424,10 @@ a.slot:focus-visible {
    right) opens the language list in place; only that list scrolls, so the back row and
    "Load from file…" stay in view however many tracks there are. */
 .menu-paged {
-  overflow: hidden;
+  /* Scrolls as a whole only when the menu is taller than the screen allows (a phone held
+     sideways): hidden, the settings at the bottom of the main page couldn't be reached. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .menu .menu-next {
   display: flex;
@@ -3492,6 +3499,15 @@ a.slot:focus-visible {
   /* Player: the whole screen, wider margins for thumbs. */
   .player {
     height: 100dvh;
+  }
+  /* A phone held upright is too narrow for every control on one line (finger-sized buttons):
+     the right-hand group, with Full screen, was pushed off the edge. It moves to a second line. */
+  .player-bar {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .player-bar > .bar-group:last-child {
+    margin-left: auto;
   }
   .player-top {
     padding: max(var(--u), env(safe-area-inset-top)) var(--gutter) calc(var(--u) * 4);
