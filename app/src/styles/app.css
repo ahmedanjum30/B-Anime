@@ -2034,6 +2034,35 @@ a.slot:focus-visible {
     display: none;
   }
 }
+/* A phone held upright: every control on one line (finger-sized buttons left Full screen off the
+   edge). Previous episode goes (the episode list has it), buttons are a little narrower, and the
+   time never wraps. */
+@media (pointer: coarse) and (max-width: 480px) {
+  .player-bar .ep-prev {
+    display: none;
+  }
+  .player-bar .icon-btn {
+    width: 40px;
+  }
+  .player-bar,
+  .player-bar .bar-group {
+    gap: 2px;
+  }
+  /* The time grows as it counts ("9:59" to "10:00", hours on long episodes). The buttons on the
+     right never give way; the time is cut short ("…") before anything moves. */
+  .player-bar > .bar-group:last-child {
+    flex-shrink: 0;
+  }
+  .player-bar > .bar-group:first-child {
+    min-width: 0;
+  }
+  .player-time {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
 /* Picture subtitles (PGS): a box matching the video's picture, images placed in percentages. */
 .pgs-layer {
   position: absolute;
@@ -3499,15 +3528,6 @@ a.slot:focus-visible {
   /* Player: the whole screen, wider margins for thumbs. */
   .player {
     height: 100dvh;
-  }
-  /* A phone held upright is too narrow for every control on one line (finger-sized buttons):
-     the right-hand group, with Full screen, was pushed off the edge. It moves to a second line. */
-  .player-bar {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
-  .player-bar > .bar-group:last-child {
-    margin-left: auto;
   }
   .player-top {
     padding: max(var(--u), env(safe-area-inset-top)) var(--gutter) calc(var(--u) * 4);

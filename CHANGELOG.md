@@ -11,6 +11,13 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-23
+
+### Fixed
+- Phones held upright: the player's controls stay on one line however long the time gets
+  (they split over two uneven lines once it reached 10:00). Previous episode is in the
+  episode list there.
+
 ## [0.3.8] - 2026-11-23
 
 ### Added

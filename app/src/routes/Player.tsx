@@ -1211,7 +1211,7 @@ export default function Player() {
                 <Pause size={20} fill="currentColor" stroke-width={0} />
               </Show>
             </button>
-            <button type="button" class="icon-btn" disabled={!hasPrev()} onClick={() => goTo(episode() - 1)} aria-label="Previous episode (P)">
+            <button type="button" class="icon-btn ep-prev" disabled={!hasPrev()} onClick={() => goTo(episode() - 1)} aria-label="Previous episode (P)">
               <SkipBack size={18} fill="currentColor" stroke-width={0} />
             </button>
             <button type="button" class="icon-btn" disabled={!hasNext()} onClick={() => goTo(episode() + 1)} aria-label="Next episode (N)">
