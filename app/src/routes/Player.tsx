@@ -8,7 +8,7 @@ import {
 } from "../lib/icons";
 import {
   errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
-  localStream, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
+  localStream, onAndroid, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
@@ -658,9 +658,11 @@ export default function Player() {
         video.currentTime = 0;
       }
     }
+    // Play first: the skip times come from AniSkip, and waiting for them left an episode paused
+    // at the start (the next one after auto-next) whenever AniSkip was slow.
+    void video.play().catch(() => {});
     const mal = media()?.idMal;
     if (mal && inTauri) setSkips(await getSkipTimes(mal, episode(), video.duration || 0).catch(() => []));
-    void video.play().catch(() => {});
   };
 
   /**
@@ -776,17 +778,22 @@ export default function Player() {
     setLevel(i);
     setMenu(null);
   };
+  /** Android: the app's activity hides the status and navigation bars (MainActivity.kt). */
+  const androidBars = () => (window as unknown as { BAnimeAndroid?: { setImmersive(on: boolean): void } }).BAnimeAndroid;
   const toggleFullscreen = async () => {
     const next = !fullscreen();
     setFullscreen(next);
-    if (inTauri) {
+    if (onAndroid) {
+      androidBars()?.setImmersive(next);
+    } else if (inTauri) {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().setFullscreen(next).catch(() => {});
     } else if (next) void shell.requestFullscreen?.().catch(() => {});
     else if (document.fullscreenElement) void document.exitFullscreen();
   };
   onCleanup(() => {
-    if (fullscreen() && inTauri) void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setFullscreen(false));
+    if (fullscreen() && onAndroid) androidBars()?.setImmersive(false);
+    else if (fullscreen() && inTauri) void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setFullscreen(false));
   });
   const togglePip = () => {
     if (document.pictureInPictureElement) void document.exitPictureInPicture();

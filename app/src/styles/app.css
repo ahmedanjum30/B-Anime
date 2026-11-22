@@ -2023,6 +2023,13 @@ a.slot:focus-visible {
 .player[data-subpos="high"] {
   --sub-lift: 13;
 }
+/* Phones: the picture is only ~400px tall, so 56px is above even "High" (13%) and every Position
+   landed in the same place. The PC problem the floor is for doesn't happen there. */
+@media (pointer: coarse) {
+  .player {
+    --sub-floor: 8px;
+  }
+}
 /* Picture subtitles (PGS): a box matching the video's picture, images placed in percentages. */
 .pgs-layer {
   position: absolute;
