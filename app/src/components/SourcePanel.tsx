@@ -125,6 +125,20 @@ export default function SourcePanel(props: {
                         Matched to <strong>{(m() as { title: string }).title}</strong>
                       </span>
                       <button type="button" class="link-btn" onClick={openPicker}>Wrong match?</button>
+                      {/* A match picked by hand sticks; removing it goes back to the automatic lookup. */}
+                      <Show when={!(m() as { auto: boolean }).auto}>
+                        <button
+                          type="button"
+                          class="link-btn"
+                          title="Forget this match and find the show automatically again"
+                          onClick={() => {
+                            setPicking(false);
+                            void retry();
+                          }}
+                        >
+                          Remove match
+                        </button>
+                      </Show>
                       <Show when={s().items.loading}>
                         <span class="source-status is-busy" role="status">
                           <i class="spin-dot" aria-hidden="true" />
