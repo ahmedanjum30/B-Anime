@@ -11,6 +11,21 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-24
+
+### Added
+- **AnikotoTv** extension: subbed and dubbed anime in English.
+
+### Changed
+- AniPm and AnimeVillage extensions updated.
+- The player starts in the Sub or Dub you opened the episode with, on the server you last picked
+  for the show (or the same server in that language), and switching audio keeps it as the show's
+  choice.
+
+### Fixed
+- Videos from hosts that hide each piece of video behind a small image now play: B-Anime removes
+  the image before the player sees it.
+
 ## [0.4.1] - 2026-11-24
 
 ### Fixed
