@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import type Hls from "../vendor/hls/hls.mjs";
+import type Hls from "hls.js";
 
 import {
   ArrowLeft, AudioLines, Captions, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
@@ -307,7 +307,7 @@ export default function Player() {
       }, STALL_SECONDS * 1000);
       // HLS goes through hls.js whenever Media Source Extensions exist: newer WebView2 builds
       // claim native HLS support but play proxied streams unreliably, and hls.js gives us levels.
-      const HlsLib = src.kind === "hls" ? (await import("../vendor/hls/hls.mjs")).default : null;
+      const HlsLib = src.kind === "hls" ? (await import("hls.js")).default : null;
       if (src.kind === "hls" && !HlsLib?.isSupported() && !video.canPlayType("application/vnd.apple.mpegurl")) {
         return setVideoError("This system can't play HLS streams.");
       }
