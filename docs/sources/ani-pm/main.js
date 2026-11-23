@@ -194,6 +194,7 @@ class Provider {
 
     return {
       server: "Settlar",
+      audio: channel, // the language actually served (bootstrap may fall back from dub to sub)
       headers: {
         Referer: `${embed.origin}/`,
         Origin: embed.origin,
@@ -207,6 +208,7 @@ class Provider {
             id: String(i),
             url: s.url,
             language: s.label || s.srclang,
+            srclang: s.srclang,
             isDefault: !!s.default,
           })),
         },
@@ -220,22 +222,39 @@ class Provider {
   }
 
   // The tool passes the episode id string and expects { headers, sources: [...] }.
-  // Asks both servers at once and returns every one that worked (Settlar first).
+  // Asks at once: Settlar in the episode's language, Beta, and Settlar in the other language (when the
+  // show has it). Returns every one that worked, in that order.
+  // Settlar sources carry `audio` ("sub"/"dub") so the app's Audio menu can switch between them. Beta has
+  // no `audio`: both languages are tracks inside its master, and the player lists those itself.
   // headers = the first working server's; each source also carries its own server's headers.
   async sources(episodeId) {
-    const servers = this.getSettings().episodeServers;
-    const results = await Promise.allSettled(servers.map((name) => this.findEpisodeServer({ id: episodeId }, name)));
-    const ok = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
-    if (!ok.length) {
-      throw new Error(results.map((r, i) => `${servers[i]}: ${r.reason?.message ?? r.reason}`).join(" | "));
-    }
+    const ep = this.parseEpisodeId(episodeId);
+    const other = ep.lang === "dub" ? "sub" : "dub";
+    const jobs = [
+      { server: "Settlar", id: episodeId, lang: ep.lang },
+      { server: "Beta", id: episodeId },
+      { server: "Settlar", id: [ep.src, ep.key, ep.number, other, ep.anilistId].join("/"), lang: other },
+    ];
+    const results = await Promise.allSettled(jobs.map((j) => this.findEpisodeServer({ id: j.id }, j.server)));
+    const ok = [];
+    const errors = [];
+    results.forEach((r, i) => {
+      const job = jobs[i];
+      const name = job.lang ? `${job.server} (${job.lang})` : job.server;
+      if (r.status !== "fulfilled") return errors.push(`${name}: ${r.reason?.message ?? r.reason}`);
+      // Settlar serves the other language when this one is missing; that one is asked for separately.
+      if (job.lang && r.value.audio !== job.lang) return errors.push(`${name}: not available (got ${r.value.audio})`);
+      ok.push(r.value);
+    });
+    if (!ok.length) throw new Error(errors.join(" | "));
     return {
       headers: ok[0].headers,
       sources: ok.flatMap((result) => result.videoSources.map((s) => ({
         url: s.url,
         type: s.type,
         quality: s.quality,
-        label: result.server,
+        label: result.audio ? `${result.server} (${result.audio})` : result.server,
+        audio: result.audio,
         headers: result.headers,
         subtitles: s.subtitles,
       }))),

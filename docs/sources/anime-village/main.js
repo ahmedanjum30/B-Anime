@@ -76,32 +76,56 @@ class Provider {
     }));
   }
 
+  // The episode in its own language and in the other one, so the player's Audio menu can switch.
+  // Sub and dub share the episode id ("show-slug?ep=123"); only `category` changes. When a show has
+  // no dub (or no sub), the API answers with the other language's link instead, so a second
+  // language whose link is the same as the first one's is left out.
   async sources(episodeId) {
     const s = String(episodeId);
     const bar = s.indexOf("|");
     const category = bar > 0 ? s.slice(0, bar) : "sub";
     const rawId = bar > 0 ? s.slice(bar + 1) : s;
+    const other = category === "dub" ? "sub" : "dub";
 
     // Same as the site: split "show-slug?ep=123" into the show part and the ep number.
     const [showPart, rest] = rawId.split("?ep=");
-    const params = new URLSearchParams({ category, server: SERVER });
     const ep = rest ? rest.split("&")[0] : null;
-    if (ep) params.set("ep", ep);
+    const stream = (cat) => {
+      const params = new URLSearchParams({ category: cat, server: SERVER });
+      if (ep) params.set("ep", ep);
+      return getJSON(`${BASE}/api/stream/${encodeURIComponent(showPart)}?${params}`);
+    };
 
-    const json = await getJSON(`${BASE}/api/stream/${encodeURIComponent(showPart)}?${params}`);
+    const [mine, theirs] = await Promise.allSettled([stream(category), stream(other)]);
+    if (mine.status === "rejected" && theirs.status === "rejected") throw mine.reason;
+    const own = mine.status === "fulfilled" ? (mine.value.sources || []).map((x) => x.url) : [];
+    const answers = [];
+    if (mine.status === "fulfilled") answers.push([category, mine.value]);
+    if (theirs.status === "fulfilled" && (theirs.value.sources || []).some((x) => !own.includes(x.url))) {
+      answers.push([other, theirs.value]);
+    }
+
+    const subtitles = [];
+    for (const [, json] of answers) {
+      for (const t of json.subtitles || []) {
+        if (t && t.url && !subtitles.some((x) => x.url === t.url)) {
+          subtitles.push({ url: t.url, lang: langCode(t.lang), label: t.label || t.lang || undefined });
+        }
+      }
+    }
 
     return {
-      headers: { ...json.headers, ...HEADERS },
-      sources: (json.sources || []).map((src) => ({
-        url: src.url,
-        type: src.isM3U8 || /\.m3u8(?:[?#]|$)/i.test(src.url) ? "hls" : "mp4",
-        quality: src.quality && src.quality !== "default" ? src.quality : undefined,
-        label: SERVER.toUpperCase(),
-        audio: category,
-      })),
-      subtitles: (json.subtitles || [])
-        .filter((t) => t && t.url)
-        .map((t) => ({ url: t.url, lang: langCode(t.lang), label: t.label || t.lang || undefined })),
+      headers: { ...answers[0][1].headers, ...HEADERS },
+      sources: answers.flatMap(([cat, json]) =>
+        (json.sources || []).map((src) => ({
+          url: src.url,
+          type: src.isM3U8 || /\.m3u8(?:[?#]|$)/i.test(src.url) ? "hls" : "mp4",
+          quality: src.quality && src.quality !== "default" ? src.quality : undefined,
+          label: `${SERVER.toUpperCase()} (${cat})`,
+          audio: cat,
+        })),
+      ),
+      subtitles,
     };
   }
 }

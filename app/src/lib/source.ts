@@ -37,7 +37,7 @@ export function rememberShowSource(mediaId: number, ext: string) {
 const SERVER_KEY = (mediaId: number) => `banime.server.show.${mediaId}`;
 const LAST_SERVER_KEY = "banime.server.last";
 /** A stream's name for remembering it: its label, else its kind. */
-export const serverName = (s: { label: string; kind: string }) => s.label.trim() || s.kind;
+export { serverName } from "./server-pick";
 export function rememberServer(mediaId: number, name: string) {
   try {
     localStorage.setItem(SERVER_KEY(mediaId), name);

@@ -16,6 +16,7 @@ import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
 import { audioId, recallAudio, rememberAudio, rememberDub } from "../lib/dub";
 import { createSource, recallServer, rememberServer, rememberShowSource, serverName } from "../lib/source";
+import { sameServerIn, startSource } from "../lib/server-pick";
 import { homeStore } from "../lib/store";
 import type { SkipTime } from "../lib/types";
 
@@ -110,6 +111,12 @@ export default function Player() {
     const text = q.toLowerCase();
     return episodeChoices().filter((e) => e.title?.toLowerCase().includes(text));
   });
+  /** Sub or Dub for the next episode: the language playing now when the source names it (it may
+   *  have been switched in the Audio menu), else what this episode was opened with. */
+  const nextDub = () => {
+    const playing = stream()?.sources[sourceIndex()]?.audio;
+    return playing === "en" ? true : playing === "ja" ? false : dubParam();
+  };
   const has = (ep: number) => (local() ? !!localEps()?.includes(ep) : source.byNumber().has(ep));
   const hasNext = () => has(episode() + 1);
   const hasPrev = () => has(episode() - 1);
@@ -119,7 +126,7 @@ export default function Player() {
     navigate(
       local()
         ? `/watch/${mediaId()}/${ep}?local=1`
-        : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}${dubParam() ? "&dub=1" : ""}`,
+        : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}${nextDub() ? "&dub=1" : ""}`,
       { replace: true },
     );
   };
@@ -248,15 +255,17 @@ export default function Player() {
     }),
   );
 
-  // Which server (stream) to start on: the one last picked for this show when the episode offers
-  // it again, else the one in the preferred audio language, else the first.
+  // Which server (stream) to start on: in the Sub/Dub this episode was opened with (?dub=1), the
+  // server last picked for this show. See startSource for the details.
   createEffect(
     on(stream, (s) => {
-      const server = recallServer(mediaId());
-      const byServer = s && server ? s.sources.findIndex((x) => serverName(x) === server) : -1;
-      const want = prefs()?.audio;
-      const byAudio = s && want ? s.sources.findIndex((x) => x.audio === want) : -1;
-      setSourceIndex(byServer >= 0 ? byServer : byAudio > 0 ? byAudio : 0);
+      const all = (s?.sources ?? []).map((x, i) => ({ ...x, i }));
+      const start = startSource(all, {
+        picked: local() ? null : dubParam() ? "en" : "ja",
+        preferred: prefs()?.audio,
+        remembered: recallServer(mediaId()),
+      });
+      setSourceIndex(start?.i ?? 0);
       setExtraSubs([]);
       setSubOffset(0);
     }),
@@ -619,7 +628,22 @@ export default function Player() {
     return same.length > 1 ? `${base} (${same.indexOf(t) + 1})` : base;
   };
   /** Sources that differ by audio language, for the Audio menu when the stream has no tracks. */
-  const audioSources = () => (stream()?.sources ?? []).map((s, i) => ({ ...s, i })).filter((s) => s.audio);
+  /** Sources that name their audio language. */
+  const withAudio = () => (stream()?.sources ?? []).map((s, i) => ({ ...s, i })).filter((s) => s.audio);
+  /** One Audio menu entry per language (a source with several servers per language listed each). */
+  const audioSources = () => withAudio().filter((s, k, all) => all.findIndex((x) => x.audio === s.audio) === k);
+  /** Switches the audio language and keeps the server: the source at the same place in the new
+   *  language's list as the current one is in its own (HD-1 sub → HD-1 dub). */
+  const chooseAudioSource = (audio: string | null) => {
+    const all = withAudio();
+    const current = all.find((s) => s.i === sourceIndex());
+    const pick = current ? sameServerIn(all, current, audio) : all.find((s) => s.audio === audio);
+    if (!pick) return;
+    chooseServer(pick.i);
+    // Also this show's Sub/Dub from now on (show page, next episode).
+    if (!local() && (audio === "ja" || audio === "en")) rememberDub(mediaId(), audio === "en");
+  };
+  const currentAudio = () => stream()?.sources[sourceIndex()]?.audio ?? null;
   const audioName = (code: string | null) => (code === "ja" ? "Japanese" : code === "en" ? "English" : code ?? "Unknown");
 
   // ── Resume, position saving, watched-at-80%, skip times
@@ -1327,7 +1351,7 @@ export default function Player() {
                       fallback={
                         <For each={audioSources()}>
                           {(s) => (
-                            <button type="button" role="menuitemradio" aria-checked={sourceIndex() === s.i} onClick={() => { chooseServer(s.i); setMenu(null); }}>
+                            <button type="button" role="menuitemradio" aria-checked={currentAudio() === s.audio} onClick={() => { chooseAudioSource(s.audio); setMenu(null); }}>
                               {audioName(s.audio)}
                             </button>
                           )}

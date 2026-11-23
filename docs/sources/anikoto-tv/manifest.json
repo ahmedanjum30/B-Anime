@@ -1,0 +1,12 @@
+{
+  "id": "anikoto-tv",
+  "name": "AnikotoTv",
+  "version": "1.0.0",
+  "kind": "anime",
+  "author": "you",
+  "description": "AnikotoTv is an online streaming provider for subbed and dubbed anime in english.",
+  "language": "en",
+  "codeUrl": "main.js",
+  "apiVersion": 1,
+  "icon": "https://anikototv.bz/favicon.ico"
+}

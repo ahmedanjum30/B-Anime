@@ -6,7 +6,7 @@
       "manifestUrl": "sources/ani-pm/manifest.json",
       "id": "ani-pm",
       "name": "AniPm",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "kind": "anime",
       "author": "you",
       "language": "en",
@@ -18,12 +18,23 @@
       "manifestUrl": "sources/anime-village/manifest.json",
       "id": "anime-village",
       "name": "AnimeVillage",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "anime",
       "author": "you",
       "language": "en",
       "icon": "https://animevillage.org/favicon.ico",
       "description": "AnimeVillage is an online streaming provider for subbed and dubbed anime in english."
+    },
+    {
+      "manifestUrl": "sources/anikoto-tv/manifest.json",
+      "id": "anikoto-tv",
+      "name": "AnikotoTv",
+      "version": "1.0.0",
+      "kind": "anime",
+      "author": "you",
+      "language": "en",
+      "icon": "https://anikototv.bz/favicon.ico",
+      "description": "AnikotoTv is an online streaming provider for subbed and dubbed anime in english."
     },
     {
       "manifestUrl": "sources/anime-heaven/manifest.json",

@@ -4,7 +4,8 @@
 //! so the webview can't load them directly. Every media URL the UI gets points here instead:
 //! `http://127.0.0.1:<port>/m/<secret>/<session>?u=<target>`. The proxy adds the session's
 //! headers, passes Range through (seeking), rewrites HLS playlists so segments and keys come back
-//! through it, and converts SRT/ASS subtitles to WebVTT.
+//! through it, drops the PNG some hosts put in front of video segments, and converts SRT/ASS
+//! subtitles to WebVTT.
 //!
 //! Only this app can use it: it listens on loopback, every URL carries a random secret, and
 //! targets get the same public-http(s)-only check as extension fetches.
@@ -20,7 +21,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 
 use crate::extensions::runtime::check_url;
@@ -321,8 +322,105 @@ async fn handle(
     }
     out_headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
     out_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
-    let stream = res.bytes_stream().map_err(std::io::Error::other);
-    (status, out_headers, Body::from_stream(stream)).into_response()
+
+    // Only a body that starts at byte 0 can carry a wrapper at its front.
+    let from_start = status == StatusCode::OK
+        || (status == StatusCode::PARTIAL_CONTENT
+            && res
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.starts_with("bytes 0-")));
+    let length = res.content_length();
+    let mut stream = Box::pin(res.bytes_stream().map_err(std::io::Error::other));
+    if !from_start {
+        return (status, out_headers, Body::from_stream(stream)).into_response();
+    }
+
+    // Some hosts upload video pieces as images: a tiny valid PNG with the MPEG-TS after it. Players
+    // (hls.js, VLC) can't read that, so the PNG part is dropped here. Reads only the first bytes.
+    let mut head = Vec::new();
+    // (Ends when the stream does: a short body with a PNG start is passed through unchanged.)
+    let cut = loop {
+        match png_wrapper(&head) {
+            Wrapper::Video(n) => break Some(n),
+            Wrapper::NeedMore if head.len() < MAX_WRAPPER_BYTES => match stream.try_next().await {
+                Ok(Some(chunk)) => head.extend_from_slice(&chunk),
+                Ok(None) => break None,
+                Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("source stream failed: {e}")),
+            },
+            _ => break None,
+        }
+    };
+    let mut status = status;
+    let first = match cut {
+        Some(n) => {
+            tracing::debug!(host = target.host_str().unwrap_or(""), wrapper = n, "proxy: dropped image wrapper from segment");
+            status = StatusCode::OK;
+            out_headers.remove(header::CONTENT_RANGE);
+            out_headers.remove(header::ACCEPT_RANGES);
+            out_headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp2t"));
+            match length.and_then(|l| l.checked_sub(n as u64)) {
+                Some(l) => out_headers.insert(header::CONTENT_LENGTH, HeaderValue::from(l)),
+                None => out_headers.remove(header::CONTENT_LENGTH),
+            };
+            head.split_off(n)
+        }
+        None => head,
+    };
+    let body = futures_util::stream::once(async move { Ok::<_, std::io::Error>(axum::body::Bytes::from(first)) }).chain(stream);
+    (status, out_headers, Body::from_stream(body)).into_response()
+}
+
+/// How much of a body is looked at for an image wrapper (the ones seen are 70 bytes).
+const MAX_WRAPPER_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Wrapper {
+    /// Not a wrapped segment: a real image, a plain segment, anything else. Pass it through.
+    No,
+    /// Starts like a PNG but its end isn't in `head` yet.
+    NeedMore,
+    /// A PNG followed by MPEG-TS; the first whole TS packet starts at this offset.
+    Video(usize),
+}
+
+const TS_PACKET: usize = 188;
+/// Sync bytes (0x47) in a row, one packet apart, that mark where the TS really starts.
+const TS_SYNCS: usize = 3;
+
+/// Checks the start of a body for a PNG wrapping MPEG-TS. Walks the PNG's chunks
+/// (`[length:4][type:4][data][crc:4]`) to the end of `IEND`, then finds the first offset where
+/// packets line up. The hosts seen put a 70-byte PNG and then a cut-short 182-byte packet first,
+/// so the video starts at 252 (the site's own player drops a fixed 252 bytes).
+fn png_wrapper(head: &[u8]) -> Wrapper {
+    const SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if head.len() < SIG.len() {
+        return if SIG.starts_with(head) { Wrapper::NeedMore } else { Wrapper::No };
+    }
+    if head[..8] != SIG {
+        return Wrapper::No;
+    }
+    let mut pos = 8;
+    loop {
+        let Some(h) = head.get(pos..pos + 8) else { return Wrapper::NeedMore };
+        let len = u32::from_be_bytes([h[0], h[1], h[2], h[3]]) as usize;
+        let next = pos + 12 + len;
+        if next > MAX_WRAPPER_BYTES {
+            return Wrapper::No; // a real (large) image
+        }
+        if &h[4..8] == b"IEND" {
+            // Look within one packet after the image for TS_SYNCS sync bytes a packet apart.
+            let need = next + TS_PACKET + (TS_SYNCS - 1) * TS_PACKET + 1;
+            if head.len() < need {
+                return Wrapper::NeedMore;
+            }
+            return (next..=next + TS_PACKET)
+                .find(|&i| (0..TS_SYNCS).all(|k| head[i + k * TS_PACKET] == 0x47))
+                .map_or(Wrapper::No, Wrapper::Video);
+        }
+        pos = next;
+    }
 }
 
 fn video_type(path: &std::path::Path) -> &'static str {
@@ -549,6 +647,97 @@ mod tests {
         assert!(out.contains("\nP[https://cdn.example.com/show/ep1/seg-1.ts]\n"));
         assert!(out.contains("\nP[https://other.example.com/seg-2.ts]\n"));
         assert!(out.starts_with("#EXTM3U\n"));
+    }
+
+    /// A PNG chunk; the parser doesn't check CRCs, so they're zero.
+    fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut c = (data.len() as u32).to_be_bytes().to_vec();
+        c.extend_from_slice(kind);
+        c.extend_from_slice(data);
+        c.extend_from_slice(&[0; 4]);
+        c
+    }
+
+    /// A 1x1 PNG like the ones hosts put in front of segments.
+    fn tiny_png() -> Vec<u8> {
+        let mut p = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        p.extend(png_chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]));
+        p.extend(png_chunk(b"IDAT", &[0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0, 5, 0x01, 0x02, 0xff]));
+        p.extend(png_chunk(b"IEND", &[]));
+        p
+    }
+
+    fn ts_packets(n: usize) -> Vec<u8> {
+        (0..n).flat_map(|i| std::iter::once(0x47).chain(std::iter::repeat_n(i as u8, 187))).collect()
+    }
+
+    /// What the hosts actually serve: the PNG, a cut-short 182-byte packet, then whole packets.
+    fn wrapped_segment(packets: usize) -> Vec<u8> {
+        let mut w = tiny_png();
+        w.push(0x47);
+        w.extend(std::iter::repeat_n(0u8, 181));
+        w.extend(ts_packets(packets));
+        w
+    }
+
+    #[test]
+    fn png_wrappers_are_found() {
+        let png = tiny_png();
+        assert_eq!(png.len(), 70, "same size as the wrappers seen in the wild");
+        // Real shape: video starts after the broken first packet, at 252 like the site's player.
+        assert_eq!(png_wrapper(&wrapped_segment(4)), Wrapper::Video(252));
+        // Whole packets straight after the image.
+        let mut clean = png.clone();
+        clean.extend(ts_packets(4));
+        assert_eq!(png_wrapper(&clean), Wrapper::Video(70));
+        // Not enough bytes yet: keep reading.
+        assert_eq!(png_wrapper(&clean[..3]), Wrapper::NeedMore);
+        assert_eq!(png_wrapper(&clean[..40]), Wrapper::NeedMore);
+        assert_eq!(png_wrapper(&png), Wrapper::NeedMore);
+        // A real image followed by something that isn't TS, and anything not PNG, pass through.
+        let mut image_then_junk = png.clone();
+        image_then_junk.extend(std::iter::repeat_n(0u8, 1000));
+        assert_eq!(png_wrapper(&image_then_junk), Wrapper::No);
+        assert_eq!(png_wrapper(&ts_packets(2)), Wrapper::No);
+        assert_eq!(png_wrapper(b"#EXTM3U"), Wrapper::No);
+        // A big image is given up on without reading it all.
+        let mut big = png[..8].to_vec();
+        big.extend_from_slice(&(1_000_000u32).to_be_bytes());
+        big.extend_from_slice(b"IDAT");
+        assert_eq!(png_wrapper(&big), Wrapper::No);
+    }
+
+    #[tokio::test]
+    async fn wrapped_segments_come_back_as_plain_video() {
+        use axum::routing::get as route;
+        let wrapped = wrapped_segment(4);
+        let png = tiny_png();
+        let app = Router::new()
+            .route("/seg.image", route(move || async move { ([(header::CONTENT_TYPE, "image/png")], wrapped) }))
+            .route("/real.png", route(move || async move { ([(header::CONTENT_TYPE, "image/png")], png) }))
+            .route("/seg.ts", route(|| async { ts_packets(2) }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let proxy = Proxy::start_with(true).await.unwrap();
+        let session = proxy.session(&HashMap::new());
+        let get = |path: &str| {
+            let url = proxy.url(&session, &format!("{origin}{path}"), None).unwrap();
+            async move { reqwest::get(url).await.unwrap() }
+        };
+
+        let seg = get("/seg.image").await;
+        assert_eq!(seg.status(), 200);
+        assert_eq!(seg.headers()["content-type"], "video/mp2t");
+        assert_eq!(seg.headers()["content-length"], (188 * 4).to_string().as_str());
+        assert_eq!(seg.bytes().await.unwrap().to_vec(), ts_packets(4));
+
+        let real = get("/real.png").await;
+        assert_eq!(real.headers()["content-type"], "image/png");
+        assert_eq!(real.bytes().await.unwrap().to_vec(), tiny_png());
+
+        assert_eq!(get("/seg.ts").await.bytes().await.unwrap().to_vec(), ts_packets(2));
     }
 
     #[test]
