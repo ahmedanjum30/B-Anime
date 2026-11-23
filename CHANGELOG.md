@@ -11,6 +11,12 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-24
+
+### Added
+- **Remove match** on a show's source bar, for a match you picked by hand: it forgets that
+  match and finds the show automatically again.
+
 ## [0.4.2] - 2026-11-24
 
 ### Added
