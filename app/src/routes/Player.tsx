@@ -717,6 +717,9 @@ export default function Player() {
   const markWatched = async () => {
     const entry = page()?.listEntry ?? null;
     if (!inTauri || (entry && entry.progress >= episode())) return;
+    // Not signed in to AniList: there's no list to update (watching works the same; the
+    // resume position is still kept on this device).
+    if (!homeStore.account()?.viewer) return;
     const total = media()?.episodes ?? null;
     try {
       await saveEntry(mediaId(), applyRules(entry, { progress: episode() }, total));

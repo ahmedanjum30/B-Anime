@@ -464,6 +464,10 @@ async fn sqlx_scalar(db: &db::Db, sql: &'static str) -> banime_core::Result<Opti
 #[tauri::command]
 async fn anilist_login(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Account, String> {
     let client_id = auth::client_id().ok_or("This build has no AniList client id configured.")?;
+    // A sign-in still waiting holds the callback port. That happens when the page was reloaded
+    // (on phones, coming back from the browser can do that) and Connect was tapped again: the new
+    // attempt replaces it. start_login waits for the port to come free.
+    state.cancel_login.notify_waiters();
     let pending = auth::start_login(&client_id).await.map_err(msg)?;
     app.opener()
         .open_url(&pending.url, None::<&str>)
@@ -475,9 +479,24 @@ async fn anilist_login(app: AppHandle, state: tauri::State<'_, AppState>) -> Res
         _ = cancel.notified() => return Err("Sign-in cancelled.".into()),
     };
 
-    let client = anilist::Client::new(Some(token.clone())).map_err(msg)?;
-    let viewer = client.viewer().await.map_err(msg)?;
+    // Kept straight away: the token is good whatever happens next.
     auth::save_token(&token).map_err(msg)?;
+    let client = anilist::Client::new(Some(token.clone())).map_err(msg)?;
+    // The token arrives while the browser is in front. On a phone, an app in the background may
+    // have no network (Android blocks it), so the first request failed ("error sending request")
+    // whenever logging in to AniList took a while. Network errors are retried for up to 2 minutes:
+    // coming back to B-Anime lets them through.
+    let mut tries = 0;
+    let viewer = loop {
+        match client.viewer().await {
+            Ok(v) => break v,
+            Err(banime_core::Error::Network(_)) if tries < 40 => {
+                tries += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+            Err(e) => return Err(msg(e)),
+        }
+    };
     run_sync(&app, &state, &client, &viewer).await.map_err(msg)?;
     if let Ok(mut e) = state.sync_error.lock() {
         *e = None;

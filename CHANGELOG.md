@@ -11,6 +11,18 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-24
+
+### Fixed
+- Connecting AniList on a phone: the first time, when you had to log in to AniList, it failed
+  with "couldn't reach AniList". Android blocks the network for apps in the background, and
+  B-Anime asked AniList who you are while the browser was still in front. It now keeps trying
+  until you're back in B-Anime.
+- Connecting AniList again after coming back from the browser failed with "couldn't listen on
+  port 48731: address already in use". A new attempt now replaces the one still waiting.
+- Watching without an AniList account no longer shows "Couldn't update AniList" at 80% of an
+  episode.
+
 ## [0.4.0] - 2026-11-23
 
 ### Fixed

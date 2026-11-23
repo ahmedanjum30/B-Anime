@@ -158,12 +158,27 @@ impl Drop for PendingLogin {
 
 type Slot = Arc<Mutex<Option<oneshot::Sender<std::result::Result<String, String>>>>>;
 
-/// Starts the loopback callback server. Fails if the port is taken (e.g. a second sign-in).
+/// Starts the loopback callback server. A sign-in just cancelled may still be letting go of the
+/// port, so it's tried for up to 2 seconds; after that something else has it.
 pub async fn start_login(client_id: &str) -> Result<PendingLogin> {
     let addr = SocketAddr::from(([127, 0, 0, 1], CALLBACK_PORT));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| Error::Login(format!("couldn't listen on port {CALLBACK_PORT}: {e}")))?;
+    let mut tries = 0;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => break l,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && tries < 20 => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                return Err(Error::Login(format!(
+                    "Another app is using port {CALLBACK_PORT}, which AniList sign-in needs. Close it (or restart \
+                     the device) and try again."
+                )));
+            }
+            Err(e) => return Err(Error::Login(format!("couldn't listen on port {CALLBACK_PORT}: {e}"))),
+        }
+    };
 
     let (tx, rx) = oneshot::channel();
     let slot: Slot = Arc::new(Mutex::new(Some(tx)));
@@ -251,6 +266,20 @@ const CALLBACK_HTML: &str = r#"<!doctype html>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Connect, give up on it (the page reloaded), Connect again: the second one gets the port.
+    /// Uses the real callback port, so it's skipped by default (it would clash with a running
+    /// B-Anime): `cargo test -p banime-core -- --ignored sign_in_again`.
+    #[tokio::test]
+    #[ignore]
+    async fn sign_in_again_after_cancelling() {
+        let first = start_login("1").await.unwrap();
+        // The browser had already connected to the callback page.
+        let _ = reqwest::get(format!("http://127.0.0.1:{CALLBACK_PORT}/callback")).await.unwrap();
+        drop(first);
+        let second = start_login("1").await.expect("the port came free");
+        drop(second);
+    }
 
     #[test]
     fn token_file_round_trip() {
