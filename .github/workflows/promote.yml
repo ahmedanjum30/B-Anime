@@ -1,0 +1,44 @@
+# After scripts/promote.ps1 makes a beta stable: points the website's downloads at that release.
+# Uses the release's own files, so the site serves exactly what beta users ran.
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release made stable, e.g. v0.4.3"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  pages:
+    runs-on: ubuntu-latest
+    # One writer to gh-pages at a time (release.yml and site.yml use the same group).
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the release is stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Not a version tag: $TAG"; exit 1; }
+          pre="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+          [ "$pre" = "false" ] || { echo "::error::$TAG is still a pre-release; run scripts/promote.ps1."; exit 1; }
+
+      - name: Download its files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D release -p "B-Anime-*"
+
+      - name: Publish the site and downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: bash scripts/publish-site.sh "${TAG#v}" release

@@ -690,6 +690,7 @@ pub fn run() {
             updates::update_status,
             updates::check_for_update,
             updates::install_update,
+            updates::set_update_channel,
             list_extensions,
             preview_extension,
             install_extension,

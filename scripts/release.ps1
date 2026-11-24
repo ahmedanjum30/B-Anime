@@ -10,9 +10,14 @@
   scripts\release.ps1 major      # 0.3.4 -> 1.0.0
   scripts\release.ps1 0.5.0      # exact version
   scripts\release.ps1 -DryRun    # show the next version and stop
+  scripts\release.ps1 -Beta      # a beta: only copies on the Beta update channel get it
+
+  A beta is published as a GitHub pre-release. Stable users get it once it's promoted with
+  scripts\promote.ps1 <version> (the same build, no rebuild).
 #>
 param(
   [string]$Bump = "patch",
+  [switch]$Beta,
   [switch]$DryRun
 )
 
@@ -55,15 +60,18 @@ if ([version]$next -le [version]$current) { throw "$next isn't newer than the cu
 if (git tag --list "v$next") { throw "Tag v$next already exists." }
 
 $unpushed = (git rev-list --count origin/main..HEAD).Trim()
-Write-Host "Releasing $current -> $next (main at $((git rev-parse --short HEAD).Trim()))"
+$kind = if ($Beta) { "beta " } else { "" }
+Write-Host "Releasing $kind$current -> $next (main at $((git rev-parse --short HEAD).Trim()))"
 if ($DryRun) { return }
 
 # --- Tag and push -----------------------------------------------------------------------------
 # Local commits not on GitHub yet go up first, so the tag points at something CI can build.
 if ($unpushed -ne "0") { Run "git push main" { git push -q origin main } }
-Run "git tag" { git tag "v$next" }
+# A beta is an annotated tag whose message is "beta"; the Release workflow reads it and publishes
+# a pre-release. Stable releases are plain tags.
+if ($Beta) { Run "git tag" { git tag -a "v$next" -m "beta" } } else { Run "git tag" { git tag "v$next" } }
 Run "git push tag" { git push -q origin "v$next" }
 
 $repo = (git remote get-url origin).Trim() -replace '\.git$', '' -replace '^git@github\.com:', 'https://github.com/'
-Write-Host "Pushed v$next. The installer and APK build on GitHub in about 12 minutes:"
+Write-Host "Pushed $($kind)v$next. The installer and APK build on GitHub in about 12 minutes:"
 Write-Host "  $repo/releases/tag/v$next"

@@ -77,11 +77,17 @@ pub fn asset_name(version: &str) -> String {
     }
 }
 
-/// The latest release, when it's newer than `current`.
-pub async fn check(current: &str) -> Result<Option<Update>> {
+/// The newest release, when it's newer than `current`. Stable asks GitHub for its latest release,
+/// which never is a pre-release; `beta` also takes pre-releases (betas are published as those).
+pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
     let http = client()?;
+    let url = if beta {
+        format!("https://api.github.com/repos/{REPO}/releases?per_page=20")
+    } else {
+        format!("https://api.github.com/repos/{REPO}/releases/latest")
+    };
     let res = http
-        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .get(url)
         .header("accept", "application/vnd.github+json")
         .send()
         .await
@@ -92,9 +98,21 @@ pub async fn check(current: &str) -> Result<Option<Update>> {
     if !res.status().is_success() {
         return Err(Error::Network(format!("GitHub answered HTTP {}", res.status().as_u16())));
     }
-    let rel: Release = res.json().await.map_err(|e| Error::Network(e.to_string()))?;
+    let rel = if beta {
+        let list: Vec<Release> = res.json().await.map_err(|e| Error::Network(e.to_string()))?;
+        match newest(list, true) {
+            Some(r) => r,
+            None => return Ok(None),
+        }
+    } else {
+        let rel: Release = res.json().await.map_err(|e| Error::Network(e.to_string()))?;
+        if rel.draft || rel.prerelease {
+            return Ok(None);
+        }
+        rel
+    };
     let version = rel.tag_name.trim_start_matches('v').to_owned();
-    if rel.draft || rel.prerelease || !crate::extensions::newer(&version, current) {
+    if !crate::extensions::newer(&version, current) {
         return Ok(None);
     }
 
@@ -135,6 +153,16 @@ pub async fn check(current: &str) -> Result<Option<Update>> {
         setup_name,
         sha256,
     }))
+}
+
+/// The highest-numbered published release (never a draft); pre-releases only when `beta`.
+fn newest(list: Vec<Release>, beta: bool) -> Option<Release> {
+    list.into_iter()
+        .filter(|r| !r.draft && (beta || !r.prerelease))
+        .reduce(|best, r| {
+            let (a, b) = (r.tag_name.trim_start_matches('v'), best.tag_name.trim_start_matches('v'));
+            if crate::extensions::newer(a, b) { r } else { best }
+        })
 }
 
 /// Downloads the setup into `dir` and verifies its checksum. Reuses an earlier verified download.
@@ -230,11 +258,35 @@ mod tests {
         assert!(!ok("https://example.com/x"));
     }
 
+    fn rel(tag: &str, prerelease: bool, draft: bool) -> Release {
+        Release {
+            tag_name: tag.into(),
+            body: None,
+            html_url: String::new(),
+            published_at: None,
+            draft,
+            prerelease,
+            assets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn beta_takes_the_highest_prerelease_and_stable_skips_them() {
+        let list = || vec![rel("v0.4.2", false, false), rel("v0.4.4", false, true), rel("v0.4.3", true, false)];
+        assert_eq!(newest(list(), true).unwrap().tag_name, "v0.4.3");
+        assert_eq!(newest(list(), false).unwrap().tag_name, "v0.4.2");
+        // A stable release newer than the last beta wins on the beta channel too.
+        let mut l = list();
+        l.push(rel("v0.4.5", false, false));
+        assert_eq!(newest(l, true).unwrap().tag_name, "v0.4.5");
+        assert!(newest(vec![rel("v0.1.0", false, true)], true).is_none());
+    }
+
     /// Real network: `cargo test -p banime-core -- --ignored live_update`.
     #[tokio::test]
     #[ignore]
     async fn live_update_check_talks_to_github() {
-        let result = check("0.0.1").await;
+        let result = check("0.0.1", false).await;
         println!("update check: {result:?}");
         assert!(result.is_ok(), "{result:?}");
     }

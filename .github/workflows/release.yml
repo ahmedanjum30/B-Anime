@@ -7,6 +7,10 @@
 # Installed copies of B-Anime find the release, download their file (the setup on Windows, the
 # APK on Android), check it against SHA256SUMS.txt, and offer to update.
 #
+# Betas (scripts/release.ps1 -Beta: an annotated tag whose message is "beta") are published as
+# pre-releases: only copies on the Beta update channel take them, and the website's downloads
+# stay on the last stable version. scripts/promote.ps1 later makes the same release stable.
+#
 # Optional Windows code signing: repository secrets WINDOWS_CERT_PFX (the .pfx file,
 # base64-encoded) and WINDOWS_CERT_PASSWORD. Without them, the setup is unsigned.
 #
@@ -243,11 +247,28 @@ jobs:
     needs: [windows, android]
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      beta: ${{ steps.channel.outputs.beta }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+
+      # A beta's tag is annotated with the message "beta" (scripts/release.ps1 -Beta).
+      - name: Stable or beta
+        id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME"
+          beta=false
+          if [ "$(gh api "$ref" --jq .object.type)" = "tag" ]; then
+            message="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$(gh api "$ref" --jq .object.sha)" --jq .message)"
+            case "$message" in beta*) beta=true ;; esac
+          fi
+          echo "beta=$beta" >> "$GITHUB_OUTPUT"
+          echo "Beta: $beta"
 
       # CHANGELOG.md, for this version's section in the release notes.
       - uses: actions/checkout@v7
@@ -259,6 +280,7 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          BETA: ${{ steps.channel.outputs.beta }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           # The notes: this version's section of CHANGELOG.md, then how to
@@ -276,6 +298,10 @@ jobs:
               echo "::warning::CHANGELOG.md has no entry for $version" >&2
             fi
           } > notes.md
+          if [ "$BETA" = "true" ]; then
+            { echo "> **Beta.** Only copies of B-Anime on the Beta update channel (Settings → About) get this version. It may have bugs."; echo; cat notes.md; } > notes.beta.md
+            mv notes.beta.md notes.md
+          fi
           cat >> notes.md <<'EOF'
 
           ## Install
@@ -302,13 +328,18 @@ jobs:
           fi
           files+=(SHA256SUMS.txt)
           cat SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" \
-            --title "B-Anime $version" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
+          channel=(--latest)
+          title="B-Anime $version"
+          if [ "$BETA" = "true" ]; then channel=(--prerelease --latest=false); title="B-Anime $version (beta)"; fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" "${channel[@]}" \
+            --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
 
   # The website (site/) on GitHub Pages, with this release's downloads at fixed links:
   # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
   pages:
     needs: publish
+    # A beta leaves the website's downloads on the last stable version (promote.yml moves them).
+    if: needs.publish.outputs.beta != 'true'
     runs-on: ubuntu-latest
     # One writer to gh-pages at a time (site.yml uses the same group).
     concurrency:

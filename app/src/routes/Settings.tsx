@@ -2,7 +2,7 @@ import { For, Match, Show, Switch, createResource, createSignal, onCleanup } fro
 
 import {
   addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
+  installUpdate, setUpdateChannel, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
   setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
@@ -472,6 +472,19 @@ function About() {
       setChecking(false);
     }
   };
+  const [switching, setSwitching] = createSignal(false);
+  const setChannel = async (beta: boolean) => {
+    if (switching() || update()?.beta === beta) return;
+    setSwitching(true);
+    try {
+      await setUpdateChannel(beta);
+    } catch (e) {
+      homeStore.notify(errorText(e));
+    } finally {
+      await refetchUpdate();
+      setSwitching(false);
+    }
+  };
   const install = async () => {
     setInstalling(true);
     try {
@@ -524,6 +537,28 @@ function About() {
           </Show>
         </div>
       </div>
+      <Show when={inTauri && update()?.enabled}>
+        <div class="setting-row">
+          <div class="setting-text">
+            <p class="setting-title">Update channel</p>
+            <p class="setting-desc">
+              {update()?.beta
+                ? "Beta: new versions arrive before everyone else gets them, and may have bugs. Switching back to Stable keeps the version you have until Stable passes it."
+                : "Stable: versions everyone gets. Beta brings new versions earlier, and they may have bugs."}
+            </p>
+          </div>
+          <div class="setting-actions">
+            <div class="segmented" role="group" aria-label="Update channel" aria-busy={switching()}>
+              <button type="button" aria-pressed={!update()?.beta} disabled={switching()} onClick={() => void setChannel(false)}>
+                Stable
+              </button>
+              <button type="button" aria-pressed={!!update()?.beta} disabled={switching()} onClick={() => void setChannel(true)}>
+                Beta
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </section>
   );
 }

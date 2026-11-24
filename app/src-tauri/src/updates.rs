@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
+use banime_core::db;
 use banime_core::updater::{self, Update};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -17,6 +18,8 @@ const UPDATE_FAILED: &str = "update-failed";
 /// Soon after launch (once startup work has settled), so a new version is announced right away.
 const FIRST_CHECK: Duration = Duration::from_secs(3);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// "1" when the user takes beta versions (GitHub pre-releases) as well as stable ones.
+const BETA_PREF: &str = "updates.beta";
 
 #[derive(Default)]
 pub struct Updates {
@@ -29,6 +32,15 @@ pub struct Updates {
 /// Development builds never update themselves. Windows installs the setup; Android the APK.
 fn enabled() -> bool {
     !cfg!(debug_assertions)
+}
+
+async fn beta(state: &AppState) -> bool {
+    // Same key as BETA_PREF (the query must be a literal).
+    db::scalar_text(&state.db, "SELECT value FROM setting WHERE key = 'updates.beta'")
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "1")
 }
 
 fn current(app: &AppHandle) -> String {
@@ -63,7 +75,7 @@ async fn check_and_download(app: &AppHandle) {
             *slot = e;
         }
     };
-    let update = match updater::check(&current(app)).await {
+    let update = match updater::check(&current(app), beta(&state).await).await {
         Ok(Some(u)) => u,
         Ok(None) => return set_error(None),
         Err(e) => {
@@ -101,16 +113,23 @@ async fn check_and_download(app: &AppHandle) {
 pub struct UpdateStatus {
     current: String,
     enabled: bool,
+    /// Takes beta versions too.
+    beta: bool,
     available: Option<Update>,
     ready: bool,
     error: Option<String>,
 }
 
 #[tauri::command]
-pub fn update_status(app: AppHandle, state: tauri::State<'_, AppState>) -> UpdateStatus {
+pub async fn update_status(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<UpdateStatus, String> {
+    Ok(status(&app, &state).await)
+}
+
+async fn status(app: &AppHandle, state: &AppState) -> UpdateStatus {
     UpdateStatus {
-        current: current(&app),
+        current: current(app),
         enabled: enabled(),
+        beta: beta(state).await,
         available: state.updates.available.lock().ok().and_then(|u| u.clone()),
         ready: state.updates.ready.lock().map(|r| r.is_some()).unwrap_or(false),
         error: state.updates.error.lock().ok().and_then(|e| e.clone()),
@@ -122,7 +141,31 @@ pub async fn check_for_update(app: AppHandle, state: tauri::State<'_, AppState>)
     if enabled() {
         check_and_download(&app).await;
     }
-    Ok(update_status(app.clone(), state))
+    Ok(status(&app, &state).await)
+}
+
+/// Switches between stable and beta versions, then checks again on the new channel. A version
+/// found on the old channel is forgotten (leaving beta drops a beta that wasn't installed yet).
+/// Nothing is ever downgraded: an installed beta stays until stable passes it.
+#[tauri::command]
+pub async fn set_update_channel(app: AppHandle, state: tauri::State<'_, AppState>, beta: bool) -> Result<UpdateStatus, String> {
+    db::set_setting(&state.db, BETA_PREF, if beta { "1" } else { "0" }).await.map_err(crate::msg)?;
+    {
+        let _guard = state.updates.checking.lock().await;
+        if let Ok(mut s) = state.updates.available.lock() {
+            *s = None;
+        }
+        if let Ok(mut s) = state.updates.ready.lock() {
+            *s = None;
+        }
+        if let Ok(mut s) = state.updates.error.lock() {
+            *s = None;
+        }
+    }
+    if enabled() {
+        check_and_download(&app).await;
+    }
+    Ok(status(&app, &state).await)
 }
 
 /// Desktop: runs the verified installer in update mode and quits; the installer relaunches

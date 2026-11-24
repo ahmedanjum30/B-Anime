@@ -315,6 +315,8 @@ export interface UpdateInfo {
 export interface UpdateStatus {
   current: string;
   enabled: boolean;
+  /** Takes beta versions (GitHub pre-releases) too. */
+  beta: boolean;
   available: UpdateInfo | null;
   ready: boolean;
   error: string | null;

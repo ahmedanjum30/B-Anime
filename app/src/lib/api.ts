@@ -74,9 +74,10 @@ export const playLocal = (mediaId: number, episode: number) =>
 export const updateStatus = () =>
   inTauri
     ? call<UpdateStatus>("update_status")
-    : Promise.resolve<UpdateStatus>({ current: "dev", enabled: false, available: null, ready: false, error: null });
+    : Promise.resolve<UpdateStatus>({ current: "dev", enabled: false, beta: false, available: null, ready: false, error: null });
 export const checkForUpdate = () => call<UpdateStatus>("check_for_update");
 export const installUpdate = () => call<void>("install_update");
+export const setUpdateChannel = (beta: boolean) => call<UpdateStatus>("set_update_channel", { beta });
 
 /** Listens to a backend event; returns an unsubscribe. */
 export async function onEvent<T>(name: string, fn: (payload: T) => void): Promise<() => void> {
