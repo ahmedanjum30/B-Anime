@@ -5,8 +5,9 @@
 //! iroh: hole punching where it works, falling back to iroh's public relays (which only forward
 //! encrypted traffic) where it doesn't. B-Anime runs no server.
 //!
-//! The host's device is the room: guests dial it by the room code, which carries the host's
-//! endpoint id and home relay, so joining doesn't depend on iroh's address lookup service. The
+//! The host's device is the room: guests dial it by the room code, a short code like
+//! `K7QM-4X2P-9FTE` that the host's key is made from (so the code alone gives its endpoint id),
+//! plus a letter for its home relay, so joining doesn't depend on iroh's address lookup service. The
 //! host keeps the room's state, so a change from anyone goes to the host and the host passes it on.
 //!
 //! Losing the host isn't the end of the room. A guest whose connection drops keeps trying for a
@@ -26,6 +27,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use iroh::endpoint::{Connection, RecvStream, SendStream, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl, TransportAddr};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::{Error, Result};
@@ -53,7 +55,77 @@ const ROSTER_EVERY: Duration = Duration::from_secs(2);
 /// than drift and the host's 2 s reports explain) is a seek, and the room keeps its position.
 const GUEST_SEEK: f64 = 5.0;
 
-/// The room code: the host's id and addresses, as URL-safe base64 of a small JSON object.
+/// Room codes use Crockford's base 32: no I, L, O or U, so they read out and type without
+/// mix-ups (and a typed I or L reads as 1, an O as 0).
+const CODE_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/// Characters of a code that make the key (5 bits each: 55 bits, far too many to guess).
+const CODE_SEED_CHARS: usize = 11;
+/// iroh's default relays, one letter each in a code.
+const RELAYS: [(char, &str); 4] = [
+    ('E', "euc1-1.relay.n0.iroh.link."),
+    ('N', "use1-1.relay.n0.iroh.link."),
+    ('W', "usw1-1.relay.n0.iroh.link."),
+    ('S', "aps1-1.relay.n0.iroh.link."),
+];
+
+/// A device's identity in rooms: a short random seed, its key made from it. Whoever has the code
+/// can work out the key, so the code is what admits people (anyone with it could also stand in
+/// as the room's host while the real one is away; fine for a watch party).
+#[derive(Clone, Copy)]
+struct Seed(u64);
+
+impl Seed {
+    fn random() -> Seed {
+        Seed(rand::random::<u64>() >> (64 - 5 * CODE_SEED_CHARS))
+    }
+
+    fn key(self) -> iroh::SecretKey {
+        let digest = Sha256::digest([b"banime/watch/room/1:".as_slice(), &self.0.to_be_bytes()].concat());
+        iroh::SecretKey::from_bytes(&digest.into())
+    }
+
+    fn chars(self) -> String {
+        (0..CODE_SEED_CHARS)
+            .rev()
+            .map(|i| CODE_ALPHABET[((self.0 >> (5 * i)) & 31) as usize] as char)
+            .collect()
+    }
+}
+
+/// The short code for a device with this seed and home relay: `K7QM-4X2P-9FTE` (the last letter
+/// is the relay). None when the relay isn't one of iroh's defaults.
+fn short_code(seed: Seed, relay: &RelayUrl) -> Option<String> {
+    let host = relay.host_str()?;
+    let letter = RELAYS.iter().find(|(_, h)| h.trim_end_matches('.') == host.trim_end_matches('.'))?.0;
+    let chars: Vec<char> = format!("{}{letter}", seed.chars()).chars().collect();
+    Some(chars.chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-"))
+}
+
+/// A short code back to the host's address: its id (from the key the code makes) and its relay.
+fn parse_short(code: &str) -> Option<EndpointAddr> {
+    let chars: Vec<char> = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| match c.to_ascii_uppercase() {
+            'I' | 'L' => '1',
+            'O' => '0',
+            c => c,
+        })
+        .collect();
+    if chars.len() != CODE_SEED_CHARS + 1 {
+        return None;
+    }
+    let mut seed = 0u64;
+    for c in &chars[..CODE_SEED_CHARS] {
+        seed = (seed << 5) | CODE_ALPHABET.iter().position(|a| *a as char == *c)? as u64;
+    }
+    let host = RELAYS.iter().find(|(l, _)| *l == chars[CODE_SEED_CHARS])?.1;
+    let relay: RelayUrl = format!("https://{host}/").parse().ok()?;
+    Some(EndpointAddr::from(Seed(seed).key().public()).with_relay_url(relay))
+}
+
+/// The long room code, for a device whose relay isn't a default one: its id and addresses, as
+/// URL-safe base64 of a small JSON object.
 #[derive(Serialize, Deserialize)]
 struct Ticket {
     id: String,
@@ -82,8 +154,12 @@ fn room_code(addr: &EndpointAddr) -> String {
     URL_SAFE_NO_PAD.encode(serde_json::to_vec(&t).unwrap_or_default())
 }
 
-/// Reads a room code; a bare endpoint id works too (then the address lookup service finds it).
+/// Reads a room code: a short one, or the long form (or a bare endpoint id, found through the
+/// address lookup service).
 fn parse_code(code: &str) -> Result<EndpointAddr> {
+    if let Some(addr) = parse_short(code) {
+        return Ok(addr);
+    }
     // Chat apps wrap long text: spaces and line breaks inside the code are dropped.
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
     let code = code.as_str();
@@ -265,8 +341,14 @@ fn quality(conn: &Connection) -> (Option<bool>, Option<u32>) {
 }
 
 /// Every device accepts connections (so any guest can take over hosting); only a host serves them.
-async fn bind() -> Result<Endpoint> {
-    Endpoint::builder(presets::N0).alpns(vec![ALPN.to_vec()]).bind().await.map_err(net)
+/// Its key comes from `seed`, so its short code identifies it.
+async fn bind(seed: Seed) -> Result<Endpoint> {
+    Endpoint::builder(presets::N0)
+        .secret_key(seed.key())
+        .alpns(vec![ALPN.to_vec()])
+        .bind()
+        .await
+        .map_err(net)
 }
 
 async fn connect(endpoint: &Endpoint, addr: EndpointAddr, within: Duration) -> Result<Connection> {
@@ -284,6 +366,7 @@ pub struct Room {
 
 struct Shared {
     endpoint: Endpoint,
+    seed: Seed,
     me: EndpointId,
     name: String,
     events: mpsc::UnboundedSender<RoomEvent>,
@@ -449,9 +532,10 @@ impl HostState {
 }
 
 impl Shared {
-    fn new(endpoint: Endpoint, name: String, events: mpsc::UnboundedSender<RoomEvent>, role: Role) -> Arc<Shared> {
+    fn new(endpoint: Endpoint, seed: Seed, name: String, events: mpsc::UnboundedSender<RoomEvent>, role: Role) -> Arc<Shared> {
         Arc::new(Shared {
             me: endpoint.id(),
+            seed,
             endpoint,
             name,
             events,
@@ -465,8 +549,16 @@ impl Shared {
         let _ = self.events.send(e);
     }
 
+    /// This device's code: short when its relay is a default one (it nearly always is).
     fn my_code(&self) -> String {
-        room_code(&self.endpoint.addr())
+        let addr = self.endpoint.addr();
+        addr.addrs
+            .iter()
+            .find_map(|a| match a {
+                TransportAddr::Relay(url) => short_code(self.seed, url),
+                _ => None,
+            })
+            .unwrap_or_else(|| room_code(&addr))
     }
 
     fn closing(&self) -> bool {
@@ -541,12 +633,13 @@ impl Shared {
 impl Room {
     /// Opens a room on this device. Guests join with [`Room::info`]'s code.
     pub async fn host(name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
-        let endpoint = bind().await?;
+        let seed = Seed::random();
+        let endpoint = bind(seed).await?;
         // Reachable (home relay picked) before the code is handed out.
         endpoint.online().await;
         let (events, rx) = mpsc::unbounded_channel();
         let (to_host, _) = mpsc::unbounded_channel();
-        let shared = Shared::new(endpoint, name, events, Role::Guest { to_host, code: String::new() });
+        let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: String::new() });
         shared.become_host();
         tracing::info!(addrs = ?shared.endpoint.addr().addrs, "watch: room open");
         tokio::spawn(accept_loop(shared.clone()));
@@ -557,7 +650,8 @@ impl Room {
     pub async fn join(code: &str, name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
         let host_addr = parse_code(code)?;
         tracing::info!(host = %host_addr.id.fmt_short(), addrs = ?host_addr.addrs, "watch: joining room");
-        let endpoint = bind().await?;
+        let seed = Seed::random();
+        let endpoint = bind(seed).await?;
         let conn = match connect(&endpoint, host_addr.clone(), JOIN_TIMEOUT).await {
             Ok(c) => c,
             Err(e) => {
@@ -573,7 +667,7 @@ impl Room {
         let _ = tokio::time::timeout(Duration::from_secs(5), endpoint.online()).await;
         let (events, rx) = mpsc::unbounded_channel();
         let (to_host, outgoing) = mpsc::unbounded_channel();
-        let shared = Shared::new(endpoint, name, events, Role::Guest { to_host, code: room_code(&host_addr) });
+        let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: code.trim().to_owned() });
         tokio::spawn(accept_loop(shared.clone()));
         tokio::spawn(guest_loop(shared.clone(), host_addr, conn, outgoing));
         Ok((Room { shared }, rx))
@@ -738,9 +832,15 @@ async fn guest_loop(shared: Arc<Shared>, mut host: EndpointAddr, first: Connecti
         match rejoin(&shared, &host, handed_over).await {
             Some(Some((addr, c))) => {
                 if addr.id != host.id {
+                    let new_code = shared
+                        .local
+                        .lock()
+                        .ok()
+                        .and_then(|l| l.roster.as_ref()?.members.iter().find(|m| m.id == addr.id.to_string()).map(|m| m.code.clone()))
+                        .unwrap_or_else(|| room_code(&addr));
                     if let Ok(mut role) = shared.role.lock() {
                         if let Role::Guest { code, .. } = &mut *role {
-                            *code = room_code(&addr);
+                            *code = new_code;
                         }
                     }
                     shared.emit(RoomEvent::Info(shared.info()));
@@ -1062,6 +1162,27 @@ mod tests {
         // A bare id (the first format) still parses.
         assert_eq!(parse_code(&id.to_string()).unwrap().id, id);
         assert!(parse_code("not a code").is_err());
+    }
+
+    #[test]
+    fn short_codes_make_the_hosts_address() {
+        let seed = Seed(0x1F_2E3D_4C5B_6A79 & ((1 << 55) - 1));
+        let relay: RelayUrl = "https://euc1-1.relay.n0.iroh.link./".parse().unwrap();
+        let code = short_code(seed, &relay).unwrap();
+        assert_eq!(code.len(), 14, "{code}"); // 12 characters in groups of four
+        assert!(code.ends_with('E'), "{code}");
+        let addr = parse_code(&code).unwrap();
+        assert_eq!(addr.id, seed.key().public());
+        assert!(matches!(addr.addrs.iter().next(), Some(TransportAddr::Relay(r)) if r.host_str() == relay.host_str()));
+        // Typed sloppily: lower case, no dashes, O for 0 and I or L for 1.
+        let sloppy = code.replace('-', "").to_lowercase().replace('0', "o").replace('1', "l");
+        assert_eq!(parse_code(&sloppy).unwrap().id, addr.id);
+        // Random seeds give different keys and stay within 55 bits.
+        let (a, b) = (Seed::random(), Seed::random());
+        assert!(a.0 < 1 << 55 && a.key().public() != b.key().public());
+        // Not a default relay: no short code (the long one is used).
+        assert!(short_code(seed, &"https://relay.example.com/".parse().unwrap()).is_none());
+        assert!(parse_code("K7QM-4X2P-9FTQ").is_err()); // Q isn't a relay letter
     }
 
     async fn until<T>(rx: &mut mpsc::UnboundedReceiver<RoomEvent>, mut pick: impl FnMut(RoomEvent) -> Option<T>) -> T {

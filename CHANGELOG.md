@@ -19,7 +19,7 @@ one line each, written for users (see CLAUDE.md).
 
 ### Added
 - Watch together: watch an episode in step with friends, each from your own source.
-- Invite links open B-Anime straight into a room.
+- Invite links open B-Anime straight into a room, and room codes are short (like K7QM-4X2P-9FTE).
 - The host picks the show, episode, Sub or Dub and subtitles; everyone gets ready, then the host starts.
 - A room waits for anyone still loading, rides out dropped connections, and finds a new host if the host leaves.
 - See who can play the episode, and install the host's source in one tap if you can't.
