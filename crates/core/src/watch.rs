@@ -306,10 +306,12 @@ enum Msg {
     Ended,
     /// Host → guests: the host left; the guest who joined first hosts from here.
     HandOver,
-    /// Host → guest, right after the guest's status (its radio is awake then, so a phone's
-    /// Wi-Fi power saving doesn't skew it), and the guest's immediate answer: the ping shown.
+    /// Guest → host every 2 s, and the host's immediate answer: the guest measures its ping (its
+    /// radio is awake, having just sent, so a phone's Wi-Fi power saving doesn't skew it).
     Ping { n: u32 },
     Pong { n: u32 },
+    /// Guest → host: its ping, the median of the last few.
+    Latency { ms: u32 },
     /// A message from a newer B-Anime: ignored, rather than ending the connection.
     #[serde(other)]
     Unknown,
@@ -447,22 +449,48 @@ struct Guest {
     check: Check,
     tx: mpsc::UnboundedSender<Msg>,
     conn: Connection,
-    /// The ping in flight (its number, when it went), the last number used, and the last few
-    /// round trips.
-    ping: Option<(u32, Instant)>,
-    ping_n: u32,
-    rtts: Vec<Duration>,
+    /// Its ping to the host, as it measured and reported it.
+    latency: Option<u32>,
 }
 
-/// How many recent pings the shown one is the median of.
+/// How many recent pings the shown one is the median of, and how often a guest pings.
 const PINGS_KEPT: usize = 5;
+const PING_EVERY: Duration = Duration::from_secs(2);
 
-impl Guest {
-    /// The ping shown: the median of the recent round trips (steady through one-off spikes).
-    fn ping_ms(&self) -> Option<u32> {
+/// A guest's pings to the host: the one in flight and the last few round trips.
+#[derive(Default)]
+struct Pinger {
+    n: u32,
+    sent: Option<(u32, Instant)>,
+    rtts: Vec<Duration>,
+    reported: Option<u32>,
+}
+
+impl Pinger {
+    fn next(&mut self) -> Option<Msg> {
+        // One at a time; an unanswered one is given up after 10 s.
+        if self.sent.is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(10)) {
+            return None;
+        }
+        self.n = self.n.wrapping_add(1);
+        self.sent = Some((self.n, Instant::now()));
+        Some(Msg::Ping { n: self.n })
+    }
+
+    /// The answer to ping `n`: the new median, when it changed (to report).
+    fn answered(&mut self, n: u32) -> Option<u32> {
+        let (_, at) = self.sent.take().filter(|(sent, _)| *sent == n)?;
+        self.rtts.push(at.elapsed());
+        if self.rtts.len() > PINGS_KEPT {
+            self.rtts.remove(0);
+        }
         let mut r = self.rtts.clone();
         r.sort();
-        r.get(r.len() / 2).map(|d| d.as_millis().min(u32::MAX as u128) as u32)
+        let ms = r.get(r.len() / 2)?.as_millis().min(u32::MAX as u128) as u32;
+        (self.reported != Some(ms)).then(|| {
+            self.reported = Some(ms);
+            ms
+        })
     }
 }
 
@@ -485,7 +513,7 @@ impl HostState {
         list.extend(self.guests.iter().map(|g| {
             let (direct, quic_rtt) = quality(&g.conn);
             // Measured pings; QUIC's own estimate until there are some.
-            let rtt_ms = g.ping_ms().or(quic_rtt);
+            let rtt_ms = g.latency.or(quic_rtt);
             Member {
                 id: g.id.to_string(),
                 name: g.name.clone(),
@@ -993,8 +1021,17 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
             }
         }
     });
+    let mut pinger = Pinger::default();
+    let mut ping_tick = tokio::time::interval(PING_EVERY);
     let outcome = loop {
         tokio::select! {
+            _ = ping_tick.tick() => {
+                if let Some(ping) = pinger.next() {
+                    if write_msg(&mut send, &ping).await.is_err() {
+                        break Outcome::Dropped;
+                    }
+                }
+            }
             out = outgoing.recv() => match out {
                 Some(m) => {
                     if write_msg(&mut send, &m).await.is_err() {
@@ -1019,9 +1056,11 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
                 Some(Msg::Refused { reason }) => break Outcome::Ended(reason),
                 Some(Msg::Ended) => break Outcome::Ended("The host ended the room.".into()),
                 Some(Msg::HandOver) => break Outcome::HandedOver,
-                Some(Msg::Ping { n }) => {
-                    if write_msg(&mut send, &Msg::Pong { n }).await.is_err() {
-                        break Outcome::Dropped;
+                Some(Msg::Pong { n }) => {
+                    if let Some(ms) = pinger.answered(n) {
+                        if write_msg(&mut send, &Msg::Latency { ms }).await.is_err() {
+                            break Outcome::Dropped;
+                        }
                     }
                 }
                 Some(_) => {}
@@ -1126,9 +1165,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                 check,
                 tx,
                 conn: connection.clone(),
-                ping: None,
-                ping_n: 0,
-                rtts: Vec::new(),
+                latency: None,
             });
             h.announce();
         }
@@ -1184,15 +1221,6 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                         g.buffering = buffering;
                         g.on = on;
                     }
-                    // A ping now, while the guest's radio is awake from sending this.
-                    if let Some(g) = h.guest_mut(&id) {
-                        // One at a time (an unanswered one is given up after 10 s).
-                        if g.ping.is_none_or(|(_, at)| at.elapsed() > Duration::from_secs(10)) {
-                            g.ping_n = g.ping_n.wrapping_add(1);
-                            g.ping = Some((g.ping_n, Instant::now()));
-                            let _ = g.tx.send(Msg::Ping { n: g.ping_n });
-                        }
-                    }
                     // Loading starts and ends at once (waits depend on them); positions batch.
                     if changed {
                         h.announce();
@@ -1209,20 +1237,20 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                     h.announce();
                 }
             }
-            Ok(Msg::Pong { n }) => {
+            Ok(Msg::Ping { n }) => {
+                if let Ok(h) = host.lock() {
+                    if let Some(g) = h.guests.iter().find(|g| g.id == id) {
+                        let _ = g.tx.send(Msg::Pong { n });
+                    }
+                }
+            }
+            Ok(Msg::Latency { ms }) => {
                 if let Ok(mut h) = host.lock() {
                     if let Some(g) = h.guest_mut(&id) {
-                        if let Some((sent, at)) = g.ping {
-                            if sent == n {
-                                g.rtts.push(at.elapsed());
-                                if g.rtts.len() > PINGS_KEPT {
-                                    g.rtts.remove(0);
-                                }
-                                // Answered: the next status may ping again.
-                                g.ping = None;
-                            }
-                        }
+                        g.latency = Some(ms);
                     }
+                    tracing::debug!(guest = %id.fmt_short(), ms, "watch: ping");
+                    h.announce_later();
                 }
             }
             Ok(Msg::Check(check)) => {
@@ -1375,6 +1403,13 @@ mod tests {
             _ => None,
         })
         .await;
+        // The guest's measured ping reaches the host's list (pings every 2 s).
+        let ping = until(&mut host_events, |e| match e {
+            RoomEvent::Roster(r) => r.members.iter().find(|m| !m.host).and_then(|m| m.rtt_ms),
+            _ => None,
+        })
+        .await;
+        assert!(ping < 5_000, "{ping} ms");
         guest.leave(false).await;
         host.leave(true).await;
     }
