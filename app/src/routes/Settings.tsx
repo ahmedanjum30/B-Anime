@@ -5,7 +5,7 @@ import {
   installUpdate, setUpdateChannel, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
   setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
-import { fmtAgo, fmtCount } from "../lib/format";
+import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 import { homeStore } from "../lib/store";
 import type { MediaCard, PlayerChoice, UnmatchedGroup } from "../lib/types";
 
@@ -503,16 +503,16 @@ function About() {
       <div class="setting-row">
         <div class="setting-text">
           <p class="setting-title">
-            B-Anime <span class="ext-version num">{update()?.current}</span>
+            B-Anime <span class="ext-version num">{fmtVersion(update()?.current)}</span>
           </p>
           <p class="setting-desc">
             <Switch fallback={onAndroid ? "Updates download automatically. You're up to date." : "Updates install automatically when you restart. You're up to date."}>
               <Match when={!inTauri || (update() && !update()!.enabled)}>Updates are off in development builds.</Match>
               <Match when={update()?.ready && update()?.available}>
-                {(u) => <>Version {(u() as { version: string }).version} is downloaded and ready.</>}
+                {(u) => <>Version {fmtVersion((u() as { version: string }).version)} is downloaded and ready.</>}
               </Match>
               <Match when={update()?.available}>
-                {(u) => <>Downloading version {(u() as { version: string }).version}…</>}
+                {(u) => <>Downloading version {fmtVersion((u() as { version: string }).version)}…</>}
               </Match>
               <Match when={update()?.error}>
                 <span class="warn-text">Couldn't check for updates: {update()!.error}</span>

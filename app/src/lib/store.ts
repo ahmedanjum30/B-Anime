@@ -1,5 +1,6 @@
 import { createResource, createRoot, createSignal } from "solid-js";
 import { getAccount, getHome, onAndroid, onEvent, onLibraryChanged, syncIfStale, updateStatus } from "./api";
+import { fmtVersion } from "./format";
 import type { ScanStatus } from "./types";
 
 // App-wide state. Home data and the AniList account are fetched once and refreshed whenever
@@ -48,7 +49,7 @@ export const homeStore = createRoot(() => {
   // when it's ready to install. The sidebar keeps the notice and the restart button.
   void onEvent<{ version: string }>("update-available", (u) => {
     void refetchUpdate();
-    notify(`B-Anime ${u.version} is available. Downloading it in the background…`);
+    notify(`B-Anime ${fmtVersion(u.version)} is available. Downloading it in the background…`);
   });
   void onEvent("update-failed", () => void refetchUpdate());
   // Installed extensions updated themselves at launch.
@@ -63,8 +64,8 @@ export const homeStore = createRoot(() => {
     void refetchUpdate();
     notify(
       onAndroid
-        ? `B-Anime ${u.version} is ready. Install it from More.`
-        : `B-Anime ${u.version} is ready. Restart to update (in the sidebar).`,
+        ? `B-Anime ${fmtVersion(u.version)} is ready. Install it from More.`
+        : `B-Anime ${fmtVersion(u.version)} is ready. Restart to update (in the sidebar).`,
     );
   });
   void onEvent<{ episode: number; title: string }>("player-watched", (w) =>

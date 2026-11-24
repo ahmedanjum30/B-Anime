@@ -38,3 +38,6 @@ export function startOfWeek(d: Date): Date {
 
 export const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/** An app version for people: "0.4.5-beta.2" reads "0.4.5 Beta 2". */
+export const fmtVersion = (v: string | null | undefined) => (v ?? "").replace(/-beta\.(\d+)$/, " Beta $1");

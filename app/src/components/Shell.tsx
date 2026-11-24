@@ -7,7 +7,7 @@ import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzl
 import { homeStore } from "../lib/store";
 import { trackPages } from "../lib/nav";
 import { watchStore } from "../lib/watch";
-import { fmtAgo, fmtCount } from "../lib/format";
+import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 
 // `bar`: kept in the phone's bottom bar; the rest move into the More sheet.
 const NAV = [
@@ -191,7 +191,7 @@ function UpdateNotice() {
           fallback={
             <div class="rail-update" role="status">
               <p class="rail-update-text">
-                Version <span class="num">{u().version}</span> is available
+                Version <span class="num">{fmtVersion(u().version)}</span> is available
               </p>
               <p class="rail-update-text rail-update-sub">
                 <Show when={update()?.error} fallback={<><i class="spin-dot" aria-hidden="true" /> Downloading…</>}>
@@ -203,12 +203,12 @@ function UpdateNotice() {
         >
         <div class="rail-update" role="status">
           <p class="rail-update-text">
-            Version <span class="num">{u().version}</span> is ready
+            Version <span class="num">{fmtVersion(u().version)}</span> is ready
           </p>
           <button
             type="button"
             class="btn btn-primary btn-sm"
-            aria-label={`${UPDATE_ACTION} to version ${u().version}`}
+            aria-label={`${UPDATE_ACTION} to version ${fmtVersion(u().version)}`}
             disabled={restarting()}
             onClick={() => {
               setRestarting(true);

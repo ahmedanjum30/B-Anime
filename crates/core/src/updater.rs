@@ -15,6 +15,49 @@ use sha2::{Digest, Sha256};
 use crate::{Error, Result};
 
 pub const REPO: &str = "ahmedanjum30/B-Anime";
+/// Betas (`x.y.z-beta.N`) are published here, on their own Releases page, so B-Anime's page only
+/// lists stable versions. Copies on the Beta channel look in both.
+pub const BETA_REPO: &str = "ahmedanjum30/B-Anime-Beta";
+
+/// A release version: `x.y.z`, or `x.y.z-beta.N` for the Nth beta of `x.y.z`. A beta comes before
+/// its final release: 0.4.5-beta.1 < 0.4.5-beta.2 < 0.4.5 < 0.4.6-beta.1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Version {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+    /// `u32::MAX` for a final release, so it sorts after all its betas.
+    pub beta: u32,
+}
+
+impl Version {
+    pub fn parse(v: &str) -> Option<Version> {
+        let v = v.trim().trim_start_matches('v');
+        let (core, beta) = match v.split_once('-') {
+            None => (v, u32::MAX),
+            Some((core, pre)) => (core, pre.strip_prefix("beta.")?.parse().ok()?),
+        };
+        let mut parts = core.split('.').map(|p| p.parse::<u32>().ok());
+        let (major, minor, patch) = (parts.next()??, parts.next()??, parts.next()??);
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(Version { major, minor, patch, beta })
+    }
+
+    pub fn is_beta(&self) -> bool {
+        self.beta != u32::MAX
+    }
+}
+
+/// Whether `candidate` is a later version than `current`. Unreadable versions are never newer.
+pub fn newer(candidate: &str, current: &str) -> bool {
+    match (Version::parse(candidate), Version::parse(current)) {
+        (Some(a), Some(b)) => a > b,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,15 +120,7 @@ pub fn asset_name(version: &str) -> String {
     }
 }
 
-/// The newest release, when it's newer than `current`. Stable asks GitHub for its latest release,
-/// which never is a pre-release; `beta` also takes pre-releases (betas are published as those).
-pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
-    let http = client()?;
-    let url = if beta {
-        format!("https://api.github.com/repos/{REPO}/releases?per_page=20")
-    } else {
-        format!("https://api.github.com/repos/{REPO}/releases/latest")
-    };
+async fn releases(http: &reqwest::Client, url: &str) -> Result<Vec<Release>> {
     let res = http
         .get(url)
         .header("accept", "application/vnd.github+json")
@@ -93,26 +128,38 @@ pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
         .await
         .map_err(|e| Error::Network(e.to_string()))?;
     if res.status().as_u16() == 404 {
-        return Ok(None); // no releases yet
+        return Ok(Vec::new()); // no releases (or no beta repository) yet
     }
     if !res.status().is_success() {
         return Err(Error::Network(format!("GitHub answered HTTP {}", res.status().as_u16())));
     }
-    let rel = if beta {
-        let list: Vec<Release> = res.json().await.map_err(|e| Error::Network(e.to_string()))?;
-        match newest(list, true) {
-            Some(r) => r,
-            None => return Ok(None),
-        }
-    } else {
+    if url.ends_with("/latest") {
         let rel: Release = res.json().await.map_err(|e| Error::Network(e.to_string()))?;
-        if rel.draft || rel.prerelease {
-            return Ok(None);
+        return Ok(vec![rel]);
+    }
+    res.json().await.map_err(|e| Error::Network(e.to_string()))
+}
+
+/// The newest release, when it's newer than `current`. Stable takes B-Anime's latest release;
+/// `beta` also takes betas, from the beta repository (and any pre-release on B-Anime's page).
+pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
+    let http = client()?;
+    let mut list = releases(&http, &format!("https://api.github.com/repos/{REPO}/releases/latest")).await?;
+    if beta {
+        // An unreachable beta repository mustn't stop stable updates on the Beta channel.
+        for url in [
+            format!("https://api.github.com/repos/{BETA_REPO}/releases?per_page=20"),
+            format!("https://api.github.com/repos/{REPO}/releases?per_page=20"),
+        ] {
+            match releases(&http, &url).await {
+                Ok(more) => list.extend(more),
+                Err(e) => tracing::warn!(error = %e, url, "beta releases unreachable"),
+            }
         }
-        rel
-    };
+    }
+    let Some(rel) = newest(list, beta) else { return Ok(None) };
     let version = rel.tag_name.trim_start_matches('v').to_owned();
-    if !crate::extensions::newer(&version, current) {
+    if !newer(&version, current) {
         return Ok(None);
     }
 
@@ -155,14 +202,14 @@ pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
     }))
 }
 
-/// The highest-numbered published release (never a draft); pre-releases only when `beta`.
+/// The highest version published (never a draft, never an unreadable tag); betas and
+/// pre-releases only when `beta`.
 fn newest(list: Vec<Release>, beta: bool) -> Option<Release> {
     list.into_iter()
-        .filter(|r| !r.draft && (beta || !r.prerelease))
-        .reduce(|best, r| {
-            let (a, b) = (r.tag_name.trim_start_matches('v'), best.tag_name.trim_start_matches('v'));
-            if crate::extensions::newer(a, b) { r } else { best }
-        })
+        .filter_map(|r| Version::parse(&r.tag_name).map(|v| (v, r)))
+        .filter(|(v, r)| !r.draft && (beta || (!r.prerelease && !v.is_beta())))
+        .max_by_key(|(v, _)| *v)
+        .map(|(_, r)| r)
 }
 
 /// Downloads the setup into `dir` and verifies its checksum. Reuses an earlier verified download.
@@ -223,7 +270,7 @@ pub fn clean_downloads(dir: &Path, current: &str) -> usize {
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let stale = name.ends_with(".part") || version_in(&name).is_some_and(|v| !crate::extensions::newer(v, current));
+        let stale = name.ends_with(".part") || version_in(&name).is_some_and(|v| !newer(v, current));
         if stale && std::fs::remove_file(entry.path()).is_ok() {
             removed += 1;
         }
@@ -271,6 +318,20 @@ mod tests {
     }
 
     #[test]
+    fn betas_come_before_their_release() {
+        assert!(newer("0.4.5-beta.2", "0.4.5-beta.1"));
+        assert!(newer("0.4.5", "0.4.5-beta.9"));
+        assert!(newer("0.4.5-beta.1", "0.4.4"));
+        assert!(newer("0.4.6-beta.1", "0.4.5"));
+        assert!(!newer("0.4.5-beta.3", "0.4.5"));
+        assert!(!newer("0.4.5", "0.4.5"));
+        assert!(newer("0.4.10", "0.4.9"));
+        assert!(Version::parse("0.4.5-rc.1").is_none());
+        assert!(Version::parse("0.4.5.1").is_none());
+        assert!(!Version::parse("v0.4.5").unwrap().is_beta());
+    }
+
+    #[test]
     fn beta_takes_the_highest_prerelease_and_stable_skips_them() {
         let list = || vec![rel("v0.4.2", false, false), rel("v0.4.4", false, true), rel("v0.4.3", true, false)];
         assert_eq!(newest(list(), true).unwrap().tag_name, "v0.4.3");
@@ -280,6 +341,13 @@ mod tests {
         l.push(rel("v0.4.5", false, false));
         assert_eq!(newest(l, true).unwrap().tag_name, "v0.4.5");
         assert!(newest(vec![rel("v0.1.0", false, true)], true).is_none());
+        // Numbered betas (published as plain releases in the beta repository).
+        let l = || vec![rel("v0.4.4", false, false), rel("v0.4.5-beta.1", false, false), rel("v0.4.5-beta.2", false, false)];
+        assert_eq!(newest(l(), true).unwrap().tag_name, "v0.4.5-beta.2");
+        assert_eq!(newest(l(), false).unwrap().tag_name, "v0.4.4");
+        let mut l = l();
+        l.push(rel("v0.4.5", false, false));
+        assert_eq!(newest(l, true).unwrap().tag_name, "v0.4.5");
     }
 
     /// Real network: `cargo test -p banime-core -- --ignored live_update`.

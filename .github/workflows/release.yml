@@ -7,9 +7,12 @@
 # Installed copies of B-Anime find the release, download their file (the setup on Windows, the
 # APK on Android), check it against SHA256SUMS.txt, and offer to update.
 #
-# Betas (scripts/release.ps1 -Beta: an annotated tag whose message is "beta") are published as
-# pre-releases: only copies on the Beta update channel take them, and the website's downloads
-# stay on the last stable version. scripts/promote.ps1 later makes the same release stable.
+# Betas are tags vX.Y.Z-beta.N (scripts/release.ps1 -Beta, from the beta branch). They're
+# published on the beta repository's Releases page (ahmedanjum30/B-Anime-Beta), so this page
+# lists stable versions only; copies on the Beta update channel look there too, and the
+# website's downloads stay on the last stable version. Publishing there needs the secret
+# BETA_RELEASE_TOKEN (a token with Contents: write on that repository); without it, a beta is
+# published here as a pre-release instead. scripts/promote.ps1 X.Y.Z then releases the version.
 #
 # Optional Windows code signing: repository secrets WINDOWS_CERT_PFX (the .pfx file,
 # base64-encoded) and WINDOWS_CERT_PASSWORD. Without them, the setup is unsigned.
@@ -18,12 +21,9 @@
 # ANDROID_KEYSTORE (the .jks, base64-encoded), ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS.
 # The same key must sign every release, or installed copies can't update.
 name: Release
-# "v0.4.5 (beta)" or "v0.4.5". A beta's tag is annotated, so the pushed SHA (the tag object) isn't
-# the commit's; a stable tag is a plain one, so they match.
+# "v0.4.5-beta.2" or "v0.4.5".
 run-name: >-
-  ${{ github.event_name != 'push' && 'Android test build'
-  || (github.event.after != github.event.head_commit.id && format('{0} (beta)', github.ref_name))
-  || github.ref_name }}
+  ${{ github.event_name != 'push' && 'Android test build' || github.ref_name }}
 
 on:
   push:
@@ -49,7 +49,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
-          if ($tag -notmatch '^\d+\.\d+\.\d+$') { throw "Tag ${{ github.ref_name }} isn't a version like v0.3.1" }
+          if ($tag -notmatch '^\d+\.\d+\.\d+(-beta\.\d+)?$') { throw "Tag ${{ github.ref_name }} isn't a version like v0.3.1 or v0.3.1-beta.2" }
           "VERSION=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - uses: actions/setup-node@v7
@@ -150,7 +150,7 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Tag $GITHUB_REF_NAME isn't a version like v0.3.1"; exit 1; }
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || { echo "Tag $GITHUB_REF_NAME isn't a version like v0.3.1 or v0.3.1-beta.2"; exit 1; }
           else
             version=$(jq -r .version app/src-tauri/tauri.conf.json)
           fi
@@ -261,18 +261,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # A beta's tag is annotated with the message "beta" (scripts/release.ps1 -Beta).
+      # A beta is a tag vX.Y.Z-beta.N.
       - name: Stable or beta
         id: channel
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME"
           beta=false
-          if [ "$(gh api "$ref" --jq .object.type)" = "tag" ]; then
-            message="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$(gh api "$ref" --jq .object.sha)" --jq .message)"
-            case "$message" in beta*) beta=true ;; esac
-          fi
+          case "$GITHUB_REF_NAME" in *-beta.*) beta=true ;; esac
           echo "beta=$beta" >> "$GITHUB_OUTPUT"
           echo "Beta: $beta"
 
@@ -287,17 +281,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BETA: ${{ steps.channel.outputs.beta }}
+          BETA_TOKEN: ${{ secrets.BETA_RELEASE_TOKEN }}
         run: |
           version="${GITHUB_REF_NAME#v}"
+          # "0.4.5-beta.2" -> "0.4.5 Beta 2" for people; a beta's notes are its version's section.
+          base="${version%%-beta.*}"
+          label="$version"
+          if [ "$BETA" = "true" ]; then label="$base Beta ${version##*-beta.}"; fi
           # The notes: this version's section of CHANGELOG.md, then how to
           # install. --generate-notes adds the list of changes below them.
-          awk -v v="$version" '
+          awk -v v="$base" '
             index($0, "## [" v "]") == 1 { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
           ' source/CHANGELOG.md > changes.md
           {
-            echo "## What's new in $version"
+            echo "## What's new in $label"
             if grep -q '[^[:space:]]' changes.md; then
               cat changes.md
             else
@@ -305,7 +304,7 @@ jobs:
             fi
           } > notes.md
           if [ "$BETA" = "true" ]; then
-            { echo "> **Beta.** Only copies of B-Anime on the Beta update channel (Settings → About) get this version. It may have bugs."; echo; cat notes.md; } > notes.beta.md
+            { echo "> **Beta.** A test build of B-Anime $base. Only copies on the Beta update channel (Settings → About) get it. It may have bugs."; echo; cat notes.md; } > notes.beta.md
             mv notes.beta.md notes.md
           fi
           cat >> notes.md <<'EOF'
@@ -334,17 +333,28 @@ jobs:
           fi
           files+=(SHA256SUMS.txt)
           cat SHA256SUMS.txt
-          channel=(--latest)
-          title="B-Anime $version"
-          if [ "$BETA" = "true" ]; then channel=(--prerelease --latest=false); title="B-Anime $version (beta)"; fi
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" "${channel[@]}" \
-            --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
+          title="B-Anime $label"
+          if [ "$BETA" != "true" ]; then
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" --latest \
+              --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
+          elif [ -n "$BETA_TOKEN" ]; then
+            # The beta repository's own page. Its tags are just markers there (the code is here),
+            # so the commit list is left out and the notes link the changes in this repository.
+            echo "" >> "$GITHUB_WORKSPACE/notes.md"
+            echo "Code: https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_REF_NAME" >> "$GITHUB_WORKSPACE/notes.md"
+            GH_TOKEN="$BETA_TOKEN" gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY_OWNER/B-Anime-Beta" \
+              --latest --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md"
+          else
+            echo "::warning::BETA_RELEASE_TOKEN isn't set; publishing this beta here as a pre-release."
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+              --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
+          fi
 
   # The website (site/) on GitHub Pages, with this release's downloads at fixed links:
   # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
   pages:
     needs: publish
-    # A beta leaves the website's downloads on the last stable version (promote.yml moves them).
+    # A beta leaves the website's downloads on the last stable version.
     if: needs.publish.outputs.beta != 'true'
     runs-on: ubuntu-latest
     # One writer to gh-pages at a time (site.yml uses the same group).

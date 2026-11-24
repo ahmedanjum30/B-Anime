@@ -7,21 +7,10 @@ All notable changes to this project are documented here. The format follows
 The release workflow puts the section for the version you tag into the GitHub
 release notes, above the install instructions and the auto-generated list of
 commits. Add a `## [x.y.z] - YYYY-MM-DD` section below before you tag a release;
-without one, the release still gets the install notes and the commit list.
+without one, the release still gets the install notes and the commit list. Betas of x.y.z
+(x.y.z-beta.N) use the same section, so keep it up to date as betas go out.
 
 ## [Unreleased]
-
-## [0.4.6] - 2026-11-24
-
-The first stable release with Watch together (tested as the 0.4.5 beta).
-
-### Added
-- **Watch together.** A new Together page in the sidebar. Start a room and share its code, or
-  join one. Pick a show from your AniList list or search, set the episode, and mark yourself
-  ready; the host starts it for everyone. Play, pause, seeking and episode changes stay in sync,
-  and each device streams from its own source. Devices connect directly (or through an
-  encrypted relay when they can't), so nothing goes through a B-Anime server. In the player, a
-  chip shows the room you're in.
 
 ## [0.4.5] - 2026-11-24
 
