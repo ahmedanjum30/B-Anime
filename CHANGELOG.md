@@ -11,6 +11,16 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-24
+
+### Added
+- **Watch together.** A new Together page in the sidebar. Start a room and share its code, or
+  join one. Pick a show from your AniList list or search, set the episode, and mark yourself
+  ready; the host starts it for everyone. Play, pause, seeking and episode changes stay in sync,
+  and each device streams from its own source. Devices connect directly (or through an
+  encrypted relay when they can't), so nothing goes through a B-Anime server. In the player, a
+  chip shows the room you're in.
+
 ## [0.4.4] - 2026-11-24
 
 ### Added
