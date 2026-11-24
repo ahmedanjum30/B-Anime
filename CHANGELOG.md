@@ -11,6 +11,13 @@ without one, the release still gets the install notes and the commit list.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-24
+
+### Added
+- **Beta updates.** Settings has a new choice, Stable or Beta. On Beta, B-Anime also installs
+  test versions before they're released to everyone. Leaving Beta never downgrades: the beta
+  you have stays until a stable version passes it.
+
 ## [0.4.3] - 2026-11-24
 
 ### Added
