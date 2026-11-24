@@ -24,7 +24,9 @@ one line each, written for users (see CLAUDE.md).
 - A room waits for anyone still loading, rides out dropped connections, and finds a new host if the host leaves.
 - See who can play the episode, and install the host's source in one tap if you can't.
 - Watch together from any show's page.
+- Don't wait: carry on without someone who's still loading, from the notice or People.
 - Update notifications: click (Windows) or tap (Android) to install.
+- The "ready to install" notice installs when you click or tap it.
 - This "What's new" window, once after each update.
 - Numbered betas (0.4.5 Beta 1, Beta 2…) on their own releases page.
 
@@ -32,6 +34,9 @@ one line each, written for users (see CLAUDE.md).
 - Phones: tapping the video shows the controls instead of pausing; play and pause from the middle.
 - Old update downloads are cleaned up, keeping only the newest one waiting to install.
 - Discover leaves out adult and ecchi titles, and show pages no longer suggest adult ones.
+- Watch together: only the host moves the timeline; play and pause stay shared.
+- Watch together copes better with slow connections: fewer jumps and no speeding up while loading.
+- Phones: notices sit above the bottom bar.
 
 ### Fixed
 - Phones: pages no longer show through above the Library, Manga and Discover headers.
