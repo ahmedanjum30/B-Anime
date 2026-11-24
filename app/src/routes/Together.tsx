@@ -196,37 +196,7 @@ export default function Together(props: {
                 </button>
               </form>
             </div>
-            <Show when={w.recent().length}>
-              <div class="together-recent">
-                <h3 class="together-subhead">Recent rooms</h3>
-                <ul class="watch-list">
-                  <For each={w.recent()}>
-                    {(r) => (
-                      <li class="watch-member together-recent-row">
-                        <span class="together-recent-text">
-                          <span class="watch-member-name">{r.title || "A room"}</span>
-                          <span class="together-recent-meta">
-                            {r.names.length ? `with ${r.names.join(", ")} · ` : ""}
-                            {fmtAgo(new Date(r.at).toISOString(), homeStore.now())}
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          class="btn btn-sm"
-                          disabled={!!w.busy()}
-                          onClick={() => void w.rejoin(r, name().trim())}
-                        >
-                          {w.busy() === "join" ? "Rejoining…" : "Rejoin"}
-                        </button>
-                        <button type="button" class="icon-btn" aria-label={`Forget ${r.title || "this room"}`} onClick={() => w.forget(r.key)}>
-                          <X size={16} stroke-width={1.75} aria-hidden="true" />
-                        </button>
-                      </li>
-                    )}
-                  </For>
-                </ul>
-              </div>
-            </Show>
+            <RecentRooms name={name().trim()} />
           </section>
         }
       >
@@ -463,14 +433,14 @@ export default function Together(props: {
                             {m.playable === null ? "Checking…" : m.playable ? m.source ?? "Can play" : "Can't play this"}
                           </span>
                         </Show>
-                        <Show when={m.direct !== null}>
+                        {/* Their ping to the host (measured, the median of the last few). */}
+                        <Show when={m.rttMs !== null}>
                           <span
                             class="watch-member-link num"
                             data-slow={(m.rttMs ?? 0) > 250 ? "" : undefined}
-                            title={m.direct ? "Connected directly" : "Connected through a relay (encrypted)"}
+                            title="Ping to the host"
                           >
-                            {m.direct ? "Direct" : "Relay"}
-                            <Show when={m.rttMs !== null}> · {m.rttMs} ms</Show>
+                            {m.rttMs} ms
                           </span>
                         </Show>
                           {/* Host: the room pauses while someone loads; not for someone on a slow
@@ -561,6 +531,7 @@ export default function Together(props: {
                 </p>
               </Show>
             </section>
+            <RecentRooms name={name().trim()} />
           </>
         )}
       </Show>
@@ -663,5 +634,44 @@ function RoomCheck(props: { mediaId: number }) {
         </div>
       </Show>
     </div>
+  );
+}
+
+/** Rooms this device was in lately, to rejoin (the one it's in now is left out). */
+function RecentRooms(props: { name: string }) {
+  const w = watchStore;
+  const others = () => w.recent().filter((r) => !w.room() || (r.key !== w.room()!.code && !r.codes.includes(w.room()!.code)));
+  return (
+    <Show when={others().length}>
+      <div class="together-recent">
+        <h3 class="together-subhead">Recent rooms</h3>
+        <ul class="watch-list">
+          <For each={others()}>
+            {(r) => (
+              <li class="watch-member together-recent-row">
+                <span class="together-recent-text">
+                  <span class="watch-member-name">{r.title || "A room"}</span>
+                  <span class="together-recent-meta">
+                    {r.names.length ? `with ${r.names.join(", ")} · ` : ""}
+                    {fmtAgo(new Date(r.at).toISOString(), homeStore.now())}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  disabled={!!w.busy()}
+                  onClick={() => void w.rejoin(r, props.name)}
+                >
+                  {w.busy() === "join" ? "Rejoining…" : "Rejoin"}
+                </button>
+                <button type="button" class="icon-btn" aria-label={`Forget ${r.title || "this room"}`} onClick={() => w.forget(r.key)}>
+                  <X size={16} stroke-width={1.75} aria-hidden="true" />
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </div>
+    </Show>
   );
 }

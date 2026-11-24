@@ -2,7 +2,7 @@ import { For, Match, Show, Switch, createResource, createSignal, onCleanup } fro
 
 import {
   addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, setUpdateChannel, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
+  installUpdate, setUpdateChannel, networkLogs, setNetworkLogs, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
   setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
@@ -460,6 +460,12 @@ function About() {
       setChecking(false);
     }
   };
+  // Detailed network logs (troubleshooting Watch together connections).
+  const [netLogs, { mutate: setNetLogs }] = createResource(networkLogs);
+  const switchNetLogs = (on: boolean) => {
+    setNetLogs(on);
+    void setNetworkLogs(on).catch((e) => homeStore.notify(errorText(e)));
+  };
   const [switching, setSwitching] = createSignal(false);
   const setChannel = async (beta: boolean) => {
     if (switching() || update()?.beta === beta) return;
@@ -543,6 +549,23 @@ function About() {
               <button type="button" aria-pressed={!!update()?.beta} disabled={switching()} onClick={() => void setChannel(true)}>
                 Beta
               </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+      <Show when={inTauri}>
+        <div class="setting-row">
+          <div class="setting-text">
+            <p class="setting-title">Detailed network logs</p>
+            <p class="setting-desc">
+              For troubleshooting Watch together connections: records how devices reach each other. Turn it off when
+              you're done.
+            </p>
+          </div>
+          <div class="setting-actions">
+            <div class="segmented" role="group" aria-label="Detailed network logs">
+              <button type="button" aria-pressed={!netLogs()} onClick={() => switchNetLogs(false)}>Off</button>
+              <button type="button" aria-pressed={!!netLogs()} onClick={() => switchNetLogs(true)}>On</button>
             </div>
           </div>
         </div>

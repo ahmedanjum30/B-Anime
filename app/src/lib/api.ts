@@ -78,6 +78,8 @@ export const updateStatus = () =>
 export const checkForUpdate = () => call<UpdateStatus>("check_for_update");
 export const installUpdate = () => call<void>("install_update");
 export const setUpdateChannel = (beta: boolean) => call<UpdateStatus>("set_update_channel", { beta });
+export const networkLogs = () => (inTauri ? call<boolean>("network_logs") : Promise.resolve(false));
+export const setNetworkLogs = (on: boolean) => call<void>("set_network_logs", { on });
 
 // ── What's new (the first launch after an update) ──
 export const whatsNew = () =>

@@ -25,9 +25,13 @@ one line each, written for users (see CLAUDE.md).
 - In a room, episodes start where the room is, not from your own saved spot.
 - The host switches the room to another show or episode in one click; it plays once everyone has loaded it.
 - Leaving the player no longer pauses the room, and a bar takes you back to the episode.
+- Recent rooms stay listed on the Together page while you're in a room.
+- Settings → About can record detailed network logs, for troubleshooting connections.
 
 ### Fixed
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
+- The People list shows each person's real ping.
+- Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.
 
 ## [0.4.5] - 2026-11-24
 

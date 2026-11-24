@@ -47,6 +47,8 @@ const HOST_GRACE: Duration = Duration::from_secs(10);
 const REJOIN_FOR: Duration = Duration::from_secs(60);
 /// One connection attempt while rejoining.
 const ATTEMPT: Duration = Duration::from_secs(5);
+/// A device that took over hosting and is still alone after this long ends the room.
+const EMPTY_ROOM: Duration = Duration::from_secs(60);
 /// Positions and connection quality reach the others at most this often: reports only change
 /// those, so each guest gets one roster per interval instead of one per member's report. A
 /// visible change (loading, ready, joining, leaving…) goes out at once.
@@ -304,6 +306,13 @@ enum Msg {
     Ended,
     /// Host → guests: the host left; the guest who joined first hosts from here.
     HandOver,
+    /// Host → guest, right after the guest's status (its radio is awake then, so a phone's
+    /// Wi-Fi power saving doesn't skew it), and the guest's immediate answer: the ping shown.
+    Ping { n: u32 },
+    Pong { n: u32 },
+    /// A message from a newer B-Anime: ignored, rather than ending the connection.
+    #[serde(other)]
+    Unknown,
 }
 
 /// What the room tells this device.
@@ -438,6 +447,23 @@ struct Guest {
     check: Check,
     tx: mpsc::UnboundedSender<Msg>,
     conn: Connection,
+    /// The ping in flight (its number, when it went), the last number used, and the last few
+    /// round trips.
+    ping: Option<(u32, Instant)>,
+    ping_n: u32,
+    rtts: Vec<Duration>,
+}
+
+/// How many recent pings the shown one is the median of.
+const PINGS_KEPT: usize = 5;
+
+impl Guest {
+    /// The ping shown: the median of the recent round trips (steady through one-off spikes).
+    fn ping_ms(&self) -> Option<u32> {
+        let mut r = self.rtts.clone();
+        r.sort();
+        r.get(r.len() / 2).map(|d| d.as_millis().min(u32::MAX as u128) as u32)
+    }
 }
 
 impl HostState {
@@ -457,7 +483,9 @@ impl HostState {
             episode: self.on.map(|o| o.1),
         }];
         list.extend(self.guests.iter().map(|g| {
-            let (direct, rtt_ms) = quality(&g.conn);
+            let (direct, quic_rtt) = quality(&g.conn);
+            // Measured pings; QUIC's own estimate until there are some.
+            let rtt_ms = g.ping_ms().or(quic_rtt);
             Member {
                 id: g.id.to_string(),
                 name: g.name.clone(),
@@ -697,15 +725,27 @@ impl Room {
     pub async fn rejoin(codes: &[String], name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
         let seed = Seed::random();
         let endpoint = bind(seed).await?;
+        // Everyone at once: whoever hosts now answers and keeps the connection; the others (gone,
+        // or not hosting) fail or close it. A room that has ended is known within one attempt.
+        let mut tries = tokio::task::JoinSet::new();
         for code in codes {
             let Ok(addr) = parse_code(code) else { continue };
-            let Ok(conn) = connect(&endpoint, addr.clone(), ATTEMPT).await else { continue };
-            // A member that isn't hosting closes the connection at once ("not hosting").
-            if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
-                continue;
+            let (endpoint, code) = (endpoint.clone(), code.trim().to_owned());
+            tries.spawn(async move {
+                let conn = connect(&endpoint, addr.clone(), ATTEMPT).await.ok()?;
+                // A member that isn't hosting closes the connection at once ("not hosting").
+                if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
+                    return None;
+                }
+                Some((code, addr, conn))
+            });
+        }
+        while let Some(done) = tries.join_next().await {
+            if let Ok(Some((code, addr, conn))) = done {
+                tries.abort_all();
+                tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
+                return Ok(Self::joined(endpoint, seed, name, code, addr, conn).await);
             }
-            tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
-            return Ok(Self::joined(endpoint, seed, name, code.trim().to_owned(), addr, conn).await);
         }
         endpoint.close().await;
         Err(Error::Network("That room has ended: nobody in it is hosting any more.".into()))
@@ -907,9 +947,20 @@ async fn guest_loop(shared: Arc<Shared>, mut host: EndpointAddr, first: Connecti
                 conn = c;
                 shared.emit(RoomEvent::Reconnected);
             }
-            // Took over hosting.
+            // Took over hosting. If nobody comes back to it, the room is over: don't keep hosting
+            // an empty room nobody knows about.
             Some(None) => {
                 shared.emit(RoomEvent::Reconnected);
+                let shared = shared.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(EMPTY_ROOM).await;
+                    let empty = shared.host_state().is_some_and(|h| h.lock().map(|h| h.guests.is_empty()).unwrap_or(false));
+                    if empty && !shared.closing() {
+                        tracing::info!("watch: nobody came back after the handover; ending the room");
+                        shared.end("The room ended: nobody else came back.".into());
+                        shared.endpoint.close().await;
+                    }
+                });
                 return;
             }
             None => {
@@ -968,6 +1019,11 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
                 Some(Msg::Refused { reason }) => break Outcome::Ended(reason),
                 Some(Msg::Ended) => break Outcome::Ended("The host ended the room.".into()),
                 Some(Msg::HandOver) => break Outcome::HandedOver,
+                Some(Msg::Ping { n }) => {
+                    if write_msg(&mut send, &Msg::Pong { n }).await.is_err() {
+                        break Outcome::Dropped;
+                    }
+                }
                 Some(_) => {}
                 None => break Outcome::Dropped,
             },
@@ -1070,6 +1126,9 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                 check,
                 tx,
                 conn: connection.clone(),
+                ping: None,
+                ping_n: 0,
+                rtts: Vec::new(),
             });
             h.announce();
         }
@@ -1125,6 +1184,15 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                         g.buffering = buffering;
                         g.on = on;
                     }
+                    // A ping now, while the guest's radio is awake from sending this.
+                    if let Some(g) = h.guest_mut(&id) {
+                        // One at a time (an unanswered one is given up after 10 s).
+                        if g.ping.is_none_or(|(_, at)| at.elapsed() > Duration::from_secs(10)) {
+                            g.ping_n = g.ping_n.wrapping_add(1);
+                            g.ping = Some((g.ping_n, Instant::now()));
+                            let _ = g.tx.send(Msg::Ping { n: g.ping_n });
+                        }
+                    }
                     // Loading starts and ends at once (waits depend on them); positions batch.
                     if changed {
                         h.announce();
@@ -1139,6 +1207,22 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                         g.ready = ready;
                     }
                     h.announce();
+                }
+            }
+            Ok(Msg::Pong { n }) => {
+                if let Ok(mut h) = host.lock() {
+                    if let Some(g) = h.guest_mut(&id) {
+                        if let Some((sent, at)) = g.ping {
+                            if sent == n {
+                                g.rtts.push(at.elapsed());
+                                if g.rtts.len() > PINGS_KEPT {
+                                    g.rtts.remove(0);
+                                }
+                                // Answered: the next status may ping again.
+                                g.ping = None;
+                            }
+                        }
+                    }
                 }
             }
             Ok(Msg::Check(check)) => {

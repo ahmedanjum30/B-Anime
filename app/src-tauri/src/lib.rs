@@ -1,6 +1,7 @@
 #[cfg(target_os = "android")]
 mod android_install;
 mod library;
+mod logs;
 mod playback;
 mod updates;
 mod watch;
@@ -15,7 +16,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::{Mutex, Notify};
-use tracing_subscriber::EnvFilter;
 
 /// Tells the UI to refetch anything built from the library or lists.
 pub(crate) const LIBRARY_CHANGED: &str = "library-changed";
@@ -595,9 +595,7 @@ async fn run_sync(
 // On Android the app starts from this library (no main.rs), through the mobile entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .init();
+    logs::init();
 
     let builder = tauri::Builder::default();
     // Desktop: one B-Anime at a time. Opening a banime:// link (an invite) while it runs hands
@@ -650,6 +648,9 @@ pub fn run() {
                 watch: watch::Watch::default(),
             });
             updates::start(app.handle());
+            // Detailed network logs, if switched on before.
+            let logs_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move { logs::restore(&logs_handle.state::<AppState>()).await });
 
             // Open maximized. The config flag alone doesn't stick on every Windows setup.
             #[cfg(desktop)]
@@ -727,6 +728,8 @@ pub fn run() {
             watch::watch_ready,
             watch::watch_start,
             watch::watch_check,
+            logs::network_logs,
+            logs::set_network_logs,
             whats_new::whats_new,
             whats_new::whats_new_seen,
             list_extensions,
