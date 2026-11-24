@@ -207,7 +207,9 @@ export const watchStore = createRoot(() => {
    * too (`roomPath`). Anyone still loading is waited for as usual.
    */
   const pick = (s: Omit<OwnState, "position" | "playing">) => {
-    send({ ...s, position: 0, playing: started() });
+    // Once started: held at the start until everyone's player has loaded it (the host's player
+    // then plays it for everyone). In the lobby it's just the pick.
+    send({ ...s, position: 0, playing: false, held: started() });
     return started();
   };
 
@@ -263,8 +265,8 @@ export const watchStore = createRoot(() => {
     setNowAt(performance.now());
     void watchSendState({ ...s, by: "" }).catch(() => {});
   };
-  const status = (position: number, buffering: boolean) => {
-    if (room()) void watchSendStatus(position, buffering).catch(() => {});
+  const status = (position: number, buffering: boolean, mediaId: number, episode: number) => {
+    if (room()) void watchSendStatus(position, buffering, mediaId, episode).catch(() => {});
   };
   const markOwnSwitch = (mediaId: number, episode: number) => {
     ownSwitch = { mediaId, episode, at: performance.now() };
@@ -298,6 +300,8 @@ const JUMP = 3;
 const CLOSE_ENOUGH = 0.3;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
 const WAIT_FOR = 2000;
+/** After a switch, the room waits this long at most for everyone to load before it plays. */
+const HOLD_MAX = 30_000;
 /** A jump to where the room is that isn't loaded yet lands this far ahead, so the room arrives
  *  about when the video is ready there (instead of stalling behind it again). */
 const JUMP_LEAD = 2;
@@ -353,6 +357,8 @@ export function syncPlayer(opts: {
       position: v.currentTime,
       playing: !v.paused,
       source: w.room()?.host ? opts.source() : null,
+      // A hold after a switch stays until the host releases it (everyone has loaded).
+      held: !!w.nowPlaying()?.held && w.nowPlaying()?.mediaId === opts.mediaId() && w.nowPlaying()?.episode === opts.episode(),
     };
   };
   /** The player is closing: the browser pauses its video, which isn't anyone's pause. */
@@ -373,6 +379,12 @@ export function syncPlayer(opts: {
       );
       const s = current();
       if (s) w.send({ ...s, playing: false });
+      return;
+    }
+    // Held after a switch: plays (the player's own autoplay) wait for everyone, quietly.
+    if (v && !v.paused && w.room() && w.nowPlaying()?.held) {
+      quietUntil = performance.now() + 500;
+      v.pause();
       return;
     }
     // A play by hand ends a wait for someone loading (they'll catch up by jumping).
@@ -406,6 +418,7 @@ export function syncPlayer(opts: {
   const apply = (s: RemoteState) => {
     const v = opts.video();
     if (!v) return;
+    if (s.held) s = { ...s, playing: false };
     if (v.readyState < 1) {
       pending = s;
       return;
@@ -492,9 +505,39 @@ export function syncPlayer(opts: {
   );
   onCleanup(() => clearTimeout(waitTimer));
 
+  // After a switch (the host's player): once everyone's player is on the new episode and has
+  // loaded it, play it for everyone. Not past HOLD_MAX: then it starts, saying who's still loading.
+  let holdTimer: number | undefined;
+  const ready = (m: { mediaId: number | null; episode: number | null; buffering: boolean }) =>
+    m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering;
+  const release = (late: string[]) => {
+    clearTimeout(holdTimer);
+    const v = opts.video();
+    const p = w.nowPlaying();
+    if (!v || !p?.held) return;
+    w.send({ ...p, held: false, playing: true, position: v.currentTime });
+    quietUntil = performance.now() + 500;
+    void v.play().catch(() => {});
+    if (late.length) homeStore.notify(`Started without waiting for ${late.join(", ")}.`);
+  };
+  createEffect(
+    on([w.members, w.nowPlaying], ([members, p]) => {
+      if (!w.room()?.host || !p?.held || p.mediaId !== opts.mediaId() || p.episode !== opts.episode()) return;
+      const waitingFor = members.filter((m) => !w.notWaiting().has(m.id) && !ready(m));
+      if (!waitingFor.length) return release([]);
+      if (holdTimer === undefined) {
+        holdTimer = window.setTimeout(() => {
+          holdTimer = undefined;
+          release(w.members().filter((m) => !ready(m)).map((m) => m.name));
+        }, HOLD_MAX);
+      }
+    }),
+  );
+  onCleanup(() => clearTimeout(holdTimer));
+
   const reportStatus = () => {
     const v = opts.video();
-    if (v && w.room()) w.status(v.currentTime, opts.waiting());
+    if (v && w.room()) w.status(v.currentTime, opts.waiting() || v.readyState < 3, opts.mediaId(), opts.episode());
   };
   // Loading starts and ends reach the room at once (not just with the 2 s report), so waits
   // for someone start and end promptly. After the Player has updated `waiting`.

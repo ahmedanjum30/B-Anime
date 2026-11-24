@@ -378,6 +378,8 @@ export interface PlayState {
   source?: SourceRef | null;
   /** The room's subtitle language ("en", … or "off"), set by the host. */
   subs?: string | null;
+  /** Held at the start after a switch, until everyone has loaded it (the host then plays it). */
+  held?: boolean;
 }
 
 export interface RoomMember {
@@ -398,6 +400,9 @@ export interface RoomMember {
   rttMs: number | null;
   /** Their own room code (where the room goes if they take over hosting). */
   code: string;
+  /** The episode their player is on (with `buffering`: whether it has loaded). */
+  mediaId: number | null;
+  episode: number | null;
 }
 
 /** Who's in the room, and whether the host has started it (false: the lobby). */

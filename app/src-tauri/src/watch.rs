@@ -86,9 +86,15 @@ pub async fn watch_send_state(state: tauri::State<'_, AppState>, play: PlayState
 }
 
 #[tauri::command]
-pub async fn watch_send_status(state: tauri::State<'_, AppState>, position: f64, buffering: bool) -> Result<(), String> {
+pub async fn watch_send_status(
+    state: tauri::State<'_, AppState>,
+    position: f64,
+    buffering: bool,
+    media_id: Option<i64>,
+    episode: Option<f64>,
+) -> Result<(), String> {
     if let Some(room) = state.watch.room.lock().await.as_ref() {
-        room.send_status(position, buffering);
+        room.send_status(position, buffering, media_id.zip(episode));
     }
     Ok(())
 }

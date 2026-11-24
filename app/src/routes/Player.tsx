@@ -1179,6 +1179,21 @@ export default function Player() {
           </div>
         )}
       </Show>
+      {/* Loaded, but the room is held after a switch until everyone has loaded it. */}
+      <Show
+        when={
+          !failure() && !videoError() && !waiting() && watchStore.room() && watchStore.nowPlaying()?.held &&
+          watchStore.nowPlaying()?.mediaId === mediaId() && watchStore.nowPlaying()?.episode === episode()
+        }
+      >
+        <p class="player-spinner-label player-held">
+          Waiting for everyone to load…{" "}
+          <span class="num">
+            {watchStore.members().filter((m) => m.mediaId === mediaId() && m.episode === episode() && !m.buffering).length}/
+            {watchStore.members().length} ready
+          </span>
+        </p>
+      </Show>
       <Show when={!failure() && !videoError() && waiting()}>
         <div class="player-spinner" aria-label="Loading" />
         {/* In a room, say what's loading: the room may just have switched show or episode. */}

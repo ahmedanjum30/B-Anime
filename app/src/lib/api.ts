@@ -91,7 +91,8 @@ export const watchRejoin = (codes: string[], name: string) => call<RoomInfo>("wa
 export const watchLeave = (end = false) => call<void>("watch_leave", { end });
 export const watchRoom = () => (inTauri ? call<RoomInfo | null>("watch_room") : Promise.resolve(null));
 export const watchSendState = (play: PlayState) => call<void>("watch_send_state", { play });
-export const watchSendStatus = (position: number, buffering: boolean) => call<void>("watch_send_status", { position, buffering });
+export const watchSendStatus = (position: number, buffering: boolean, mediaId: number | null, episode: number | null) =>
+  call<void>("watch_send_status", { position, buffering, mediaId, episode });
 export const watchReady = (ready: boolean) => call<void>("watch_ready", { ready });
 export const watchStart = () => call<void>("watch_start");
 export const watchCheck = (playable: boolean | null, source: string | null) => call<void>("watch_check", { playable, source });

@@ -23,7 +23,7 @@ one line each, written for users (see CLAUDE.md).
 ### Changed
 - In the player, the room opens over the episode, which keeps playing.
 - In a room, episodes start where the room is, not from your own saved spot.
-- The host switches the room to another show or episode in one click; everyone moves and it plays.
+- The host switches the room to another show or episode in one click; it plays once everyone has loaded it.
 - Leaving the player no longer pauses the room, and a bar takes you back to the episode.
 
 ### Fixed

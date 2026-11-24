@@ -214,6 +214,10 @@ pub struct PlayState {
     /// player picks it instead of their own default. None in a change: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subs: Option<String>,
+    /// Held at the start after the host switched show or episode: everyone loads it, and the host
+    /// plays it once they all have. Nobody else's play starts it meanwhile.
+    #[serde(default)]
+    pub held: bool,
 }
 
 /// Whether someone can play the room's episode, and with what.
@@ -247,6 +251,9 @@ pub struct Member {
     /// Their own room code: where the others go if they take over hosting.
     #[serde(default)]
     pub code: String,
+    /// The episode their player is on (with `buffering`: whether it has loaded it).
+    pub media_id: Option<i64>,
+    pub episode: Option<f64>,
 }
 
 /// Who's in the room and whether the host has started it.
@@ -277,7 +284,14 @@ enum Msg {
     /// Host → guests: the room's state. Guest → host: a change the guest made.
     State(PlayState),
     /// Guest → host: where the guest is.
-    Status { position: f64, buffering: bool },
+    Status {
+        position: f64,
+        buffering: bool,
+        #[serde(default)]
+        media_id: Option<i64>,
+        #[serde(default)]
+        episode: Option<f64>,
+    },
     /// Guest → host: ready to start, or not any more.
     Ready { ready: bool },
     /// Guest → host: whether the guest can play the room's episode.
@@ -400,6 +414,7 @@ struct HostState {
     state: Option<PlayState>,
     position: f64,
     buffering: bool,
+    on: Option<(i64, f64)>,
     ready: bool,
     check: Check,
     /// The host has started the room (the lobby is over).
@@ -418,6 +433,7 @@ struct Guest {
     code: String,
     position: f64,
     buffering: bool,
+    on: Option<(i64, f64)>,
     ready: bool,
     check: Check,
     tx: mpsc::UnboundedSender<Msg>,
@@ -437,6 +453,8 @@ impl HostState {
             direct: None,
             rtt_ms: None,
             code: self.code.clone(),
+            media_id: self.on.map(|o| o.0),
+            episode: self.on.map(|o| o.1),
         }];
         list.extend(self.guests.iter().map(|g| {
             let (direct, rtt_ms) = quality(&g.conn);
@@ -451,6 +469,8 @@ impl HostState {
                 direct,
                 rtt_ms,
                 code: g.code.clone(),
+                media_id: g.on.map(|o| o.0),
+                episode: g.on.map(|o| o.1),
             }
         }));
         list
@@ -497,6 +517,11 @@ impl HostState {
             .state
             .as_ref()
             .is_none_or(|s| s.media_id != state.media_id || s.episode != state.episode || s.dub != state.dub);
+        // Held after a switch: a guest's play (its autoplay, say) doesn't start it; the host does.
+        if from_guest && state.playing && self.state.as_ref().is_some_and(|s| s.held) && !other_episode {
+            state.playing = false;
+            state.held = true;
+        }
         if !self.started {
             if state.playing {
                 if from_guest {
@@ -591,6 +616,7 @@ impl Shared {
                 state: l.state.clone(),
                 position: l.position,
                 buffering: l.buffering,
+                on: None,
                 ready: l.ready,
                 check: l.check.clone(),
                 started: l.roster.as_ref().is_some_and(|r| r.started),
@@ -793,7 +819,7 @@ impl Room {
     }
 
     /// Where this device is, for the member list.
-    pub fn send_status(&self, position: f64, buffering: bool) {
+    pub fn send_status(&self, position: f64, buffering: bool, on: Option<(i64, f64)>) {
         if let Ok(mut l) = self.shared.local.lock() {
             l.position = position;
             l.buffering = buffering;
@@ -801,9 +827,10 @@ impl Room {
         match self.shared.host_state() {
             Some(host) => {
                 if let Ok(mut h) = host.lock() {
-                    let changed = h.buffering != buffering;
+                    let changed = h.buffering != buffering || h.on != on;
                     h.position = position;
                     h.buffering = buffering;
+                    h.on = on;
                     if changed {
                         h.announce();
                     } else if !h.guests.is_empty() {
@@ -811,7 +838,7 @@ impl Room {
                     }
                 }
             }
-            None => self.to_host(Msg::Status { position, buffering }),
+            None => self.to_host(Msg::Status { position, buffering, media_id: on.map(|o| o.0), episode: on.map(|o| o.1) }),
         }
     }
 
@@ -1038,6 +1065,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                 code,
                 position: 0.0,
                 buffering: true,
+                on: None,
                 ready,
                 check,
                 tx,
@@ -1087,13 +1115,15 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                     }
                 }
             }
-            Ok(Msg::Status { position, buffering }) => {
+            Ok(Msg::Status { position, buffering, media_id, episode }) => {
                 if let Ok(mut h) = host.lock() {
                     let mut changed = false;
+                    let on = media_id.zip(episode);
                     if let Some(g) = h.guest_mut(&id) {
-                        changed = g.buffering != buffering;
+                        changed = g.buffering != buffering || g.on != on;
                         g.position = position;
                         g.buffering = buffering;
+                        g.on = on;
                     }
                     // Loading starts and ends at once (waits depend on them); positions batch.
                     if changed {
@@ -1151,6 +1181,7 @@ mod tests {
             by: "x".into(),
             source: Some(SourceRef { id: "src".into(), name: "Src".into(), url: "https://example.com/m.json".into() }),
             subs: Some("en".into()),
+            held: false,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""t":"state""#), "{json}");
@@ -1169,6 +1200,8 @@ mod tests {
             direct: Some(true),
             rtt_ms: Some(30),
             code: "c".into(),
+            media_id: Some(21),
+            episode: Some(5.0),
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains(r#""playable":true"#) && json.contains(r#""rttMs":30"#), "{json}");
@@ -1229,7 +1262,7 @@ mod tests {
     }
 
     fn play(position: f64, playing: bool) -> PlayState {
-        PlayState { media_id: 1, episode: 2.0, title: String::new(), dub: false, position, playing, by: String::new(), source: None, subs: None }
+        PlayState { media_id: 1, episode: 2.0, title: String::new(), dub: false, position, playing, by: String::new(), source: None, subs: None, held: false }
     }
 
     /// Real network (iroh's relays): `cargo test -p banime-core -- --ignored live_room`.

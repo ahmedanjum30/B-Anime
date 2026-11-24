@@ -3173,6 +3173,11 @@ a.slot:focus-visible {
   text-align: center;
   pointer-events: none;
 }
+/* Held after a switch, with no spinner: the note sits in the middle. */
+.player-held {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
 .player-spinner {
   position: absolute;
   left: 50%;
