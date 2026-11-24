@@ -1,8 +1,8 @@
 import { createEffect, createRoot, createSignal, on, onCleanup } from "solid-js";
 
 import {
-  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRejoin, watchRoom,
-  watchSendState, watchSendStatus, watchStart,
+  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRejoin, watchRename,
+  watchRoom, watchSendState, watchSendStatus, watchSetRoomName, watchStart,
 } from "./api";
 import { homeStore } from "./store";
 import type { PlayState, RecentRoom, RoomInfo, RoomMember, Roster, SourceRef } from "./types";
@@ -13,16 +13,18 @@ export type RemoteState = PlayState & { at: number };
 export type OwnState = Omit<PlayState, "by">;
 
 const NAME_KEY = "banime.watch.name";
+/** The room name this device hosts under (when the host renamed it; kept for next time). */
+const ROOM_NAME_KEY = "banime.watch.roomName";
 const RECENT_KEY = "banime.watch.recent";
-/** Rooms remembered for Rejoin. */
-const RECENT_MAX = 3;
+/** Rooms remembered for Rejoin: just the last one. */
+const RECENT_MAX = 1;
 /** On launch, a room this recent is offered straight away (the app was closed mid-session). */
 const OFFER_REJOIN_MS = 30 * 60 * 1000;
 
 function loadRecent(): RecentRoom[] {
   try {
     const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-    return Array.isArray(list) ? list.filter((r) => r && Array.isArray(r.codes) && r.codes.length) : [];
+    return Array.isArray(list) ? list.filter((r) => r && Array.isArray(r.codes) && r.codes.length).slice(0, RECENT_MAX) : [];
   } catch {
     return [];
   }
@@ -49,6 +51,8 @@ export const watchStore = createRoot(() => {
   const [remote, setRemote] = createSignal<RemoteState | null>(null);
   /** False in the lobby: everyone gathers and gets ready, then the host starts. */
   const [started, setStarted] = createSignal(false);
+  /** The room's name ("Ahmed's room" unless the host renamed it). */
+  const [roomName, setRoomName] = createSignal("");
   /** What the room is on: the last state from the room or sent from here. */
   const [nowPlaying, setNowPlaying] = createSignal<OwnState | null>(null);
   /** When `nowPlaying` was last known (performance.now()), to work out where the room is now. */
@@ -92,7 +96,7 @@ export const watchStore = createRoot(() => {
     if (!codes.length) return;
     const entry: RecentRoom = {
       key: recentKey,
-      title: nowPlaying()?.title ?? "",
+      title: roomName() || nowPlaying()?.title || "",
       names: others.map((m) => m.name),
       codes,
       at: Date.now(),
@@ -103,6 +107,7 @@ export const watchStore = createRoot(() => {
 
   void watchRoom().then((r) => r && setRoom(r)).catch(() => {});
   void onEvent<PlayState>("watch-state", (s) => {
+    announcePlayback(nowPlaying(), s);
     setRemote({ ...s, at: performance.now() });
     setNowPlaying(s);
     setNowAt(performance.now());
@@ -111,6 +116,7 @@ export const watchStore = createRoot(() => {
     announceChanges(members(), r.members);
     setMembers(r.members);
     setStarted(r.started);
+    setRoomName(r.name);
     remember();
   });
   void onEvent<RoomInfo>("watch-info", (info) => {
@@ -125,6 +131,7 @@ export const watchStore = createRoot(() => {
     setMembers([]);
     setRemote(null);
     setStarted(false);
+    setRoomName("");
     setNowPlaying(null);
     setReconnecting(false);
   };
@@ -132,6 +139,27 @@ export const watchStore = createRoot(() => {
     reset();
     homeStore.notify(reason);
   });
+
+  /** "Sam paused", "Sam resumed", "Sam jumped to 12:41": someone else's change, as a notice. */
+  function announcePlayback(before: OwnState | null, s: PlayState) {
+    const me = room()?.me;
+    if (!before || !me || s.by === me || !s.by || s.held || before.held) return;
+    if (before.mediaId !== s.mediaId || before.episode !== s.episode) return;
+    const who = members().find((m) => m.id === s.by)?.name;
+    if (!who) return;
+    if (before.playing && !s.playing) homeStore.notify(`${who} paused.`);
+    else if (!before.playing && s.playing) homeStore.notify(`${who} resumed.`);
+    else if (Math.abs(s.position - roomPositionOf(before)) > 5) homeStore.notify(`${who} jumped to ${clock(s.position)}.`);
+  }
+  /** Where `p` would be now, from when it was last known. */
+  const roomPositionOf = (p: OwnState) => p.position + (p.playing ? (performance.now() - nowAt()) / 1000 : 0);
+  const clock = (sec: number) => {
+    const t = Math.max(0, Math.floor(sec));
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const ss = String(t % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  };
 
   /** "Sam joined", "Sam left": the room's comings and goings, as notices. */
   function announceChanges(before: RoomMember[], after: RoomMember[]) {
@@ -194,7 +222,13 @@ export const watchStore = createRoot(() => {
   };
   const host = (name: string) => {
     rememberName(name);
-    return enter("host", () => watchHost(name || "Host"));
+    let roomName: string | null = null;
+    try {
+      roomName = localStorage.getItem(ROOM_NAME_KEY);
+    } catch {
+      /* not remembered */
+    }
+    return enter("host", () => watchHost(name || "Host", roomName));
   };
   const join = (code: string, name: string) => {
     rememberName(name);
@@ -211,6 +245,26 @@ export const watchStore = createRoot(() => {
     // then plays it for everyone). In the lobby it's just the pick.
     send({ ...s, position: 0, playing: false, held: started() });
     return started();
+  };
+
+  /** Rename yourself in the room (remembered for next time too). */
+  const rename = (name: string) => {
+    const n = name.trim();
+    if (!n || !room()) return;
+    rememberName(n);
+    void watchRename(n).catch((e) => homeStore.notify(errorText(e)));
+  };
+  /** The host names the room; empty goes back to "<host>'s room". */
+  const nameRoom = (name: string) => {
+    const n = name.trim();
+    // Kept for this device's next rooms; empty goes back to "<host>'s room".
+    try {
+      if (n) localStorage.setItem(ROOM_NAME_KEY, n);
+      else localStorage.removeItem(ROOM_NAME_KEY);
+    } catch {
+      /* not remembered */
+    }
+    void watchSetRoomName(n).catch((e) => homeStore.notify(errorText(e)));
   };
 
   /** Back into a room from the recent list, through whoever hosts it now. */
@@ -288,7 +342,7 @@ export const watchStore = createRoot(() => {
 
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
-    recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt,
+    recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt, roomName, rename, nameRoom,
     host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });
@@ -299,8 +353,6 @@ const JUMP = 3;
 const CLOSE_ENOUGH = 0.3;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
 const WAIT_FOR = 2000;
-/** After a switch, the room waits this long at most for everyone to load before it plays. */
-const HOLD_MAX = 30_000;
 /** A jump to where the room is that isn't loaded yet lands this far ahead, so the room arrives
  *  about when the video is ready there (instead of stalling behind it again). */
 const JUMP_LEAD = 2;
@@ -325,8 +377,40 @@ export function syncPlayer(opts: {
   source: () => SourceRef | null;
 }) {
   const w = watchStore;
-  /** Events caused by applying the room's state aren't sent back to it. */
-  let quietUntil = 0;
+  /**
+   * Play, pause and seek events this code caused (applying the room's state, undoing an early
+   * play) aren't sent back to the room: each change made here expects its one event and skips
+   * it. Anything else is the viewer's own and always goes to the room. (A time window instead
+   * swallowed real presses that happened to land just after a room update.)
+   */
+  const expect = { play: 0, pause: 0, seek: 0 };
+  const EXPECT_MS = 1500;
+  const ours = (kind: keyof typeof expect) => {
+    if (performance.now() < expect[kind]) {
+      expect[kind] = 0;
+      return true;
+    }
+    return false;
+  };
+  const selfPause = (v: HTMLVideoElement) => {
+    if (v.paused) return;
+    expect.pause = performance.now() + EXPECT_MS;
+    v.pause();
+  };
+  const selfPlay = (v: HTMLVideoElement) => {
+    if (!v.paused) return;
+    expect.play = performance.now() + EXPECT_MS;
+    void v.play().catch(() => (expect.play = 0));
+  };
+  const selfSeek = (v: HTMLVideoElement, t: number) => {
+    expect.seek = performance.now() + EXPECT_MS;
+    v.currentTime = t;
+  };
+  /** When the room's state was last applied here (the host's regular report waits a moment). */
+  let appliedAt = 0;
+  /** This viewer's own last play or pause: room updates sent before the room heard it (saying
+   *  the opposite) are ignored for a moment, instead of undoing it. */
+  let own: { playing: boolean; at: number } | null = null;
   let rateReset: number | undefined;
   let pending: RemoteState | null = null;
   /** When this device's video stalled to load, recently. */
@@ -365,12 +449,11 @@ export function syncPlayer(opts: {
   onCleanup(() => (closing = true));
   const sendNow = () => {
     const v = opts.video();
-    if (closing || !v?.isConnected || performance.now() < quietUntil) return;
+    if (closing || !v?.isConnected) return;
     // In the lobby only Start plays the episode: any other play (the player's own autoplay
     // included) is undone, and the room hears the episode, paused.
     if (v && !v.paused && w.room() && !w.started()) {
-      quietUntil = performance.now() + 500;
-      v.pause();
+      selfPause(v);
       homeStore.notify(
         w.room()!.host
           ? "Press Start on the Together page once everyone's ready."
@@ -382,14 +465,16 @@ export function syncPlayer(opts: {
     }
     // Held after a switch: plays (the player's own autoplay) wait for everyone, quietly.
     if (v && !v.paused && w.room() && w.nowPlaying()?.held) {
-      quietUntil = performance.now() + 500;
-      v.pause();
+      selfPause(v);
       return;
     }
     // A play by hand ends a wait for someone loading (they'll catch up by jumping).
     if (v && !v.paused) waitingFor = null;
     const s = current();
-    if (s) w.send(s);
+    if (s) {
+      own = { playing: s.playing, at: performance.now() };
+      w.send(s);
+    }
   };
 
   // Only the host moves the timeline: a guest's own seek (the bar, ±10 s, keys, a double-tap)
@@ -397,13 +482,12 @@ export function syncPlayer(opts: {
   let seekNoticeAt = 0;
   const onSeeked = () => {
     const v = opts.video();
-    if (closing || !v?.isConnected || performance.now() < quietUntil) return;
+    if (closing || !v?.isConnected || ours("seek")) return;
     const room = w.remote();
     if (v && w.room() && !w.room()!.host && w.started() && room && room.mediaId === opts.mediaId() && room.episode === opts.episode()) {
       const expected = room.position + (room.playing ? (performance.now() - room.at) / 1000 : 0);
       if (Math.abs(v.currentTime - expected) > 2) {
-        quietUntil = performance.now() + 800;
-        v.currentTime = Math.max(0, expected);
+        selfSeek(v, Math.max(0, expected));
         if (performance.now() - seekNoticeAt > 4000) {
           seekNoticeAt = performance.now();
           homeStore.notify("Only the host can move the timeline.");
@@ -423,11 +507,13 @@ export function syncPlayer(opts: {
       return;
     }
     pending = null;
-    quietUntil = performance.now() + 800;
+    // Crossed in flight with this viewer's own play or pause: the room hasn't heard it yet.
+    if (own && performance.now() - own.at < 1500 && s.playing !== own.playing && !s.held) return;
+    appliedAt = performance.now();
     // Loading right now: no corrections (each would restart the load); the room waits for this
     // device instead, and play or pause still follows.
     if (opts.waiting() && s.playing) {
-      if (v.paused) void v.play().catch(() => {});
+      selfPlay(v);
       return;
     }
     const expected = s.position + (s.playing ? (performance.now() - s.at) / 1000 : 0);
@@ -436,7 +522,7 @@ export function syncPlayer(opts: {
       if (Math.abs(gap) > (s.playing ? JUMP : CLOSE_ENOUGH)) {
         // Not loaded there yet: land a little ahead, where the room will be once it has loaded.
         const lead = s.playing && !isLoaded(v, expected) ? JUMP_LEAD : 0;
-        v.currentTime = Math.max(0, expected + lead);
+        selfSeek(v, Math.max(0, expected + lead));
       }
       v.playbackRate = 1;
     } else if (Math.abs(gap) > CLOSE_ENOUGH && !(gap > 0 && slow())) {
@@ -445,8 +531,8 @@ export function syncPlayer(opts: {
       clearTimeout(rateReset);
       rateReset = window.setTimeout(() => (v.playbackRate = 1), (Math.abs(gap) / 0.08) * 1000);
     }
-    if (s.playing && v.paused) void v.play().catch(() => {});
-    if (!s.playing && !v.paused) v.pause();
+    if (s.playing) selfPlay(v);
+    else selfPause(v);
   };
 
   // The room's changes for this episode (other episodes are the Shell's to follow).
@@ -504,35 +590,28 @@ export function syncPlayer(opts: {
   );
   onCleanup(() => clearTimeout(waitTimer));
 
-  // After a switch (the host's player): once everyone's player is on the new episode and has
-  // loaded it, play it for everyone. Not past HOLD_MAX: then it starts, saying who's still loading.
-  let holdTimer: number | undefined;
+  // Held at Start or after a switch (the host's player): once everyone's player is on the
+  // episode and has loaded it, play it for everyone. Never by itself otherwise: the host decides
+  // (Start without waiting, or Don't wait for someone).
   const ready = (m: { mediaId: number | null; episode: number | null; buffering: boolean }) =>
     m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering;
   const release = (late: string[]) => {
-    clearTimeout(holdTimer);
     const v = opts.video();
     const p = w.nowPlaying();
     if (!v || !p?.held) return;
     w.send({ ...p, held: false, playing: true, position: v.currentTime });
-    quietUntil = performance.now() + 500;
-    void v.play().catch(() => {});
+    selfPlay(v);
     if (late.length) homeStore.notify(`Started without waiting for ${late.join(", ")}.`);
   };
   createEffect(
     on([w.members, w.nowPlaying], ([members, p]) => {
       if (!w.room()?.host || !p?.held || p.mediaId !== opts.mediaId() || p.episode !== opts.episode()) return;
       const waitingFor = members.filter((m) => !w.notWaiting().has(m.id) && !ready(m));
-      if (!waitingFor.length) return release([]);
-      if (holdTimer === undefined) {
-        holdTimer = window.setTimeout(() => {
-          holdTimer = undefined;
-          release(w.members().filter((m) => !ready(m)).map((m) => m.name));
-        }, HOLD_MAX);
-      }
+      if (!waitingFor.length) release([]);
     }),
   );
-  onCleanup(() => clearTimeout(holdTimer));
+  /** The host's "Start without waiting": plays it now, saying who it didn't wait for. */
+  const startNow = () => release(w.members().filter((m) => !ready(m)).map((m) => m.name));
 
   const reportStatus = () => {
     const v = opts.video();
@@ -544,6 +623,13 @@ export function syncPlayer(opts: {
   const onStall = () => {
     stalls.push(performance.now());
     statusSoon();
+  };
+
+  const onPlayEvent = () => {
+    if (!ours("play")) sendNow();
+  };
+  const onPauseEvent = () => {
+    if (!ours("pause")) sendNow();
   };
 
   const attach = (v: HTMLVideoElement) => {
@@ -559,16 +645,16 @@ export function syncPlayer(opts: {
       }
     };
     v.addEventListener("loadedmetadata", onReady);
-    v.addEventListener("play", sendNow);
-    v.addEventListener("pause", sendNow);
+    v.addEventListener("play", onPlayEvent);
+    v.addEventListener("pause", onPauseEvent);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("waiting", onStall);
     v.addEventListener("playing", statusSoon);
     v.addEventListener("canplay", statusSoon);
     onCleanup(() => {
       v.removeEventListener("loadedmetadata", onReady);
-      v.removeEventListener("play", sendNow);
-      v.removeEventListener("pause", sendNow);
+      v.removeEventListener("play", onPlayEvent);
+      v.removeEventListener("pause", onPauseEvent);
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("waiting", onStall);
       v.removeEventListener("playing", statusSoon);
@@ -582,9 +668,9 @@ export function syncPlayer(opts: {
     if (!w.room()) return;
     reportStatus();
     const s = current();
-    if (w.room()?.host && s && performance.now() >= quietUntil) w.send(s);
+    if (w.room()?.host && s && performance.now() - appliedAt > 800) w.send(s);
   }, 2000);
   onCleanup(() => clearInterval(tick));
 
-  return { attach };
+  return { attach, startNow };
 }

@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
-import { errorText, getLibrary, getMedia, getPlayerPrefs, installExtension, localEpisodes } from "../lib/api";
+import { errorText, getLibrary, getMedia, getPlayerPrefs, installExtension, localEpisodes, watchMyCode, watchNewLink } from "../lib/api";
 import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search, X } from "../lib/icons";
@@ -107,6 +107,27 @@ export default function Together(props: {
     }),
   );
   const [leaving, setLeaving] = createSignal(false);
+  // This device's permanent room code (shown before a room is open), and replacing it.
+  const [myCode, { mutate: setMyCode }] = createResource(() => watchMyCode().catch(() => ""));
+  const copyText = async (text: string, done: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      homeStore.notify(done);
+    } catch {
+      homeStore.notify("Couldn't copy. Select it and copy it instead.");
+    }
+  };
+  const newLink = async () => {
+    if (!window.confirm("Make a new invite link? Your current link will stop working.")) return;
+    try {
+      setMyCode(await watchNewLink());
+      homeStore.notify("New invite link made. The old one no longer works.");
+    } catch (e) {
+      homeStore.notify(errorText(e));
+    }
+  };
+  /** Renaming the room (host) or yourself, inline. */
+  const [editing, setEditing] = createSignal<"room" | "me" | null>(null);
   /** The host moves the room to another episode of the same show (everyone opens it, paused). */
   const setEpisode = (n: number) => {
     const p = w.nowPlaying();
@@ -173,6 +194,23 @@ export default function Together(props: {
               <button type="button" class="btn btn-primary" disabled={!!w.busy()} onClick={() => void w.host(name().trim())}>
                 {w.busy() === "host" ? "Opening a room…" : "Start a room"}
               </button>
+              {/* This device always hosts under the same code, so its invite link can be kept. */}
+              <Show when={myCode()}>
+                {(c) => (
+                  <div class="together-mylink">
+                    <span class="watch-label">Your room's invite link, the same every time</span>
+                    <div class="watch-code-row">
+                      <code class="watch-code-text" title={inviteLink(c())}>{inviteLink(c())}</code>
+                      <button type="button" class="btn btn-sm" onClick={() => void copyText(inviteLink(c()), "Invite link copied.")}>
+                        <Copy size={14} stroke-width={1.75} aria-hidden="true" /> Copy
+                      </button>
+                      <button type="button" class="btn btn-sm btn-quiet" onClick={() => void newLink()}>
+                        New link
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Show>
               <form
                 class="watch-join"
                 onSubmit={(e) => {
@@ -203,9 +241,32 @@ export default function Together(props: {
         {(room) => (
           <>
             <section class="section" aria-labelledby="together-room-h">
-              <h2 id="together-room-h" class="section-head">
-                {w.started() ? "Watching" : "Lobby"}
-              </h2>
+              {/* The room's name (the host renames it), and where it's at. */}
+              <div class="together-title-row">
+                <Show
+                  when={editing() === "room"}
+                  fallback={
+                    <h2 id="together-room-h" class="together-room-name">
+                      {w.roomName() || "Watch together"}
+                    </h2>
+                  }
+                >
+                  <NameField
+                    value={w.roomName()}
+                    label="Room name"
+                    onDone={(v) => {
+                      if (v !== null) w.nameRoom(v);
+                      setEditing(null);
+                    }}
+                  />
+                </Show>
+                <span class="together-phase">{w.started() ? "Watching" : "Lobby"}</span>
+                <Show when={room().host && editing() !== "room"}>
+                  <button type="button" class="link-btn together-rename" onClick={() => setEditing("room")}>
+                    Rename
+                  </button>
+                </Show>
+              </div>
 
               <Show when={w.reconnecting()}>
                 <p class="together-banner" role="status">
@@ -422,10 +483,33 @@ export default function Together(props: {
                 <For each={w.members()}>
                   {(m) => (
                     <li class="watch-member">
-                      <span class="watch-member-name">
+                      <Show
+                        when={m.id === room().me && editing() === "me"}
+                      >
+                        <NameField
+                          value={m.name}
+                          label="Your name"
+                          onDone={(v) => {
+                            if (v !== null) {
+                              w.rename(v);
+                              setName(v);
+                            }
+                            setEditing(null);
+                          }}
+                        />
+                      </Show>
+                      <span class="watch-member-name" classList={{ "is-hidden": m.id === room().me && editing() === "me" }}>
                         {m.name}
-                        <Show when={m.id === room().me}> <span class="watch-you">(you)</span></Show>
+                        <Show when={m.id === room().me}>
+                          {" "}
+                          <span class="watch-you">(you)</span>
+                        </Show>
                       </span>
+                      <Show when={m.id === room().me && editing() !== "me"}>
+                        <button type="button" class="link-btn together-rename" onClick={() => setEditing("me")}>
+                          Rename
+                        </button>
+                      </Show>
                       <Show when={m.host}><span class="ext-tag watch-host-tag">Host</span></Show>
                       <span class="watch-member-meta">
                         <Show when={m.playable !== null || w.nowPlaying()}>
@@ -496,7 +580,12 @@ export default function Together(props: {
                 <Show
                   when={room().host && others().length}
                   fallback={
-                    <button type="button" class="btn btn-quiet" onClick={() => void w.leave(true)}>
+                    <button
+                      type="button"
+                      class="btn"
+                      classList={{ "btn-danger": !!room().host }}
+                      onClick={() => void w.leave(true)}
+                    >
                       {room().host ? "End the room" : "Leave the room"}
                     </button>
                   }
@@ -504,7 +593,7 @@ export default function Together(props: {
                   {/* With others in it, a host can leave the room to them, or end it for everyone. */}
                   <button
                     type="button"
-                    class="btn btn-quiet"
+                    class="btn"
                     disabled={leaving()}
                     title={`${others()[0]?.name ?? "The next person"} hosts from here`}
                     onClick={() => {
@@ -514,7 +603,7 @@ export default function Together(props: {
                   >
                     Leave (hand over)
                   </button>
-                  <button type="button" class="btn btn-quiet together-end" disabled={leaving()} onClick={() => void w.leave(true)}>
+                  <button type="button" class="btn btn-danger" disabled={leaving()} onClick={() => void w.leave(true)}>
                     End for everyone
                   </button>
                 </Show>
@@ -644,7 +733,7 @@ function RecentRooms(props: { name: string }) {
   return (
     <Show when={others().length}>
       <div class="together-recent">
-        <h3 class="together-subhead">Recent rooms</h3>
+        <h3 class="together-subhead">Your last room</h3>
         <ul class="watch-list">
           <For each={others()}>
             {(r) => (
@@ -673,5 +762,29 @@ function RecentRooms(props: { name: string }) {
         </ul>
       </div>
     </Show>
+  );
+}
+
+/** An inline name field: Enter or leaving it saves, Esc cancels (onDone gets null). */
+function NameField(props: { value: string; label: string; onDone: (value: string | null) => void }) {
+  let done = false;
+  const finish = (v: string | null) => {
+    if (done) return;
+    done = true;
+    props.onDone(v);
+  };
+  return (
+    <input
+      class="watch-input together-name-input"
+      aria-label={props.label}
+      value={props.value}
+      maxLength={32}
+      ref={(el) => queueMicrotask(() => (el.focus(), el.select()))}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(e.currentTarget.value);
+        if (e.key === "Escape") finish(null);
+      }}
+      onBlur={(e) => finish(e.currentTarget.value)}
+    />
   );
 }

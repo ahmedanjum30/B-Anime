@@ -87,7 +87,9 @@ export const whatsNew = () =>
 export const whatsNewSeen = () => call<void>("whats_new_seen");
 
 // ── Watch together ──
-export const watchHost = (name: string) => call<RoomInfo>("watch_host", { name });
+export const watchHost = (name: string, roomName: string | null) => call<RoomInfo>("watch_host", { name, roomName });
+export const watchMyCode = () => (inTauri ? call<string>("watch_my_code") : Promise.resolve(""));
+export const watchNewLink = () => call<string>("watch_new_link");
 export const watchJoin = (code: string, name: string) => call<RoomInfo>("watch_join", { code, name });
 export const watchRejoin = (codes: string[], name: string) => call<RoomInfo>("watch_rejoin", { codes, name });
 export const watchLeave = (end = false) => call<void>("watch_leave", { end });
@@ -97,6 +99,8 @@ export const watchSendStatus = (position: number, buffering: boolean, mediaId: n
   call<void>("watch_send_status", { position, buffering, mediaId, episode });
 export const watchReady = (ready: boolean) => call<void>("watch_ready", { ready });
 export const watchStart = () => call<void>("watch_start");
+export const watchRename = (name: string) => call<void>("watch_rename", { name });
+export const watchSetRoomName = (name: string) => call<void>("watch_set_room_name", { name });
 export const watchCheck = (playable: boolean | null, source: string | null) => call<void>("watch_check", { playable, source });
 
 /** Listens to a backend event; returns an unsubscribe. */

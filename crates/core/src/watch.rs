@@ -17,15 +17,12 @@
 //!
 //! Messages are JSON, each sent as a 4-byte big-endian length followed by the bytes.
 
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use iroh::endpoint::{Connection, RecvStream, SendStream, presets};
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl, TransportAddr};
+use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
@@ -47,6 +44,10 @@ const HOST_GRACE: Duration = Duration::from_secs(10);
 const REJOIN_FOR: Duration = Duration::from_secs(60);
 /// One connection attempt while rejoining.
 const ATTEMPT: Duration = Duration::from_secs(5);
+/// Silence this long means the other side is gone (app closed, phone asleep, network lost):
+/// guests ping every 2 s and the host answers, so a live link is never quiet for this long.
+/// QUIC alone would take 30 s to notice.
+const GONE_AFTER: Duration = Duration::from_secs(10);
 /// A device that took over hosting and has been alone this long, not playing, ends the room.
 const EMPTY_ROOM: Duration = Duration::from_secs(10 * 60);
 /// Rejoining keeps trying this long: a takeover after the host left takes a few seconds.
@@ -62,9 +63,9 @@ const GUEST_SEEK: f64 = 5.0;
 /// Room codes use Crockford's base 32: no I, L, O or U, so they read out and type without
 /// mix-ups (and a typed I or L reads as 1, an O as 0).
 const CODE_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-/// Characters of a code that make the key (5 bits each: 55 bits, far too many to guess).
+/// Characters of a code, which make the key (5 bits each: 55 bits, far too many to guess).
 const CODE_SEED_CHARS: usize = 11;
-/// iroh's default relays, one letter each in a code.
+/// iroh's default relays: a join tries the host through each.
 const RELAYS: [(char, &str); 4] = [
     ('E', "euc1-1.relay.n0.iroh.link."),
     ('N', "use1-1.relay.n0.iroh.link."),
@@ -96,17 +97,17 @@ impl Seed {
     }
 }
 
-/// The short code for a device with this seed and home relay: `K7QM-4X2P-9FTE` (the last letter
-/// is the relay). None when the relay isn't one of iroh's defaults.
-fn short_code(seed: Seed, relay: &RelayUrl) -> Option<String> {
-    let host = relay.host_str()?;
-    let letter = RELAYS.iter().find(|(_, h)| h.trim_end_matches('.') == host.trim_end_matches('.'))?.0;
-    let chars: Vec<char> = format!("{}{letter}", seed.chars()).chars().collect();
-    Some(chars.chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-"))
+/// A device's room code: its 11 seed characters, `K7QM-4X2P-9FT`. The same for good for a
+/// device that keeps its seed (B-Anime saves one), whichever relay it's on: joining tries them all.
+fn short_code(seed: Seed) -> String {
+    let chars: Vec<char> = seed.chars().chars().collect();
+    chars.chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-")
 }
 
-/// A short code back to the host's address: its id (from the key the code makes) and its relay.
-fn parse_short(code: &str) -> Option<EndpointAddr> {
+/// A room code back to the host's address, once through each of iroh's relays (it's on one of
+/// them; a join tries all at once).
+fn parse_code(code: &str) -> Result<Vec<EndpointAddr>> {
+    let bad = || Error::Config("That isn't a room code. Copy the whole code from the host.".into());
     let chars: Vec<char> = code
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -116,71 +117,52 @@ fn parse_short(code: &str) -> Option<EndpointAddr> {
             c => c,
         })
         .collect();
-    if chars.len() != CODE_SEED_CHARS + 1 {
-        return None;
+    if chars.len() != CODE_SEED_CHARS {
+        return Err(bad());
     }
     let mut seed = 0u64;
-    for c in &chars[..CODE_SEED_CHARS] {
-        seed = (seed << 5) | CODE_ALPHABET.iter().position(|a| *a as char == *c)? as u64;
+    for c in &chars {
+        seed = (seed << 5) | CODE_ALPHABET.iter().position(|a| *a as char == *c).ok_or_else(bad)? as u64;
     }
-    let host = RELAYS.iter().find(|(l, _)| *l == chars[CODE_SEED_CHARS])?.1;
-    let relay: RelayUrl = format!("https://{host}/").parse().ok()?;
-    Some(EndpointAddr::from(Seed(seed).key().public()).with_relay_url(relay))
+    let id = Seed(seed).key().public();
+    Ok(RELAYS
+        .iter()
+        .filter_map(|(_, host)| format!("https://{host}/").parse::<RelayUrl>().ok())
+        .map(|relay| EndpointAddr::from(id).with_relay_url(relay))
+        .collect())
 }
 
-/// The long room code, for a device whose relay isn't a default one: its id and addresses, as
-/// URL-safe base64 of a small JSON object.
-#[derive(Serialize, Deserialize)]
-struct Ticket {
-    id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    relay: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    ips: Vec<String>,
+/// A typed code, tidied: upper case, grouped like `K7QM-4X2P-9FT`.
+fn short_code_of(code: &str) -> String {
+    let chars: String = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_uppercase();
+    chars.chars().collect::<Vec<_>>().chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-")
 }
 
-/// The host's home relay, and its direct addresses only when there's no relay. Direct addresses
-/// in the code broke joining: a phone on the host PC's hotspot tried them all at once, some
-/// looped back through the PC, and the handshake stalled. Through the relay it connects at once,
-/// and iroh then finds a direct path by itself.
-fn room_code(addr: &EndpointAddr) -> String {
-    let mut t = Ticket { id: addr.id.to_string(), relay: None, ips: Vec::new() };
-    for a in &addr.addrs {
-        match a {
-            TransportAddr::Relay(url) => t.relay = Some(url.to_string()),
-            TransportAddr::Ip(ip) => t.ips.push(ip.to_string()),
-            _ => {}
+/// A new device seed, to keep (the device's room code for good): see [`code_for_seed`].
+pub fn new_seed() -> u64 {
+    Seed::random().0
+}
+
+/// The room code a device with this seed hosts under.
+pub fn code_for_seed(seed: u64) -> String {
+    short_code(Seed(seed & ((1 << (5 * CODE_SEED_CHARS)) - 1)))
+}
+
+/// Connects to whichever of `addrs` answers first (the same host through different relays, or
+/// different members): the others are dropped.
+async fn connect_any(endpoint: &Endpoint, addrs: Vec<EndpointAddr>, within: Duration) -> Option<(EndpointAddr, Connection)> {
+    let mut tries = tokio::task::JoinSet::new();
+    for addr in addrs {
+        let endpoint = endpoint.clone();
+        tries.spawn(async move { connect(&endpoint, addr.clone(), within).await.ok().map(|c| (addr, c)) });
+    }
+    while let Some(done) = tries.join_next().await {
+        if let Ok(Some(found)) = done {
+            tries.abort_all();
+            return Some(found);
         }
     }
-    if t.relay.is_some() {
-        t.ips.clear();
-    }
-    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&t).unwrap_or_default())
-}
-
-/// Reads a room code: a short one, or the long form (or a bare endpoint id, found through the
-/// address lookup service).
-fn parse_code(code: &str) -> Result<EndpointAddr> {
-    if let Some(addr) = parse_short(code) {
-        return Ok(addr);
-    }
-    // Chat apps wrap long text: spaces and line breaks inside the code are dropped.
-    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-    let code = code.as_str();
-    let bad = || Error::Config("That isn't a room code. Copy the whole code from the host.".into());
-    if let Ok(id) = EndpointId::from_str(code) {
-        return Ok(EndpointAddr::from(id));
-    }
-    let bytes = URL_SAFE_NO_PAD.decode(code).map_err(|_| bad())?;
-    let t: Ticket = serde_json::from_slice(&bytes).map_err(|_| bad())?;
-    let mut addr = EndpointAddr::from(EndpointId::from_str(&t.id).map_err(|_| bad())?);
-    if let Some(relay) = t.relay.and_then(|r| r.parse::<RelayUrl>().ok()) {
-        addr.addrs.insert(TransportAddr::Relay(relay));
-    }
-    for ip in t.ips.iter().filter_map(|ip| ip.parse().ok()) {
-        addr.addrs.insert(TransportAddr::Ip(ip));
-    }
-    Ok(addr)
+    None
 }
 
 /// The extension someone plays the episode with, so others can install the same one.
@@ -267,6 +249,20 @@ pub struct Roster {
     pub members: Vec<Member>,
     /// False in the lobby: everyone gathers, says they're ready, and the host starts.
     pub started: bool,
+    /// The room's name ("Ahmed's room" unless the host renamed it).
+    #[serde(default)]
+    pub name: String,
+}
+
+/// A room's name when the host hasn't given it one: "<host>'s room".
+fn default_room_name(host: &str) -> String {
+    let host = host.trim();
+    if host.is_empty() { "Watch together".to_owned() } else { format!("{host}'s room") }
+}
+
+/// A name as typed: trimmed, at most 32 characters.
+fn clean_name(name: &str) -> String {
+    name.trim().chars().take(32).collect()
 }
 
 /// This device's place in the room.
@@ -300,6 +296,8 @@ enum Msg {
     Ready { ready: bool },
     /// Guest → host: whether the guest can play the room's episode.
     Check(Check),
+    /// Guest → host: the guest's new name.
+    Rename { name: String },
     /// Host → guests: everyone in the room, and whether it has started.
     Roster(Roster),
     /// Host → guest: why it was turned away.
@@ -395,7 +393,8 @@ struct Shared {
     endpoint: Endpoint,
     seed: Seed,
     me: EndpointId,
-    name: String,
+    /// This device's name in the room (it can change; a reconnect's hello carries the latest).
+    name: Mutex<String>,
     events: mpsc::UnboundedSender<RoomEvent>,
     role: Mutex<Role>,
     /// What this device has said and seen, kept across reconnects and a change of host.
@@ -423,6 +422,7 @@ enum Role {
 struct HostState {
     me: String,
     name: String,
+    room_name: String,
     code: String,
     state: Option<PlayState>,
     position: f64,
@@ -536,7 +536,7 @@ impl HostState {
 
     /// Everyone's list changed visibly: tell the guests and this device now.
     fn announce(&mut self) {
-        let roster = Roster { members: self.members(), started: self.started };
+        let roster = Roster { members: self.members(), started: self.started, name: self.room_name.clone() };
         for g in &self.guests {
             let _ = g.tx.send(Msg::Roster(roster.clone()));
         }
@@ -620,7 +620,7 @@ impl Shared {
             me: endpoint.id(),
             seed,
             endpoint,
-            name,
+            name: Mutex::new(name),
             events,
             role: Mutex::new(role),
             local: Mutex::new(Local::default()),
@@ -628,20 +628,17 @@ impl Shared {
         })
     }
 
+    fn my_name(&self) -> String {
+        self.name.lock().map(|n| n.clone()).unwrap_or_default()
+    }
+
     fn emit(&self, e: RoomEvent) {
         let _ = self.events.send(e);
     }
 
-    /// This device's code: short when its relay is a default one (it nearly always is).
+    /// This device's room code.
     fn my_code(&self) -> String {
-        let addr = self.endpoint.addr();
-        addr.addrs
-            .iter()
-            .find_map(|a| match a {
-                TransportAddr::Relay(url) => short_code(self.seed, url),
-                _ => None,
-            })
-            .unwrap_or_else(|| room_code(&addr))
+        short_code(self.seed)
     }
 
     fn closing(&self) -> bool {
@@ -667,9 +664,13 @@ impl Shared {
     fn become_host(&self) {
         let host = {
             let l = self.local.lock().unwrap_or_else(|p| p.into_inner());
+            let name = self.my_name();
+            // Taking over keeps the room's name; a new room is named after its host.
+            let room_name = l.roster.as_ref().map(|r| r.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| default_room_name(&name));
             HostState {
                 me: self.me.to_string(),
-                name: self.name.clone(),
+                name,
+                room_name,
                 code: self.my_code(),
                 state: l.state.clone(),
                 position: l.position,
@@ -716,8 +717,10 @@ impl Shared {
 
 impl Room {
     /// Opens a room on this device. Guests join with [`Room::info`]'s code.
-    pub async fn host(name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
-        let seed = Seed::random();
+    /// Opens a room on this device, named `room_name` (or "<host>'s room"), under the code of
+    /// `seed` (a kept one gives the device the same code every time).
+    pub async fn host(name: String, room_name: Option<String>, seed: Option<u64>) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
+        let seed = seed.map(|s| Seed(s & ((1 << (5 * CODE_SEED_CHARS)) - 1))).unwrap_or_else(Seed::random);
         let endpoint = bind(seed).await?;
         // Reachable (home relay picked) before the code is handed out.
         endpoint.online().await;
@@ -725,6 +728,14 @@ impl Room {
         let (to_host, _) = mpsc::unbounded_channel();
         let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: String::new() });
         shared.become_host();
+        if let Some(room_name) = room_name.filter(|n| !clean_name(n).is_empty()) {
+            if let Some(host) = shared.host_state() {
+                if let Ok(mut h) = host.lock() {
+                    h.room_name = clean_name(&room_name);
+                    h.announce();
+                }
+            }
+        }
         tracing::info!(addrs = ?shared.endpoint.addr().addrs, "watch: room open");
         tokio::spawn(accept_loop(shared.clone()));
         Ok((Room { shared }, rx))
@@ -732,21 +743,21 @@ impl Room {
 
     /// Joins the room with this code.
     pub async fn join(code: &str, name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
-        let host_addr = parse_code(code)?;
-        tracing::info!(host = %host_addr.id.fmt_short(), addrs = ?host_addr.addrs, "watch: joining room");
+        let addrs = parse_code(code)?;
+        tracing::info!(host = %addrs[0].id.fmt_short(), "watch: joining room");
         let seed = Seed::random();
         let endpoint = bind(seed).await?;
-        let conn = match connect(&endpoint, host_addr.clone(), JOIN_TIMEOUT).await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(error = %e, "watch: couldn't connect to the room");
+        let (host_addr, conn) = match connect_any(&endpoint, addrs, JOIN_TIMEOUT).await {
+            Some(found) => found,
+            None => {
+                tracing::warn!("watch: couldn't connect to the room");
                 endpoint.close().await;
                 return Err(Error::Network(
                     "Couldn't reach the room. Check the code, and that the host still has the room open.".into(),
                 ));
             }
         };
-        Ok(Self::joined(endpoint, seed, name, code.trim().to_owned(), host_addr, conn).await)
+        Ok(Self::joined(endpoint, seed, name, short_code_of(code), host_addr, conn).await)
     }
 
     /// Gets back into a room this device was in: tries each of its members' codes in turn (the
@@ -762,10 +773,10 @@ impl Room {
         while began.elapsed() < REJOIN_TRYING {
             let mut tries = tokio::task::JoinSet::new();
             for code in codes {
-                let Ok(addr) = parse_code(code) else { continue };
-                let (endpoint, code) = (endpoint.clone(), code.trim().to_owned());
+                let Ok(addrs) = parse_code(code) else { continue };
+                let (endpoint, code) = (endpoint.clone(), short_code_of(code));
                 tries.spawn(async move {
-                    let conn = connect(&endpoint, addr.clone(), ATTEMPT).await.ok()?;
+                    let (addr, conn) = connect_any(&endpoint, addrs, ATTEMPT).await?;
                     // A member that isn't hosting closes the connection at once ("not hosting").
                     if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
                         return None;
@@ -843,6 +854,36 @@ impl Room {
             }
             None => self.to_host(Msg::State(state)),
         }
+    }
+
+    /// This device's name in the room.
+    pub fn set_name(&self, name: &str) {
+        let name = clean_name(name);
+        if name.is_empty() {
+            return;
+        }
+        if let Ok(mut n) = self.shared.name.lock() {
+            *n = name.clone();
+        }
+        match self.shared.host_state() {
+            Some(host) => {
+                if let Ok(mut h) = host.lock() {
+                    h.name = name;
+                    h.announce();
+                }
+            }
+            None => self.to_host(Msg::Rename { name }),
+        }
+    }
+
+    /// The room's name (the host's to change). An empty one goes back to "<host>'s room".
+    pub fn set_room_name(&self, name: &str) -> bool {
+        let Some(host) = self.shared.host_state() else { return false };
+        let Ok(mut h) = host.lock() else { return false };
+        let name = clean_name(name);
+        h.room_name = if name.is_empty() { default_room_name(&h.name) } else { name };
+        h.announce();
+        true
     }
 
     /// Ready to start (or not), for the lobby.
@@ -976,7 +1017,7 @@ async fn guest_loop(shared: Arc<Shared>, mut host: EndpointAddr, first: Connecti
                         .lock()
                         .ok()
                         .and_then(|l| l.roster.as_ref()?.members.iter().find(|m| m.id == addr.id.to_string()).map(|m| m.code.clone()))
-                        .unwrap_or_else(|| room_code(&addr));
+                        .unwrap_or_default();
                     if let Ok(mut role) = shared.role.lock() {
                         if let Role::Guest { code, .. } = &mut *role {
                             *code = new_code;
@@ -1036,7 +1077,7 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
     let Ok((mut send, recv)) = conn.open_bi().await else { return Outcome::Dropped };
     let hello = {
         let l = shared.local.lock().unwrap_or_else(|p| p.into_inner());
-        Msg::Hello { name: shared.name.clone(), code: shared.my_code(), ready: l.ready, check: l.check.clone() }
+        Msg::Hello { name: shared.my_name(), code: shared.my_code(), ready: l.ready, check: l.check.clone() }
     };
     if write_msg(&mut send, &hello).await.is_err() {
         return Outcome::Dropped;
@@ -1053,9 +1094,15 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
     });
     let mut pinger = Pinger::default();
     let mut ping_tick = tokio::time::interval(PING_EVERY);
+    let mut heard = Instant::now();
     let outcome = loop {
         tokio::select! {
             _ = ping_tick.tick() => {
+                // The host answers every ping: this long without a word, it's gone.
+                if heard.elapsed() > GONE_AFTER {
+                    tracing::info!("watch: the host went quiet; treating it as gone");
+                    break Outcome::Dropped;
+                }
                 if let Some(ping) = pinger.next() {
                     if write_msg(&mut send, &ping).await.is_err() {
                         break Outcome::Dropped;
@@ -1070,7 +1117,7 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
                 }
                 None => break Outcome::Closing,
             },
-            inc = incoming.recv() => match inc {
+            inc = incoming.recv() => match inc.inspect(|_| heard = Instant::now()) {
                 Some(Msg::State(s)) => {
                     if let Ok(mut l) = shared.local.lock() {
                         l.state = Some(s.clone());
@@ -1123,7 +1170,7 @@ async fn rejoin(shared: &Arc<Shared>, old_host: &EndpointAddr, handed_over: bool
         }
         let turn = (began.elapsed().as_secs() / HOST_GRACE.as_secs()) as usize + usize::from(handed_over);
         let target = if turn == 0 {
-            Some(old_host.clone())
+            Some(vec![old_host.clone()])
         } else {
             match line.get(turn - 1) {
                 Some((id, _)) if *id == me => {
@@ -1134,10 +1181,10 @@ async fn rejoin(shared: &Arc<Shared>, old_host: &EndpointAddr, handed_over: bool
                 None => return None,
             }
         };
-        if let Some(addr) = target {
-            match connect(&shared.endpoint, addr.clone(), ATTEMPT).await {
-                Ok(c) => return Some(Some((addr, c))),
-                Err(e) => tracing::debug!(error = %e, turn, "watch: rejoin attempt failed"),
+        if let Some(addrs) = target {
+            match connect_any(&shared.endpoint, addrs, ATTEMPT).await {
+                Some((addr, c)) => return Some(Some((addr, c))),
+                None => tracing::debug!(turn, "watch: rejoin attempt failed"),
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1215,7 +1262,15 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
         }
     });
     loop {
-        match read_msg(&mut recv).await {
+        let next = match tokio::time::timeout(GONE_AFTER, read_msg(&mut recv)).await {
+            Ok(next) => next,
+            Err(_) => {
+                tracing::info!(guest = %id.fmt_short(), "watch: guest went quiet; treating it as gone");
+                connection.close(0u32.into(), b"gone quiet");
+                break;
+            }
+        };
+        match next {
             Ok(Msg::State(mut asked)) => {
                 if let Ok(mut h) = host.lock() {
                     let lobby = !h.started;
@@ -1257,6 +1312,17 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                     } else {
                         h.announce_later();
                     }
+                }
+            }
+            Ok(Msg::Rename { name }) => {
+                let name = clean_name(&name);
+                if let Ok(mut h) = host.lock() {
+                    if let Some(g) = h.guest_mut(&id) {
+                        if !name.is_empty() {
+                            g.name = name;
+                        }
+                    }
+                    h.announce();
                 }
             }
             Ok(Msg::Ready { ready }) => {
@@ -1310,6 +1376,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iroh::TransportAddr;
 
     #[test]
     fn messages_round_trip_as_tagged_json() {
@@ -1349,46 +1416,27 @@ mod tests {
         assert!(json.contains(r#""playable":true"#) && json.contains(r#""rttMs":30"#), "{json}");
     }
 
-    #[test]
-    fn room_codes_carry_the_hosts_addresses() {
-        let id = iroh::SecretKey::generate().public();
-        let mut addr = EndpointAddr::from(id);
-        addr.addrs.insert(TransportAddr::Relay("https://euc1-1.relay.n0.iroh.link./".parse().unwrap()));
-        addr.addrs.insert(TransportAddr::Ip("192.168.137.1:50123".parse().unwrap()));
-        let code = room_code(&addr);
-        assert!(code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "{code}");
-        // With a relay, the code carries only the relay (not the IPs).
-        let parsed = parse_code(&format!("  {code}\n")).unwrap();
-        assert_eq!(parsed.id, id);
-        assert_eq!(parsed.addrs.len(), 1);
-        assert!(matches!(parsed.addrs.iter().next(), Some(TransportAddr::Relay(_))));
-        // Without one, the IPs.
-        let direct = EndpointAddr::from(id).with_ip_addr("192.168.137.1:50123".parse().unwrap());
-        assert_eq!(parse_code(&room_code(&direct)).unwrap(), direct);
-        // A bare id (the first format) still parses.
-        assert_eq!(parse_code(&id.to_string()).unwrap().id, id);
-        assert!(parse_code("not a code").is_err());
-    }
+
 
     #[test]
-    fn short_codes_make_the_hosts_address() {
+    fn room_codes_name_the_host_through_every_relay() {
         let seed = Seed(0x1F_2E3D_4C5B_6A79 & ((1 << 55) - 1));
-        let relay: RelayUrl = "https://euc1-1.relay.n0.iroh.link./".parse().unwrap();
-        let code = short_code(seed, &relay).unwrap();
-        assert_eq!(code.len(), 14, "{code}"); // 12 characters in groups of four
-        assert!(code.ends_with('E'), "{code}");
-        let addr = parse_code(&code).unwrap();
-        assert_eq!(addr.id, seed.key().public());
-        assert!(matches!(addr.addrs.iter().next(), Some(TransportAddr::Relay(r)) if r.host_str() == relay.host_str()));
+        let code = short_code(seed);
+        assert_eq!(code.len(), 13, "{code}"); // 11 characters in groups of four
+        assert_eq!(code_for_seed(seed.0), code);
+        let addrs = parse_code(&code).unwrap();
+        assert_eq!(addrs.len(), RELAYS.len());
+        assert!(addrs.iter().all(|a| a.id == seed.key().public()));
+        assert!(addrs.iter().all(|a| matches!(a.addrs.iter().next(), Some(TransportAddr::Relay(_)))));
         // Typed sloppily: lower case, no dashes, O for 0 and I or L for 1.
         let sloppy = code.replace('-', "").to_lowercase().replace('0', "o").replace('1', "l");
-        assert_eq!(parse_code(&sloppy).unwrap().id, addr.id);
-        // Random seeds give different keys and stay within 55 bits.
-        let (a, b) = (Seed::random(), Seed::random());
-        assert!(a.0 < 1 << 55 && a.key().public() != b.key().public());
-        // Not a default relay: no short code (the long one is used).
-        assert!(short_code(seed, &"https://relay.example.com/".parse().unwrap()).is_none());
-        assert!(parse_code("K7QM-4X2P-9FTQ").is_err()); // Q isn't a relay letter
+        assert_eq!(parse_code(&sloppy).unwrap()[0].id, seed.key().public());
+        assert_eq!(short_code_of(&sloppy.replace('o', "0").replace('l', "1")), code);
+        // A kept seed gives the same code every time; new ones differ and stay within 55 bits.
+        let (a, b) = (new_seed(), new_seed());
+        assert!(a < 1 << 55 && code_for_seed(a) == code_for_seed(a) && code_for_seed(a) != code_for_seed(b));
+        assert!(parse_code("not a code").is_err());
+        assert!(parse_code("K7QM-4X2P-9FTE").is_err()); // one character too many
     }
 
     async fn until<T>(rx: &mut mpsc::UnboundedReceiver<RoomEvent>, mut pick: impl FnMut(RoomEvent) -> Option<T>) -> T {
@@ -1411,7 +1459,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_room_syncs_state_between_two_endpoints() {
-        let (host, mut host_events) = Room::host("Host".into()).await.unwrap();
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
         let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into()).await.unwrap();
         until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
 
@@ -1448,7 +1496,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_room_rejoin_finds_the_new_host() {
-        let (host, mut host_events) = Room::host("Host".into()).await.unwrap();
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
         let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into()).await.unwrap();
         let codes = until(&mut host_events, |e| match e {
             RoomEvent::Roster(r) if r.members.len() == 2 => Some(r.members.into_iter().map(|m| m.code).collect::<Vec<_>>()),
@@ -1471,7 +1519,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_room_survives_the_host_leaving() {
-        let (host, mut host_events) = Room::host("Host".into()).await.unwrap();
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
         let code = host.info().code;
         let (first, mut first_events) = Room::join(&code, "First".into()).await.unwrap();
         until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;

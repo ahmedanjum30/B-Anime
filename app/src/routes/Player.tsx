@@ -1192,6 +1192,12 @@ export default function Player() {
             {watchStore.members().filter((m) => m.mediaId === mediaId() && m.episode === episode() && !m.buffering).length}/
             {watchStore.members().length} ready
           </span>
+          {/* Only the host starts it without everyone: never by itself. */}
+          <Show when={watchStore.room()?.host}>
+            <button type="button" class="btn btn-sm player-held-start" onClick={() => together.startNow()}>
+              Start without waiting
+            </button>
+          </Show>
         </p>
       </Show>
       <Show when={!failure() && !videoError() && waiting()}>

@@ -2501,6 +2501,42 @@ a.slot:focus-visible {
 .watch-member-link[data-slow] {
   color: var(--amber, #d9a441);
 }
+/* The room's name, where it's at, and Rename (host). */
+.together-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 1.5);
+  margin-bottom: calc(var(--u) * 2);
+}
+.together-room-name {
+  font: 700 22px/1.2 var(--font-head);
+  letter-spacing: 0.01em;
+  color: var(--z10);
+  overflow-wrap: anywhere;
+}
+.together-phase {
+  font: 600 12px/16px var(--font-head);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--z6);
+}
+.together-rename {
+  font-size: 12px;
+}
+.together-name-input {
+  height: 32px;
+  min-width: 0;
+  width: min(280px, 100%);
+}
+.watch-member-name.is-hidden {
+  display: none;
+}
+.together-mylink {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .together-recent {
   margin-top: calc(var(--u) * 4);
   max-width: 560px;
@@ -2536,8 +2572,19 @@ a.slot:focus-visible {
 .watch-wait:hover {
   color: var(--z10);
 }
-.together-end {
+/* Ending a room for everyone: clearly a destructive action, red, filling on hover. */
+.btn-danger {
+  background: transparent;
   color: var(--red);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--red) 65%, transparent);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+}
+.btn-danger:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 /* The show page's Watch together, under the titles. */
 .show-together {
@@ -3173,10 +3220,16 @@ a.slot:focus-visible {
   text-align: center;
   pointer-events: none;
 }
-/* Held after a switch, with no spinner: the note sits in the middle. */
+/* Held at Start or after a switch, with no spinner: the note sits in the middle (with the
+   host's Start without waiting under it). */
 .player-held {
   top: 50%;
   transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u);
+  pointer-events: auto;
 }
 .player-spinner {
   position: absolute;

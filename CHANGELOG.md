@@ -18,21 +18,27 @@ one line each, written for users (see CLAUDE.md).
 ## [0.4.6]
 
 ### Added
-- Rejoin your last three rooms, even if someone else took over hosting; closing the app mid-session offers it at the next launch.
+- Rejoin your last room, even if someone else took over hosting; closing the app mid-session offers it at the next launch.
+- Rooms have a name (the host's name by default), which the host can change; anyone can rename themselves.
+- A notice says who paused, resumed or jumped.
+- Your room code and invite link stay the same every time; New link replaces them.
+- Your name and your room's name are remembered for next time.
 
 ### Changed
 - In the player, the room opens over the episode, which keeps playing.
 - In a room, episodes start where the room is, not from your own saved spot.
-- Start waits until everyone's player has loaded the episode, so everyone begins together.
+- Start waits until everyone's player has loaded the episode, so everyone begins together; only the host can start without waiting.
 - The host switches the room to another show or episode in one click; it plays once everyone has loaded it.
 - Leaving the player no longer pauses the room, and a bar takes you back to the episode.
-- Recent rooms stay listed on the Together page while you're in a room.
+- Your last room stays listed on the Together page while you're in a room.
 - Settings → About (desktop) can record detailed network logs, for troubleshooting connections.
 
 ### Fixed
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
 - The People list shows each person's real ping.
 - Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.
+- Someone who closes the app is noticed as gone in 10 seconds instead of 30.
+- A guest's pause no longer gets lost, or undone a moment later, when it lands just after a room update.
 
 ## [0.4.5] - 2026-11-24
 

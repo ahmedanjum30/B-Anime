@@ -409,9 +409,11 @@ export interface RoomMember {
 export interface Roster {
   members: RoomMember[];
   started: boolean;
+  /** The room's name ("Ahmed's room" unless the host renamed it). */
+  name: string;
 }
 
-/** A room this device was in, kept to rejoin it (the last three). */
+/** The last room this device was in, kept to rejoin it. */
 export interface RecentRoom {
   /** The code the room had when this device entered it. */
   key: string;

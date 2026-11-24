@@ -1,6 +1,7 @@
 //! Watch together, app side: one room at a time, its events forwarded to the UI.
 
-use banime_core::watch::{Check, PlayState, Room, RoomEvent, RoomInfo};
+use banime_core::db;
+use banime_core::watch::{self as room, Check, PlayState, Room, RoomEvent, RoomInfo};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
@@ -46,8 +47,42 @@ async fn enter(app: AppHandle, state: &AppState, made: banime_core::Result<(Room
 }
 
 #[tauri::command]
-pub async fn watch_host(app: AppHandle, state: tauri::State<'_, AppState>, name: String) -> Result<RoomInfo, String> {
-    enter(app, &state, Room::host(name).await).await
+pub async fn watch_host(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    name: String,
+    room_name: Option<String>,
+) -> Result<RoomInfo, String> {
+    let seed = device_seed(&state).await?;
+    enter(app, &state, Room::host(name, room_name, Some(seed)).await).await
+}
+
+/// This device's room code is made from a seed kept in its settings, so it hosts under the same
+/// code (and invite link) every time, until New link replaces it.
+const SEED_KEY: &str = "watch.seed";
+
+async fn device_seed(state: &AppState) -> Result<u64, String> {
+    let saved = db::scalar_text(&state.db, "SELECT value FROM setting WHERE key = 'watch.seed'").await.map_err(msg)?;
+    if let Some(seed) = saved.and_then(|s| s.parse::<u64>().ok()) {
+        return Ok(seed);
+    }
+    let seed = room::new_seed();
+    db::set_setting(&state.db, SEED_KEY, &seed.to_string()).await.map_err(msg)?;
+    Ok(seed)
+}
+
+/// The code this device hosts under (shown before a room is open).
+#[tauri::command]
+pub async fn watch_my_code(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    Ok(room::code_for_seed(device_seed(&state).await?))
+}
+
+/// A new code (and invite link) for this device; the old one stops working. For the next room.
+#[tauri::command]
+pub async fn watch_new_link(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let seed = room::new_seed();
+    db::set_setting(&state.db, SEED_KEY, &seed.to_string()).await.map_err(msg)?;
+    Ok(room::code_for_seed(seed))
 }
 
 /// Back into a room this device was in, through whichever of its members hosts it now.
@@ -127,6 +162,26 @@ pub async fn watch_start(state: tauri::State<'_, AppState>) -> Result<(), String
 pub async fn watch_check(state: tauri::State<'_, AppState>, playable: Option<bool>, source: Option<String>) -> Result<(), String> {
     if let Some(room) = state.watch.room.lock().await.as_ref() {
         room.set_check(Check { playable, source });
+    }
+    Ok(())
+}
+
+/// This device's name in the room.
+#[tauri::command]
+pub async fn watch_rename(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+    if let Some(room) = state.watch.room.lock().await.as_ref() {
+        room.set_name(&name);
+    }
+    Ok(())
+}
+
+/// The room's name (host only).
+#[tauri::command]
+pub async fn watch_set_room_name(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+    let room = state.watch.room.lock().await;
+    let room = room.as_ref().ok_or("You're not in a room.")?;
+    if !room.set_room_name(&name) {
+        return Err("Only the host names the room.".into());
     }
     Ok(())
 }
