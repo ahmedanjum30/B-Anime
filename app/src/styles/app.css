@@ -3636,7 +3636,8 @@ a.slot:focus-visible {
 
 .toast {
   position: fixed;
-  left: 50%;
+  /* Centred on the content beside the rail (the player too), not on the whole window. */
+  left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2);
   bottom: calc(var(--u) * 3);
   max-width: 560px;
   padding: 12px calc(var(--u) * 2);
@@ -3733,8 +3734,10 @@ a.slot:focus-visible {
     padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
     scrollbar-gutter: auto;
   }
-  /* Notices sit above the bottom bar, full width less the gutters. */
+  /* Notices sit above the bottom bar, full width less the gutters; the rail is the bottom bar
+     here, so they centre on the screen. */
   .toast {
+    left: 50%;
     bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u) * 1.5);
     width: max-content;
     max-width: calc(100vw - 32px);
