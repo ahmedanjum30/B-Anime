@@ -3869,9 +3869,14 @@ a.slot:focus-visible {
     padding-left: 16px;
   }
 
-  /* Library and Manga */
+  /* Library, Manga and Discover. The page area keeps the status bar clear with its top
+     padding, and a sticky header stops below that padding: pages scrolled up behind it showed
+     through the gap above it. Pulled up over the padding (and padded by as much), the header
+     covers the status bar's strip too. */
   .lib-head {
-    padding-top: calc(var(--u) * 2);
+    top: calc(-1 * env(safe-area-inset-top));
+    margin-top: calc(-1 * env(safe-area-inset-top));
+    padding-top: calc(var(--u) * 2 + env(safe-area-inset-top));
   }
   .toolbar {
     flex-wrap: wrap;
@@ -4078,5 +4083,12 @@ a.slot:focus-visible {
   }
   .search-sm {
     height: 44px;
+  }
+  /* The same 44px as the selects beside it (3px padding and a 1px border around the buttons). */
+  .segmented button {
+    height: 36px;
+  }
+  .segmented-sm button {
+    height: 28px;
   }
 }

@@ -262,16 +262,36 @@ fn version_in(name: &str) -> Option<&str> {
         .or_else(|| name.strip_prefix("B-Anime-").and_then(|r| r.strip_suffix("-arm64.apk")))
 }
 
-/// Deletes downloaded updates that are already installed (not newer than `current`) and
-/// unfinished downloads. A newer one that's downloaded but not yet installed stays, so it isn't
-/// fetched again. Returns how many files went.
+/// Deletes downloaded updates that are already installed (not newer than `current`), unfinished
+/// downloads, and pending ones a newer download has replaced (a later beta, or a beta left behind
+/// after switching back to Stable). The newest one not installed yet stays, so it isn't fetched
+/// again. Returns how many files went.
 pub fn clean_downloads(dir: &Path, current: &str) -> usize {
+    clean(dir, |v| newer(v, current), None)
+}
+
+/// After `keep` has downloaded: every other download goes (it's the one to install now).
+pub fn keep_only(dir: &Path, keep: &Path) -> usize {
+    let keep = keep.file_name().map(|n| n.to_string_lossy().into_owned());
+    clean(dir, |_| true, keep.as_deref())
+}
+
+fn clean(dir: &Path, pending: impl Fn(&str) -> bool, keep: Option<&str>) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let files: Vec<(String, std::path::PathBuf)> =
+        entries.flatten().map(|e| (e.file_name().to_string_lossy().into_owned(), e.path())).collect();
+    // The one to keep: given, or the newest pending.
+    let keep = keep.map(str::to_owned).or_else(|| {
+        files
+            .iter()
+            .filter_map(|(n, _)| version_in(n).filter(|v| pending(v)).and_then(|v| Version::parse(v).map(|p| (p, n))))
+            .max_by_key(|(p, _)| *p)
+            .map(|(_, n)| n.clone())
+    });
     let mut removed = 0;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let stale = name.ends_with(".part") || version_in(&name).is_some_and(|v| !newer(v, current));
-        if stale && std::fs::remove_file(entry.path()).is_ok() {
+    for (name, path) in &files {
+        let ours = name.ends_with(".part") || version_in(name).is_some();
+        if ours && keep.as_deref() != Some(name.as_str()) && std::fs::remove_file(path).is_ok() {
             removed += 1;
         }
     }
@@ -374,9 +394,23 @@ mod tests {
             std::fs::write(dir.join(f), b"x").unwrap();
         }
         assert_eq!(clean_downloads(&dir, "0.2.8"), 4);
-        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
-        left.sort();
-        assert_eq!(left, ["B-Anime-0.2.9-arm64.apk", "notes.txt"]);
+        let left = |dir: &Path| {
+            let mut l: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+            l.sort();
+            l
+        };
+        assert_eq!(left(&dir), ["B-Anime-0.2.9-arm64.apk", "notes.txt"]);
+
+        // Two pending (an older beta never installed): only the newest stays.
+        std::fs::write(dir.join("B-Anime-0.3.0-beta.1-arm64.apk"), b"x").unwrap();
+        std::fs::write(dir.join("B-Anime-0.3.0-beta.2-arm64.apk"), b"x").unwrap();
+        assert_eq!(clean_downloads(&dir, "0.2.8"), 2);
+        assert_eq!(left(&dir), ["B-Anime-0.3.0-beta.2-arm64.apk", "notes.txt"]);
+
+        // A fresh download replaces whatever was waiting.
+        std::fs::write(dir.join("B-Anime-0.3.0-arm64.apk"), b"x").unwrap();
+        assert_eq!(keep_only(&dir, &dir.join("B-Anime-0.3.0-arm64.apk")), 1);
+        assert_eq!(left(&dir), ["B-Anime-0.3.0-arm64.apk", "notes.txt"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -64,8 +64,8 @@ export const homeStore = createRoot(() => {
     void refetchUpdate();
     notify(
       onAndroid
-        ? `B-Anime ${fmtVersion(u.version)} is ready. Install it from More.`
-        : `B-Anime ${fmtVersion(u.version)} is ready. Restart to update (in the sidebar).`,
+        ? `B-Anime ${fmtVersion(u.version)} is ready. Tap its notification, or install it from More.`
+        : `B-Anime ${fmtVersion(u.version)} is ready. Click its notification, or restart to update from the sidebar.`,
     );
   });
   void onEvent<{ episode: number; title: string }>("player-watched", (w) =>
