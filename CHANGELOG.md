@@ -25,7 +25,7 @@ one line each, written for users (see CLAUDE.md).
 - See who can play the episode, and install the host's source in one tap if you can't.
 - Watch together from any show's page.
 - Don't wait: carry on without someone who's still loading, from the notice or People.
-- Update notifications: click (Windows) or tap (Android) to install.
+- When an update is ready, its notice installs it in one click or tap.
 - The "ready to install" notice installs when you click or tap it.
 - This "What's new" window, once after each update.
 - Numbered betas (0.4.5 Beta 1, Beta 2…) on their own releases page.

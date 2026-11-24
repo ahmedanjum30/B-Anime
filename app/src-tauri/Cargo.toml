@@ -35,7 +35,3 @@ ndk-context = "0.1"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-
-[target."cfg(windows)".dependencies]
-tauri-winrt-notification = "0.8"
-windows-registry = "0.6"

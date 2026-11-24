@@ -104,7 +104,6 @@ async fn check_and_download(app: &AppHandle) {
             }
             set_error(None);
             let _ = app.emit(UPDATE_READY, &update);
-            notify_ready(app, &update);
         }
         Err(e) => {
             tracing::warn!(error = %e, "update download failed");
@@ -178,69 +177,6 @@ pub async fn set_update_channel(app: AppHandle, state: tauri::State<'_, AppState
         check_and_download(&app).await;
     }
     Ok(status(&app, &state).await)
-}
-
-/// "0.4.5-beta.2" as people read it: "0.4.5 Beta 2".
-fn version_label(v: &str) -> String {
-    match v.split_once("-beta.") {
-        Some((base, n)) => format!("{base} Beta {n}"),
-        None => v.to_owned(),
-    }
-}
-
-/// The system notification for a downloaded update: clicking it (Windows) restarts into the
-/// update; tapping it (Android) opens the installer, even with B-Anime closed. The in-app notice
-/// stays either way.
-fn notify_ready(app: &AppHandle, update: &Update) {
-    let title = format!("B-Anime {} is ready", version_label(&update.version));
-    #[cfg(target_os = "android")]
-    {
-        let Some(path) = app.state::<AppState>().updates.ready.lock().ok().and_then(|r| r.clone()) else { return };
-        let authority = format!("{}.fileprovider", app.config().identifier);
-        if let Err(e) = crate::android_install::notify_update_ready(&path, &authority, &title, "Tap to install it.") {
-            tracing::warn!(error = %e, "update notification failed");
-        }
-    }
-    #[cfg(windows)]
-    {
-        use tauri_winrt_notification::Toast;
-        let id = app.config().identifier.clone();
-        if let Err(e) = register_toast_app(app, &id) {
-            tracing::warn!(error = %e, "couldn't register for notifications");
-        }
-        let handle = app.clone();
-        let shown = Toast::new(&id)
-            .title(&title)
-            .text1("Click to restart B-Anime and update.")
-            .on_activated(move |_| {
-                if let Err(e) = install_now(&handle) {
-                    tracing::warn!(error = %e, "update from the notification failed");
-                }
-                Ok(())
-            })
-            .show();
-        if let Err(e) = shown {
-            tracing::warn!(error = %e, "update notification failed");
-        }
-    }
-    #[cfg(not(any(windows, target_os = "android")))]
-    let _ = (app, title);
-}
-
-/// Windows shows a notification under the name and icon registered for its app id: B-Anime's
-/// installer adds no such entry, so it's (re)written here (for this user) before each one.
-#[cfg(windows)]
-fn register_toast_app(app: &AppHandle, id: &str) -> Result<(), String> {
-    let icon = app.state::<AppState>().paths.cache.join("notification-icon.png");
-    if !icon.exists() {
-        std::fs::write(&icon, include_bytes!("../icons/128x128.png")).map_err(|e| e.to_string())?;
-    }
-    let key = windows_registry::CURRENT_USER
-        .create(format!(r"Software\Classes\AppUserModelId\{id}"))
-        .map_err(|e| e.to_string())?;
-    key.set_string("DisplayName", "B-Anime").map_err(|e| e.to_string())?;
-    key.set_string("IconUri", icon.to_string_lossy()).map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// Desktop: runs the verified installer in update mode and quits; the installer relaunches
