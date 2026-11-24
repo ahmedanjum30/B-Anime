@@ -354,8 +354,9 @@ jobs:
   # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
   pages:
     needs: publish
-    # A beta leaves the website's downloads on the last stable version.
-    if: needs.publish.outputs.beta != 'true'
+    # Never for a beta (a tag vX.Y.Z-beta.N): the website's downloads stay on the last stable
+    # version. Decided by the tag itself, so a beta never gets near publishing the site.
+    if: ${{ !contains(github.ref_name, '-beta.') }}
     runs-on: ubuntu-latest
     # One writer to gh-pages at a time (site.yml uses the same group).
     concurrency:
