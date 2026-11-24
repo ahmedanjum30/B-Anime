@@ -216,7 +216,7 @@ pub async fn browse(client: &Client, db: &Db, f: BrowseFilter) -> Result<BrowseP
             pageInfo {{ hasNextPage }}
             media(type: $type, search: $search, sort: $sort, season: $season, seasonYear: $seasonYear,
                   genre: $genre, format: $format, startDate_like: $year, isAdult: false,
-                  genre_not_in: ["Ecchi"]) {{ {MEDIA_FIELDS} }}
+                  genre_not_in: ["Ecchi", "Hentai"]) {{ {MEDIA_FIELDS} }}
           }}
         }}"#
     );
@@ -242,12 +242,13 @@ pub async fn browse(client: &Client, db: &Db, f: BrowseFilter) -> Result<BrowseP
     let list = list_map(db).await?;
     Ok(BrowsePage {
         has_next: data.page.page_info.has_next_page,
-        // No adult titles, and no ecchi (AniList doesn't count it as adult): anime and manga alike.
+        // No adult titles, no ecchi (AniList doesn't count it as adult) and no hentai (AniList
+        // marks it adult; checked too in case a title isn't): anime and manga alike.
         items: data
             .page
             .media
             .into_iter()
-            .filter(|m| !m.is_adult && !m.genres.iter().any(|g| g == "Ecchi"))
+            .filter(|m| !m.is_adult && !m.genres.iter().any(|g| g == "Ecchi" || g == "Hentai"))
             .map(|m| m.into_card(&list))
             .collect(),
     })
