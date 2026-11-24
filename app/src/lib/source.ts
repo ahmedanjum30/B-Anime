@@ -130,7 +130,9 @@ export function createSource(
   dub: () => boolean = () => false,
 ) {
   const kind = (): ExtKind => (media()?.type === "MANGA" ? "manga" : "anime");
-  const [exts] = createResource(() => (inTauri ? listExtensions() : Promise.resolve([] as InstalledExtension[])));
+  const [exts, { refetch: reloadExts }] = createResource(() =>
+    inTauri ? listExtensions() : Promise.resolve([] as InstalledExtension[]),
+  );
   const usable = createMemo(() => (exts() ?? []).filter((e) => e.enabled && e.kind === kind()));
 
   const [ext, setExtSignal] = createSignal<string | null>(null);
@@ -248,7 +250,7 @@ export function createSource(
     return map;
   });
 
-  return { kind, exts, usable, ext, setExt, isDub, match, rematch, setMatch, items, reloadItems, byNumber };
+  return { kind, exts, reloadExts, usable, ext, setExt, isDub, match, rematch, setMatch, items, reloadItems, byNumber };
 }
 
 export type SourceState = ReturnType<typeof createSource>;

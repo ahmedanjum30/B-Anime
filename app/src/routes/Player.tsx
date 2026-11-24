@@ -191,6 +191,13 @@ export default function Player() {
     title: () => media()?.title.userPreferred ?? "",
     dub: () => nextDub(),
     waiting,
+    // The extension this episode plays from (offered to guests who can't play it); not a
+    // library file, and not an extension installed from this computer.
+    source: () => {
+      if (local()) return null;
+      const e = source.usable().find((x) => x.id === source.ext());
+      return e && /^https:\/\//.test(e.sourceUrl) ? { id: e.id, name: e.name, url: e.sourceUrl } : null;
+    },
   });
   /** Started per stream; cleared once the video has data (see the stream effect). */
   let stallTimer: number | undefined;
@@ -1178,12 +1185,20 @@ export default function Player() {
           <button
             type="button"
             class="btn btn-sm player-together-btn is-live"
-            title={watchStore.started() ? "Watching together" : "In the lobby: the host starts the episode"}
+            title={
+              watchStore.reconnecting()
+                ? "Connection to the room dropped; getting back in"
+                : watchStore.started()
+                  ? "Watching together"
+                  : "In the lobby: the host starts the episode"
+            }
             onClick={() => navigate("/together")}
           >
             <Users size={16} stroke-width={1.75} aria-hidden="true" />
             <span class="num">{watchStore.members().length}</span>
-            <Show when={!watchStore.started()}><span>· Lobby</span></Show>
+            <Show when={watchStore.reconnecting()} fallback={<Show when={!watchStore.started()}><span>· Lobby</span></Show>}>
+              <span>· Reconnecting…</span>
+            </Show>
           </button>
         </Show>
       </header>

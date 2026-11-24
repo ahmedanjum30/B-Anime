@@ -1,13 +1,29 @@
 import { createEffect, createRoot, createSignal, on, onCleanup } from "solid-js";
 
-import { errorText, onEvent, watchHost, watchJoin, watchLeave, watchReady, watchRoom, watchSendState, watchSendStatus, watchStart } from "./api";
+import {
+  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRoom, watchSendState,
+  watchSendStatus, watchStart,
+} from "./api";
 import { homeStore } from "./store";
-import type { PlayState, RoomInfo, RoomMember, Roster } from "./types";
+import type { PlayState, RoomInfo, RoomMember, Roster, SourceRef } from "./types";
 
 /** A state from the room, stamped with when it arrived (to account for time passing while playing). */
 export type RemoteState = PlayState & { at: number };
+/** What a device sends: everything but who sent it (the backend fills that in). */
+export type OwnState = Omit<PlayState, "by">;
 
 const NAME_KEY = "banime.watch.name";
+
+/** The website's join page: opens B-Anime into the room, or offers the download. The code stays
+ *  after the "#", which browsers never send to the server. */
+export const INVITE_PAGE = "https://ahmedanjum30.github.io/B-Anime/join/";
+export const inviteLink = (code: string) => `${INVITE_PAGE}#${code}`;
+
+/** The room code in a banime://join/<code> link (or an invite page link pasted into the app). */
+export function codeFromLink(link: string): string | null {
+  const m = /^banime:\/\/join\/?([A-Za-z0-9_-]+)/.exec(link.trim()) ?? /\/join\/?#([A-Za-z0-9_-]+)/.exec(link.trim());
+  return m ? m[1] : null;
+}
 
 /**
  * Watch together: the room this device is in, who's there, and what the room is playing.
@@ -20,8 +36,12 @@ export const watchStore = createRoot(() => {
   /** False in the lobby: everyone gathers and gets ready, then the host starts. */
   const [started, setStarted] = createSignal(false);
   /** What the room is on: the last state from the room or sent from here. */
-  const [nowPlaying, setNowPlaying] = createSignal<Omit<PlayState, "by"> | null>(null);
+  const [nowPlaying, setNowPlaying] = createSignal<OwnState | null>(null);
   const [busy, setBusy] = createSignal<"host" | "join" | null>(null);
+  /** The link to the room dropped and this device is getting back in. */
+  const [reconnecting, setReconnecting] = createSignal(false);
+  /** A room code from an invite link, waiting for the Together page to join it. */
+  const [invite, setInvite] = createSignal<string | null>(null);
 
   void watchRoom().then((r) => r && setRoom(r)).catch(() => {});
   void onEvent<PlayState>("watch-state", (s) => {
@@ -29,20 +49,56 @@ export const watchStore = createRoot(() => {
     setNowPlaying(s);
   });
   void onEvent<Roster>("watch-roster", (r) => {
+    announceChanges(members(), r.members);
     setMembers(r.members);
     setStarted(r.started);
   });
+  void onEvent<RoomInfo>("watch-info", (info) => {
+    const was = room();
+    setRoom(info);
+    if (info.host && !was?.host) homeStore.notify("The host left. You're hosting the room now.");
+    else if (was && info.code !== was.code) homeStore.notify("The host left. The room carries on with a new host.");
+  });
+  void onEvent<"reconnecting" | "connected">("watch-link", (state) => setReconnecting(state === "reconnecting"));
   const reset = () => {
     setRoom(null);
     setMembers([]);
     setRemote(null);
     setStarted(false);
     setNowPlaying(null);
+    setReconnecting(false);
   };
   void onEvent<string>("watch-closed", (reason) => {
     reset();
     homeStore.notify(reason);
   });
+
+  /** "Sam joined", "Sam left": the room's comings and goings, as notices. */
+  function announceChanges(before: RoomMember[], after: RoomMember[]) {
+    const me = room()?.me;
+    if (!before.length || !me) return;
+    const was = new Set(before.map((m) => m.id));
+    const now = new Set(after.map((m) => m.id));
+    for (const m of after) if (!was.has(m.id) && m.id !== me) homeStore.notify(`${m.name} joined the room.`);
+    for (const m of before) if (!now.has(m.id) && m.id !== me && !m.host) homeStore.notify(`${m.name} left the room.`);
+  }
+
+  // Invite links: banime://join/<code> opens (or is handed to) B-Anime.
+  if (inTauri) {
+    void (async () => {
+      try {
+        const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+        const take = (urls: string[] | null) => {
+          const code = urls?.map(codeFromLink).find(Boolean);
+          if (code) setInvite(code);
+        };
+        take(await getCurrent());
+        await onOpenUrl(take);
+      } catch {
+        /* the plugin isn't available (a browser preview) */
+      }
+    })();
+  }
 
   const savedName = () => {
     try {
@@ -80,20 +136,31 @@ export const watchStore = createRoot(() => {
   };
   const join = (code: string, name: string) => {
     rememberName(name);
-    return enter("join", () => watchJoin(code.trim(), name || "Guest"));
+    const c = codeFromLink(code) ?? code.trim();
+    return enter("join", () => watchJoin(c, name || "Guest"));
   };
-  const leave = async () => {
+  /** Leaves; a host ends the room for everyone (`end`) or hands it to the next guest. */
+  const leave = async (end = false) => {
     reset();
-    await watchLeave().catch(() => {});
+    await watchLeave(end).catch(() => {});
   };
   /** This device in the member list. */
   const me = () => members().find((m) => m.id === room()?.me);
   const setReady = (ready: boolean) => void watchReady(ready).catch((e) => homeStore.notify(errorText(e)));
   const start = () => void watchStart().catch((e) => homeStore.notify(errorText(e)));
+  /** Whether this device can play the room's episode (null: still checking), and with what. */
+  let lastCheck = "";
+  const check = (playable: boolean | null, source: string | null) => {
+    const key = `${playable}|${source}`;
+    if (!room() || key === lastCheck) return;
+    lastCheck = key;
+    void watchCheck(playable, source).catch(() => {});
+  };
+  createEffect(on(room, () => (lastCheck = "")));
 
   /** The episode this device switched to itself, and when: the room's older state is ignored for a moment. */
   let ownSwitch: { mediaId: number; episode: number; at: number } | null = null;
-  const send = (s: Omit<PlayState, "by">) => {
+  const send = (s: OwnState) => {
     if (!room()) return;
     setNowPlaying(s);
     void watchSendState({ ...s, by: "" }).catch(() => {});
@@ -111,8 +178,8 @@ export const watchStore = createRoot(() => {
     (s.mediaId !== ownSwitch.mediaId || s.episode !== ownSwitch.episode);
 
   return {
-    room, members, remote, started, nowPlaying, busy, me, defaultName,
-    host, join, leave, setReady, start, send, status, markOwnSwitch, staleForSwitch,
+    room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
+    host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch,
   };
 });
 
@@ -120,11 +187,14 @@ export const watchStore = createRoot(() => {
 const JUMP = 1.5;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** Someone loading this long pauses the room (the host's player does it) until they catch up. */
+const WAIT_FOR = 2000;
 
 /**
  * Keeps a player in step with the room. Local play, pause and seeks go to the room; the room's
  * changes are applied here. The host also reports its position every 2 s, which guests use to
- * correct drift: small gaps by nudging the playback rate, large ones by jumping.
+ * correct drift: small gaps by nudging the playback rate, large ones by jumping. And the host
+ * pauses everyone while someone is loading, and plays again once they've caught up.
  */
 export function syncPlayer(opts: {
   video: () => HTMLVideoElement | undefined;
@@ -133,6 +203,8 @@ export function syncPlayer(opts: {
   title: () => string;
   dub: () => boolean;
   waiting: () => boolean;
+  /** The extension this device plays the show with (the host offers it to the others). */
+  source: () => SourceRef | null;
 }) {
   const w = watchStore;
   /** Events caused by applying the room's state aren't sent back to it. */
@@ -140,7 +212,7 @@ export function syncPlayer(opts: {
   let rateReset: number | undefined;
   let pending: RemoteState | null = null;
 
-  const current = (): Omit<PlayState, "by"> | null => {
+  const current = (): OwnState | null => {
     const v = opts.video();
     if (!v || !(v.readyState >= 1)) return null;
     return {
@@ -150,6 +222,7 @@ export function syncPlayer(opts: {
       dub: opts.dub(),
       position: v.currentTime,
       playing: !v.paused,
+      source: w.room()?.host ? opts.source() : null,
     };
   };
   const sendNow = () => {
@@ -169,6 +242,8 @@ export function syncPlayer(opts: {
       if (s) w.send({ ...s, playing: false });
       return;
     }
+    // A play by hand ends a wait for someone loading (they'll catch up by jumping).
+    if (v && !v.paused) waitingFor = null;
     const s = current();
     if (s) w.send(s);
   };
@@ -216,6 +291,41 @@ export function syncPlayer(opts: {
     }),
   );
 
+  // Wait for everyone (the host's player): someone loading for WAIT_FOR pauses the room; once
+  // nobody is, it plays again (only if it was this wait that paused it).
+  let waitingFor: string | null = null;
+  let waitTimer: number | undefined;
+  const loadingOthers = () => w.members().filter((m) => m.buffering && m.id !== w.room()?.me);
+  createEffect(
+    on(loadingOthers, (loading) => {
+      const v = opts.video();
+      if (!w.room()?.host || !w.started() || !v) return;
+      clearTimeout(waitTimer);
+      if (loading.length) {
+        if (waitingFor || v.paused) return;
+        waitTimer = window.setTimeout(() => {
+          const still = loadingOthers();
+          if (!still.length || v.paused) return;
+          waitingFor = still.map((m) => m.name).join(", ");
+          v.pause(); // the pause goes to the room like any other
+          homeStore.notify(`Waiting for ${waitingFor} to load…`);
+        }, WAIT_FOR);
+      } else if (waitingFor) {
+        waitingFor = null;
+        void v.play().catch(() => {});
+      }
+    }),
+  );
+  onCleanup(() => clearTimeout(waitTimer));
+
+  const reportStatus = () => {
+    const v = opts.video();
+    if (v && w.room()) w.status(v.currentTime, opts.waiting());
+  };
+  // Loading starts and ends reach the room at once (not just with the 2 s report), so waits
+  // for someone start and end promptly. After the Player has updated `waiting`.
+  const statusSoon = () => queueMicrotask(reportStatus);
+
   const attach = (v: HTMLVideoElement) => {
     const onReady = () => {
       if (pending) apply(pending);
@@ -228,11 +338,17 @@ export function syncPlayer(opts: {
     v.addEventListener("play", sendNow);
     v.addEventListener("pause", sendNow);
     v.addEventListener("seeked", sendNow);
+    v.addEventListener("waiting", statusSoon);
+    v.addEventListener("playing", statusSoon);
+    v.addEventListener("canplay", statusSoon);
     onCleanup(() => {
       v.removeEventListener("loadedmetadata", onReady);
       v.removeEventListener("play", sendNow);
       v.removeEventListener("pause", sendNow);
       v.removeEventListener("seeked", sendNow);
+      v.removeEventListener("waiting", statusSoon);
+      v.removeEventListener("playing", statusSoon);
+      v.removeEventListener("canplay", statusSoon);
       clearTimeout(rateReset);
     });
   };
@@ -240,9 +356,7 @@ export function syncPlayer(opts: {
   // The host's regular position (guests correct drift from it) and everyone's status.
   const tick = window.setInterval(() => {
     if (!w.room()) return;
-    const v = opts.video();
-    if (!v) return;
-    w.status(v.currentTime, opts.waiting());
+    reportStatus();
     const s = current();
     if (w.room()?.host && s && performance.now() >= quietUntil) w.send(s);
   }, 2000);

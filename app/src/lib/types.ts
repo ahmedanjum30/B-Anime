@@ -353,6 +353,14 @@ export interface HomeData {
 }
 
 // ── Watch together ──
+/** An extension someone plays with, so others can install the same one. */
+export interface SourceRef {
+  id: string;
+  name: string;
+  /** Its manifest URL. */
+  url: string;
+}
+
 /** What a watch-together room is playing. */
 export interface PlayState {
   mediaId: number;
@@ -364,6 +372,8 @@ export interface PlayState {
   playing: boolean;
   /** Who made the change. */
   by: string;
+  /** The host's source for the show (offered to those whose sources can't play it). */
+  source?: SourceRef | null;
 }
 
 export interface RoomMember {
@@ -374,6 +384,14 @@ export interface RoomMember {
   buffering: boolean;
   /** Said they're ready to start (the lobby). */
   ready: boolean;
+  /** Whether they can play the room's episode; null while checking. */
+  playable: boolean | null;
+  /** What they play it with: an extension's name, or "Library". */
+  source: string | null;
+  /** Their link to the host: direct (true) or relayed (false); null for the host. */
+  direct: boolean | null;
+  /** Round trip to the host in ms; null for the host. */
+  rttMs: number | null;
 }
 
 /** Who's in the room, and whether the host has started it (false: the lobby). */

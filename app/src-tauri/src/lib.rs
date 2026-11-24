@@ -598,10 +598,32 @@ pub fn run() {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Desktop: one B-Anime at a time. Opening a banime:// link (an invite) while it runs hands
+    // the link to the running copy (which receives it as a deep link) and brings it forward.
+    // First, as the plugin asks.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // banime:// links (Watch together invites). Phones declare the scheme in the app's
+            // manifest; Windows and Linux need it registered, which is redone at every launch so
+            // it always points at this copy (installed or a development build).
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    tracing::warn!(error = %e, "couldn't register banime:// links");
+                }
+            }
             // Phones have no OS config folder: use the app's private storage there.
             #[cfg(mobile)]
             let paths = AppPaths::resolve(Some(app.path().app_data_dir()?))?;
@@ -702,6 +724,7 @@ pub fn run() {
             watch::watch_send_status,
             watch::watch_ready,
             watch::watch_start,
+            watch::watch_check,
             list_extensions,
             preview_extension,
             install_extension,

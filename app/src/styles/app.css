@@ -2441,6 +2441,67 @@ a.slot:focus-visible {
   color: var(--red);
   font-weight: 600;
 }
+/* The link to the room dropped: shown until it's back. */
+.together-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  margin-bottom: calc(var(--u) * 2);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--amber, #d9a441) 50%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--amber, #d9a441) 10%, var(--z1));
+  font-size: 13px;
+  color: var(--z10);
+}
+.watch-code-row {
+  flex-wrap: wrap;
+}
+/* Can this device play the room's episode: a line under the pick, with fixes when it can't. */
+.together-check {
+  margin-top: var(--u);
+  padding: 10px 12px;
+  border-left: 2px solid var(--z4);
+  font-size: 13px;
+  color: var(--z8);
+}
+.together-check[data-state="ok"] {
+  border-left-color: var(--teal);
+}
+.together-check[data-state="bad"] {
+  border-left-color: var(--red);
+  color: var(--z10);
+}
+.together-check-fix {
+  margin-top: var(--u);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u);
+}
+.watch-member-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--z8);
+}
+.watch-member-check[data-bad] {
+  color: var(--red);
+}
+.watch-member-link[data-slow] {
+  color: var(--amber, #d9a441);
+}
+.together-end {
+  color: var(--red);
+}
+/* The show page's Watch together, under the titles. */
+.show-together {
+  margin-top: calc(var(--u) * 1.5);
+  align-self: flex-start;
+}
+
 /* The People section sits clear of the picker above it. */
 .together-page .section + .section {
   margin-top: calc(var(--u) * 5);

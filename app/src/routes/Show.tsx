@@ -9,10 +9,11 @@ import { createSource } from "../lib/source";
 import { recallDub, rememberDub } from "../lib/dub";
 import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
-import { ArrowLeft, ExternalLink } from "../lib/icons";
+import { ArrowLeft, ExternalLink, Users } from "../lib/icons";
 import { errorText, getMedia, getPlayerPrefs, inTauri, openAniList } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
+import { watchStore } from "../lib/watch";
 import { createEntrySaver } from "../lib/entry";
 import type { Media, MediaRef } from "../lib/types";
 
@@ -90,6 +91,37 @@ export default function Show() {
     notify,
   });
 
+  /**
+   * Watch together from here: opens a room (or uses the one this device hosts) with this show's
+   * next episode picked, then goes to the room. Guests don't pick; the host does.
+   */
+  const [opening, setOpening] = createSignal(false);
+  const watchTogether = async (m: Media) => {
+    const w = watchStore;
+    if (w.room() && !w.room()!.host) return navigate("/together");
+    setOpening(true);
+    try {
+      if (!w.room() && !(await w.host(w.defaultName().trim()))) return;
+      const entry = page()?.listEntry;
+      const last = m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : (m.episodes ?? Infinity);
+      const episode =
+        !entry || entry.status === "PLANNING" || entry.status === "COMPLETED" ? 1 : Math.max(1, Math.min(entry.progress + 1, last));
+      const e = source.usable().find((x) => x.id === source.ext());
+      w.send({
+        mediaId: m.id,
+        episode,
+        title: m.title.userPreferred,
+        dub: dub(),
+        position: 0,
+        playing: false,
+        source: e && /^https:\/\//.test(e.sourceUrl) ? { id: e.id, name: e.name, url: e.sourceUrl } : null,
+      });
+      navigate("/together");
+    } finally {
+      setOpening(false);
+    }
+  };
+
   // Related links reuse this page: start each show collapsed and at the top.
   const [expanded, setExpanded] = createSignal(false);
   createEffect(
@@ -145,6 +177,18 @@ export default function Show() {
                       <p class="show-meta num">{metaLine(m())}</p>
                       <When when={m().genres.length}>
                         <p class="show-genres">{m().genres.join(" · ")}</p>
+                      </When>
+                      <When when={inTauri && m().type === "ANIME" && !(watchStore.room() && !watchStore.room()!.host)}>
+                        <button
+                          type="button"
+                          class="btn btn-sm show-together"
+                          disabled={opening()}
+                          title="Watch this with friends: everyone plays it from their own source, in step"
+                          onClick={() => void watchTogether(m())}
+                        >
+                          <Users size={16} stroke-width={1.75} aria-hidden="true" />
+                          {opening() ? "Opening a room…" : watchStore.room() ? "Watch this together" : "Watch together"}
+                        </button>
                       </When>
                     </div>
 

@@ -43,6 +43,8 @@ export default function Shell(props: ParentProps) {
     }),
   );
   createEffect(on(watchStore.room, () => (followed = "")));
+  // An invite link was opened: the Together page joins it.
+  createEffect(on(watchStore.invite, (code) => code && location.pathname !== "/together" && navigate("/together")));
   // The host pressed Start: everyone not on the episode yet goes to it (it plays when loaded).
   createEffect(
     on(watchStore.started, (started, was) => {

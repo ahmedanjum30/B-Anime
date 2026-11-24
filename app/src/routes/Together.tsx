@@ -1,12 +1,13 @@
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
-import { getLibrary } from "../lib/api";
+import { errorText, getLibrary, getMedia, installExtension, localEpisodes } from "../lib/api";
 import { recallDub } from "../lib/dub";
 import { Copy, Search } from "../lib/icons";
+import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { LibraryEntry, ListStatus } from "../lib/types";
-import { watchStore } from "../lib/watch";
+import { inviteLink, watchStore } from "../lib/watch";
 
 const TABS: [ListStatus, string][] = [
   ["CURRENT", "Watching"],
@@ -38,7 +39,8 @@ export default function Together() {
 
   const isHost = () => !!w.room()?.host;
   const others = () => w.members().filter((m) => m.id !== w.room()?.me);
-  const allReady = () => w.members().length > 1 && w.members().every((m) => m.ready);
+  const allReady = () => w.members().length > 1 && w.members().every((m) => m.ready && m.playable !== false);
+  const cantPlay = () => w.members().filter((m) => m.playable === false);
   const watchPath = () => {
     const p = w.nowPlaying();
     return p ? `/watch/${p.mediaId}/${p.episode}${p.dub ? "?dub=1" : ""}` : null;
@@ -66,16 +68,31 @@ export default function Together() {
     return Math.max(1, Math.min(e.progress + 1, last));
   };
 
-  const copy = async () => {
+  const copy = async (what: "link" | "code") => {
     const c = w.room()?.code;
     if (!c) return;
     try {
-      await navigator.clipboard.writeText(c);
-      homeStore.notify("Room code copied. Send it to whoever's joining.");
+      await navigator.clipboard.writeText(what === "link" ? inviteLink(c) : c);
+      homeStore.notify(
+        what === "link"
+          ? "Invite link copied. Opening it brings people straight into the room."
+          : "Room code copied. Send it to whoever's joining.",
+      );
     } catch {
-      homeStore.notify("Couldn't copy the code. Select it and copy it instead.");
+      homeStore.notify("Couldn't copy. Select it and copy it instead.");
     }
   };
+  // An invite link was opened: join it (once a name is known, which it usually is).
+  createEffect(
+    on(w.invite, (inv) => {
+      if (!inv || w.busy()) return;
+      w.setInvite(null);
+      if (w.room()?.code === inv) return;
+      setCode(inv);
+      void w.join(inv, name().trim());
+    }),
+  );
+  const [leaving, setLeaving] = createSignal(false);
   /** The host moves the room to another episode of the same show (everyone opens it, paused). */
   const setEpisode = (n: number) => {
     const p = w.nowPlaying();
@@ -149,12 +166,21 @@ export default function Together() {
                 {w.started() ? "Watching" : "Lobby"}
               </h2>
 
+              <Show when={w.reconnecting()}>
+                <p class="together-banner" role="status">
+                  <i class="spin-dot" aria-hidden="true" /> Connection to the room dropped. Getting back in…
+                </p>
+              </Show>
+
               <div class="watch-code">
-                <span class="watch-label">{room().host ? "Room code: send it to whoever's joining" : "Room code"}</span>
+                <span class="watch-label">Invite people: the link opens B-Anime straight into this room</span>
                 <div class="watch-code-row">
-                  <code class="watch-code-text" title={room().code}>{room().code}</code>
-                  <button type="button" class="btn btn-sm" onClick={() => void copy()}>
-                    <Copy size={14} stroke-width={1.75} aria-hidden="true" /> Copy
+                  <code class="watch-code-text" title={inviteLink(room().code)}>{inviteLink(room().code)}</code>
+                  <button type="button" class="btn btn-sm btn-primary" onClick={() => void copy("link")}>
+                    <Copy size={14} stroke-width={1.75} aria-hidden="true" /> Copy link
+                  </button>
+                  <button type="button" class="btn btn-sm btn-quiet" onClick={() => void copy("code")}>
+                    Copy code
                   </button>
                 </div>
               </div>
@@ -182,6 +208,10 @@ export default function Together() {
                   )}
                 </Show>
               </div>
+
+              <Show when={w.nowPlaying()?.mediaId} keyed>
+                {(mediaId) => <RoomCheck mediaId={mediaId} />}
+              </Show>
 
               {/* The host changes the pick: another episode of this show, or another show. */}
               <Show when={room().host}>
@@ -325,7 +355,7 @@ export default function Together() {
                 People <small class="num">{w.members().length}</small>
               </h2>
               <Show when={!others().length}>
-                <p class="together-hint">Nobody else yet. Send them the room code.</p>
+                <p class="together-hint">Nobody else yet. Send them the invite link.</p>
               </Show>
               <ul class="watch-list">
                 <For each={w.members()}>
@@ -336,6 +366,23 @@ export default function Together() {
                         <Show when={m.id === room().me}> <span class="watch-you">(you)</span></Show>
                       </span>
                       <Show when={m.host}><span class="ext-tag watch-host-tag">Host</span></Show>
+                      <span class="watch-member-meta">
+                        <Show when={m.playable !== null || w.nowPlaying()}>
+                          <span class="watch-member-check" data-bad={m.playable === false ? "" : undefined}>
+                            {m.playable === null ? "Checking…" : m.playable ? m.source ?? "Can play" : "Can't play this"}
+                          </span>
+                        </Show>
+                        <Show when={m.direct !== null}>
+                          <span
+                            class="watch-member-link num"
+                            data-slow={(m.rttMs ?? 0) > 250 ? "" : undefined}
+                            title={m.direct ? "Connected directly" : "Connected through a relay (encrypted)"}
+                          >
+                            {m.direct ? "Direct" : "Relay"}
+                            <Show when={m.rttMs !== null}> · {m.rttMs} ms</Show>
+                          </span>
+                        </Show>
+                      </span>
                       <span class="watch-member-state num" data-ready={!w.started() && m.ready ? "" : undefined}>
                         {w.started() ? (m.buffering ? "Loading…" : clock(m.position)) : m.ready ? "Ready" : "Not ready"}
                       </span>
@@ -364,26 +411,148 @@ export default function Together() {
                       title={!w.nowPlaying() ? "Pick an episode first" : undefined}
                       onClick={start}
                     >
-                      {allReady() || !others().length ? "Start" : "Start anyway"}
+                      {allReady() || (!others().length && w.me()?.playable !== false) ? "Start" : "Start anyway"}
                     </button>
                   </Show>
                 </Show>
-                <button type="button" class="btn btn-quiet" onClick={() => void w.leave()}>
-                  {room().host ? "End the room" : "Leave the room"}
-                </button>
+                <Show
+                  when={room().host && others().length}
+                  fallback={
+                    <button type="button" class="btn btn-quiet" onClick={() => void w.leave(true)}>
+                      {room().host ? "End the room" : "Leave the room"}
+                    </button>
+                  }
+                >
+                  {/* With others in it, a host can leave the room to them, or end it for everyone. */}
+                  <button
+                    type="button"
+                    class="btn btn-quiet"
+                    disabled={leaving()}
+                    title={`${others()[0]?.name ?? "The next person"} hosts from here`}
+                    onClick={() => {
+                      setLeaving(true);
+                      void w.leave(false).finally(() => setLeaving(false));
+                    }}
+                  >
+                    Leave (hand over)
+                  </button>
+                  <button type="button" class="btn btn-quiet together-end" disabled={leaving()} onClick={() => void w.leave(true)}>
+                    End for everyone
+                  </button>
+                </Show>
               </div>
               <Show when={!w.started()}>
                 <p class="together-hint">
                   {isHost()
                     ? allReady()
                       ? "Everyone's ready."
-                      : "Start lights up when everyone's ready. You can start anyway."
+                      : cantPlay().length
+                        ? `${cantPlay().map((m) => m.name).join(", ")} can't play this episode yet.`
+                        : "Start lights up when everyone's ready. You can start anyway."
                     : "The host starts the episode once everyone's ready."}
                 </p>
               </Show>
             </section>
           </>
         )}
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * Can this device play the room's episode? From the library, or through a source match that
+ * lists the episode. Tells the room (the others see it), and when it can't: change source,
+ * fix the match, or install the host's source.
+ */
+function RoomCheck(props: { mediaId: number }) {
+  const w = watchStore;
+  const [page] = createResource(() => props.mediaId, getMedia);
+  const [localEps] = createResource(() => props.mediaId, (id) => localEpisodes(id).catch(() => [] as number[]));
+  const episode = () => w.nowPlaying()?.episode ?? 1;
+  const dub = () => !!w.nowPlaying()?.dub;
+  const source = createSource(() => page()?.media, undefined, dub);
+  const extName = () => source.usable().find((e) => e.id === source.ext())?.name ?? null;
+  const hostSource = () => w.nowPlaying()?.source ?? null;
+  const hasHostSource = () => !!hostSource() && source.usable().some((e) => e.id === hostSource()!.id);
+  const [installing, setInstalling] = createSignal(false);
+
+  /** true / false, or null while checking. */
+  const result = createMemo<{ playable: boolean | null; via: string | null; why?: string }>(() => {
+    if (localEps()?.includes(episode())) return { playable: true, via: "Library" };
+    if (page.loading || localEps.loading || source.exts.loading) return { playable: null, via: null };
+    if (!source.usable().length) return { playable: false, via: null, why: "No anime source installed." };
+    const m = source.match();
+    if (source.match.loading || (!m && !source.match.error)) return { playable: null, via: extName() };
+    if (source.match.error) return { playable: false, via: extName(), why: `${extName()} isn't answering.` };
+    if (m?.status !== "matched") return { playable: false, via: extName(), why: `${extName()} didn't find this show.` };
+    if (source.items.loading) return { playable: null, via: extName() };
+    if (!source.byNumber().has(episode()))
+      return { playable: false, via: extName(), why: `${extName()} doesn't have episode ${episode()}.` };
+    return { playable: true, via: extName() };
+  });
+  createEffect(() => {
+    const r = result();
+    w.check(r.playable, r.via);
+  });
+  // The host's working source goes with the room's pick (in the lobby), so guests who can't
+  // play it can install the same one.
+  createEffect(() => {
+    const r = result();
+    const p = w.nowPlaying();
+    const e = source.usable().find((x) => x.id === source.ext());
+    if (!w.room()?.host || w.started() || !p || r.playable !== true || r.via === "Library" || !e) return;
+    if (!/^https:\/\//.test(e.sourceUrl) || p.source?.id === e.id) return;
+    w.send({ ...p, source: { id: e.id, name: e.name, url: e.sourceUrl } });
+  });
+
+  const installHost = async () => {
+    const h = hostSource();
+    if (!h) return;
+    setInstalling(true);
+    try {
+      await installExtension(h.url);
+      await source.reloadExts();
+      source.setExt(h.id);
+      homeStore.notify(`Installed ${h.name}.`);
+    } catch (e) {
+      homeStore.notify(errorText(e));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div class="together-check" data-state={result().playable === null ? "checking" : result().playable ? "ok" : "bad"}>
+      <p class="together-check-line">
+        {result().playable === null
+          ? `Checking you can play it${result().via ? ` on ${result().via}` : ""}…`
+          : result().playable
+            ? `You can play it${result().via ? ` from ${result().via === "Library" ? "your library" : result().via}` : ""}.`
+            : `You can't play it yet. ${result().why ?? ""}`}
+      </p>
+      <Show when={result().playable === false}>
+        <div class="together-check-fix">
+          <Show when={source.usable().length > 1}>
+            <label class="select select-sm">
+              <span class="select-label">Source</span>
+              <select value={source.ext() ?? ""} onChange={(e) => source.setExt(e.currentTarget.value)}>
+                <For each={source.usable()}>{(e) => <option value={e.id}>{e.name}</option>}</For>
+              </select>
+            </label>
+          </Show>
+          <Show when={hostSource() && !hasHostSource()}>
+            <button type="button" class="btn btn-sm btn-primary" disabled={installing()} onClick={() => void installHost()}>
+              {installing() ? "Installing…" : `Install ${hostSource()!.name} (the host's source)`}
+            </button>
+          </Show>
+          <Show when={source.usable().length}>
+            <A class="btn btn-sm btn-quiet" href={`/show/${props.mediaId}`}>Fix the match</A>
+          </Show>
+          <Show when={!source.usable().length && !hostSource()}>
+            <A class="btn btn-sm btn-quiet" href="/extensions">Get a source</A>
+          </Show>
+        </div>
       </Show>
     </div>
   );
