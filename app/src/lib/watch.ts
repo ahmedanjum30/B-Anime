@@ -219,7 +219,9 @@ export function syncPlayer(opts: {
       mediaId: opts.mediaId(),
       episode: opts.episode(),
       title: opts.title(),
-      dub: opts.dub(),
+      // The host sets the room's starting Sub or Dub; switching audio in your own player later
+      // is yours alone, so the room keeps its setting.
+      dub: w.nowPlaying()?.dub ?? opts.dub(),
       position: v.currentTime,
       playing: !v.paused,
       source: w.room()?.host ? opts.source() : null,

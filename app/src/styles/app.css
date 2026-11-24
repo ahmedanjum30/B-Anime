@@ -2316,6 +2316,14 @@ a.slot:focus-visible {
 .together-hint {
   margin-top: calc(var(--u) * 1.5);
 }
+/* The room's audio and subtitles (host, in the lobby). */
+.together-av {
+  margin-top: calc(var(--u) * 1.5);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u);
+}
 .together-edit {
   margin-top: calc(var(--u) * 1.5);
   display: flex;
@@ -3071,6 +3079,36 @@ a.slot:focus-visible {
 }
 .player-message p {
   max-width: 52ch;
+}
+/* Touch screens: a play/pause button in the middle, with the other controls. */
+.player-center {
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .player-center {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 2;
+    width: 72px;
+    height: 72px;
+    margin: -36px 0 0 -36px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgb(0 0 0 / 0.45);
+    color: #fff;
+    transition: opacity var(--t-med) var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .player-center:active {
+    background: rgb(0 0 0 / 0.6);
+  }
+  .player.is-idle .player-center {
+    opacity: 0;
+    pointer-events: none;
+  }
 }
 .player-spinner {
   position: absolute;

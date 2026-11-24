@@ -7,6 +7,7 @@ import {
 } from "../lib/api";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 import { homeStore } from "../lib/store";
+import { SUB_LANGS } from "../lib/langs";
 import type { MediaCard, PlayerChoice, UnmatchedGroup } from "../lib/types";
 
 type Busy = null | "login" | "logout";
@@ -445,19 +446,6 @@ function PlaybackPrefs() {
   );
 }
 
-const SUB_LANGS: [string, string][] = [
-  ["en", "English"],
-  ["off", "Off"],
-  ["es", "Spanish"],
-  ["pt", "Portuguese"],
-  ["fr", "French"],
-  ["de", "German"],
-  ["it", "Italian"],
-  ["ar", "Arabic"],
-  ["id", "Indonesian"],
-  ["ru", "Russian"],
-  ["ja", "Japanese"],
-];
 
 function About() {
   const { update, refetchUpdate } = homeStore;

@@ -1,7 +1,8 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
-import { errorText, getLibrary, getMedia, installExtension, localEpisodes } from "../lib/api";
+import { errorText, getLibrary, getMedia, getPlayerPrefs, installExtension, localEpisodes } from "../lib/api";
+import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search } from "../lib/icons";
 import { createSource } from "../lib/source";
@@ -100,6 +101,14 @@ export default function Together() {
     w.send({ ...p, episode: n, position: 0, playing: false });
   };
   const [epDraft, setEpDraft] = createSignal("");
+  // The room's audio and subtitles (the host sets them; everyone's player follows).
+  const [prefs] = createResource(getPlayerPrefs);
+  const roomSubs = () => w.nowPlaying()?.subs ?? prefs()?.subtitles ?? "en";
+  const setRoom = (change: { dub?: boolean; subs?: string }) => {
+    const p = w.nowPlaying();
+    if (!p) return;
+    w.send({ ...p, ...change, subs: change.subs ?? roomSubs(), position: change.dub === undefined ? p.position : 0, playing: false });
+  };
   const start = () => {
     w.start();
     const path = watchPath();
@@ -201,7 +210,10 @@ export default function Together() {
                       <div class="together-now-text">
                         <span class="watch-label">{w.started() ? "Now watching" : "Up first"}</span>
                         <p class="together-now-title">{p().title || "An episode"}</p>
-                        <p class="together-now-ep num">Episode {p().episode}</p>
+                        <p class="together-now-ep num">
+                          Episode {p().episode} · {p().dub ? "Dub" : "Sub"} ·{" "}
+                          {roomSubs() === "off" ? "No subtitles" : `${subLangName(roomSubs())} subtitles`}
+                        </p>
                       </div>
                       <A class="btn btn-sm" href={watchPath()!}>Go to the episode</A>
                     </>
@@ -215,6 +227,24 @@ export default function Together() {
 
               {/* The host changes the pick: another episode of this show, or another show. */}
               <Show when={room().host}>
+                <Show when={w.nowPlaying() && !w.started()}>
+                  <div class="together-av">
+                    <div class="segmented segmented-sm" role="group" aria-label="Audio">
+                      <button type="button" aria-pressed={!w.nowPlaying()!.dub} onClick={() => setRoom({ dub: false })}>
+                        Sub
+                      </button>
+                      <button type="button" aria-pressed={!!w.nowPlaying()!.dub} onClick={() => setRoom({ dub: true })}>
+                        Dub
+                      </button>
+                    </div>
+                    <label class="select select-sm">
+                      <span class="select-label">Subtitles</span>
+                      <select value={roomSubs()} onChange={(e) => setRoom({ subs: e.currentTarget.value })}>
+                        <For each={SUB_LANGS}>{([code, label]) => <option value={code}>{label}</option>}</For>
+                      </select>
+                    </label>
+                  </div>
+                </Show>
                 <div class="together-edit">
                   <Show when={w.nowPlaying()}>
                     {(p) => (

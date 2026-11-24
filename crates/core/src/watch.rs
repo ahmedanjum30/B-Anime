@@ -127,6 +127,10 @@ pub struct PlayState {
     /// The host's source for the show, offered to guests whose own sources can't play it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceRef>,
+    /// The room's subtitle language (a code like "en", or "off"), set by the host; everyone's
+    /// player picks it instead of their own default. None in a change: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subs: Option<String>,
 }
 
 /// Whether someone can play the room's episode, and with what.
@@ -376,12 +380,18 @@ impl HostState {
     /// host starts playback, and picking another episode there asks everyone to get ready again
     /// (and to check it again). Returns the state as the room keeps it.
     fn adopt(&mut self, mut state: PlayState, from_guest: bool) -> PlayState {
-        // The host's source stays offered when a guest's change doesn't name one.
+        // The host's source and the room's subtitles stay when a change doesn't name them.
         if state.source.is_none() {
             state.source = self.state.as_ref().and_then(|s| s.source.clone());
         }
-        let other_episode =
-            self.state.as_ref().is_none_or(|s| s.media_id != state.media_id || s.episode != state.episode);
+        if state.subs.is_none() {
+            state.subs = self.state.as_ref().and_then(|s| s.subs.clone());
+        }
+        // Sub or Dub is part of the pick: a source may have one and not the other.
+        let other_episode = self
+            .state
+            .as_ref()
+            .is_none_or(|s| s.media_id != state.media_id || s.episode != state.episode || s.dub != state.dub);
         if !self.started {
             if state.playing {
                 if from_guest {
@@ -953,6 +963,7 @@ mod tests {
             playing: true,
             by: "x".into(),
             source: Some(SourceRef { id: "src".into(), name: "Src".into(), url: "https://example.com/m.json".into() }),
+            subs: Some("en".into()),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""t":"state""#), "{json}");
@@ -1010,7 +1021,7 @@ mod tests {
     }
 
     fn play(position: f64, playing: bool) -> PlayState {
-        PlayState { media_id: 1, episode: 2.0, title: String::new(), dub: false, position, playing, by: String::new(), source: None }
+        PlayState { media_id: 1, episode: 2.0, title: String::new(), dub: false, position, playing, by: String::new(), source: None, subs: None }
     }
 
     /// Real network (iroh's relays): `cargo test -p banime-core -- --ignored live_room`.

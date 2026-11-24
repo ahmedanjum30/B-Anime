@@ -374,6 +374,8 @@ export interface PlayState {
   by: string;
   /** The host's source for the show (offered to those whose sources can't play it). */
   source?: SourceRef | null;
+  /** The room's subtitle language ("en", … or "off"), set by the host. */
+  subs?: string | null;
 }
 
 export interface RoomMember {

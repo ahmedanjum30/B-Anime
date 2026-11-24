@@ -514,9 +514,12 @@ export default function Player() {
     const showing = list.findIndex((t) => t.mode === "showing");
     if (showing >= 0) setActiveTrack(showing);
     else if (!autoPicked && list.length) {
-      // The preferred subtitle language (Settings → Playback); "off" shows none. Full subtitles
-      // beat forced / signs-only tracks in the same language.
-      const want = prefs()?.subtitles ?? "en";
+      // The preferred subtitle language (Settings → Playback), or in a Watch together room the
+      // one its host chose; "off" shows none. Full subtitles beat forced / signs-only tracks in
+      // the same language.
+      const room = watchStore.room() ? watchStore.nowPlaying() : null;
+      const roomSubs = room && room.mediaId === mediaId() && room.episode === episode() ? room.subs : null;
+      const want = roomSubs ?? prefs()?.subtitles ?? "en";
       const matching = want === "off" ? [] : list.filter((t) => langMatches(t.language, t.label, want));
       const best = matching.find((t) => !/forced|signs|songs/i.test(t.label)) ?? matching[0];
       chooseTrack(best ? list.indexOf(best) : -1, false);
@@ -825,10 +828,11 @@ export default function Player() {
   const toggle = () => (video.paused ? void video.play() : video.pause());
   const seekBy = (d: number) => (video.currentTime = Math.max(0, Math.min(duration(), video.currentTime + d)));
 
-  // ── Double-tap to seek (touch screens)
-  // A quick second tap on the right side jumps 10 s ahead, on the left 10 s back; more taps keep
-  // adding. A tap on a side waits a moment for a second one before it pauses or plays; the middle
-  // answers at once.
+  // ── Taps on the picture (touch screens)
+  // A tap shows the controls, or hides them if they're up: it never pauses, so the controls can
+  // be used without stopping the episode (pausing is the big button in the middle). A quick
+  // second tap on the right side jumps 10 s ahead, on the left 10 s back; more taps keep adding.
+  // A tap on a side waits a moment for a second one; the middle answers at once.
   const TAP_SECONDS = 10;
   const DOUBLE_TAP_MS = 300;
   const [tapSeek, setTapSeek] = createSignal<{ side: "l" | "r"; total: number } | null>(null);
@@ -861,8 +865,18 @@ export default function Player() {
     }
     tapChain = side ? { side, at: now } : null;
     clearTimeout(tapTimer);
-    tapTimer = window.setTimeout(() => (menu() ? setMenu(null) : toggle()), side ? DOUBLE_TAP_MS : 0);
+    const wereHidden = hiddenAtDown;
+    tapTimer = window.setTimeout(() => {
+      if (menu()) return setMenu(null);
+      // Hidden: the pointer-down already brought them up. Showing: put them away (while playing).
+      if (!wereHidden && playing()) {
+        clearTimeout(idleTimer);
+        setIdle(true);
+      }
+    }, side ? DOUBLE_TAP_MS : 0);
   };
+  /** Whether the controls were hidden when the current touch began (it shows them at once). */
+  let hiddenAtDown = false;
   /** A click the browser made from a touch: already handled by onPictureTap. */
   const fromTouch = () => performance.now() - lastTouch < 600;
   const setVol = (v: number) => {
@@ -1031,7 +1045,10 @@ export default function Player() {
       data-subsize={subSize()}
       data-subpos={subPos()}
       onPointerMove={onPointerMove}
-      onPointerDown={wake}
+      onPointerDown={() => {
+        hiddenAtDown = idle() && playing() && !menu();
+        wake();
+      }}
     >
       <video
         ref={video}
@@ -1156,6 +1173,24 @@ export default function Player() {
       </Show>
       <Show when={!failure() && !videoError() && waiting()}>
         <div class="player-spinner" aria-label="Loading" />
+      </Show>
+      {/* Touch screens: play and pause from the middle (a tap on the picture only shows the
+          controls). Hidden with them, and while loading. */}
+      <Show when={!failure() && !videoError() && !waiting()}>
+        <button
+          type="button"
+          class="player-center"
+          aria-label={playing() ? "Pause" : "Play"}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={() => {
+            toggle();
+            wake();
+          }}
+        >
+          <Show when={playing()} fallback={<Play size={34} stroke-width={1.75} fill="currentColor" aria-hidden="true" />}>
+            <Pause size={34} stroke-width={1.75} fill="currentColor" aria-hidden="true" />
+          </Show>
+        </button>
       </Show>
 
       <header class="player-top">
