@@ -3,7 +3,7 @@
 ## Changelog entries are one-liners
 
 `CHANGELOG.md`'s section for a version is what users see: the app shows it in the "What's new"
-window the first time it opens after an update (`app/src-tauri/src/whats_new.rs` builds it in),
+window the first time it opens after an update (the release pipeline builds in just that section; `app/src-tauri/src/whats_new.rs`),
 and the release workflow puts it in the GitHub release notes. Betas of a version show that
 version's section.
 

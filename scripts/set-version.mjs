@@ -61,3 +61,22 @@ edit("app/src-tauri/tauri.conf.json", null, (t) => {
   return JSON.stringify(conf, null, 2) + "\n";
 });
 console.log(`Android versionCode: ${versionCode}`);
+
+// "What's new": only this version's section of CHANGELOG.md goes into the build (a beta's is its
+// version's), passed to the compiler as BANIME_RELEASE_NOTES (app/src-tauri/src/whats_new.rs). The
+// file itself is never built in. In CI the variable goes to $GITHUB_ENV for the build steps.
+const base = `${major}.${minor}.${patch}`;
+const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8").split(/\r?\n/);
+const start = changelog.findIndex((l) => l.startsWith(`## [${base}]`));
+let notes = "";
+if (start >= 0) {
+  const end = changelog.findIndex((l, i) => i > start && l.startsWith("## ["));
+  notes = changelog.slice(start + 1, end < 0 ? undefined : end).join("\n").trim();
+}
+if (!notes) console.warn(`CHANGELOG.md has no section for ${base}: no "What's new" in this build.`);
+if (process.env.GITHUB_ENV) {
+  const { appendFileSync } = await import("node:fs");
+  const fence = `NOTES_${Date.now()}`;
+  appendFileSync(process.env.GITHUB_ENV, `BANIME_RELEASE_NOTES<<${fence}\n${notes}\n${fence}\n`);
+  console.log(`What's new: ${notes.split("\n").length} lines for ${base}`);
+}

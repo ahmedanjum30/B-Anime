@@ -1,6 +1,7 @@
 //! "What's new": the first launch after an update shows that version's changes, once. The notes
-//! are CHANGELOG.md's section for the version, built into the app, so they match what's
-//! installed and need no network.
+//! are CHANGELOG.md's section for the version: the release pipeline extracts just that section
+//! (scripts/set-version.mjs) and hands it to the compiler as BANIME_RELEASE_NOTES, so only those
+//! lines are built in (never the file) and they match what's installed, offline.
 
 use banime_core::db;
 use serde::Serialize;
@@ -8,8 +9,12 @@ use tauri::AppHandle;
 
 use crate::{AppState, msg};
 
-/// Built in at compile time: the release build's own changelog.
-const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+/// This version's notes, set by the release pipeline. Unset in local builds: no window.
+const NOTES: Option<&str> = option_env!("BANIME_RELEASE_NOTES");
+
+fn notes() -> Option<String> {
+    NOTES.map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned)
+}
 /// The version whose notes were shown last (or that was installed fresh).
 const SEEN_KEY: &str = "whats_new.seen";
 
@@ -21,7 +26,9 @@ pub struct WhatsNew {
     pub notes: String,
 }
 
-/// A version's section of the changelog; a beta (x.y.z-beta.N) reads its version's.
+/// A version's section of the changelog; a beta (x.y.z-beta.N) reads its version's. (The
+/// release pipeline does the same in set-version.mjs; this serves the development preview.)
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn section(changelog: &str, version: &str) -> Option<String> {
     let base = version.split_once('-').map_or(version, |(b, _)| b);
     let heading = format!("## [{base}]");
@@ -33,6 +40,7 @@ fn section(changelog: &str, version: &str) -> Option<String> {
 }
 
 /// The newest released version in the changelog (for previewing in a development build).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn latest(changelog: &str) -> Option<&str> {
     changelog.lines().find_map(|l| l.strip_prefix("## [")?.split_once(']').map(|(v, _)| v).filter(|v| *v != "Unreleased"))
 }
@@ -59,11 +67,14 @@ async fn used_before(state: &AppState) -> bool {
 /// A fresh install shows nothing (and starts counting from here). Development builds never show it.
 #[tauri::command]
 pub async fn whats_new(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Option<WhatsNew>, String> {
-    // BANIME_WHATS_NEW=1 shows the newest notes every launch (to see how it looks while
-    // working on it, in any build).
+    // Development builds: BANIME_WHATS_NEW=1 shows the newest section of the source folder's
+    // CHANGELOG.md every launch, read at runtime (to see how it looks while working on it).
+    #[cfg(debug_assertions)]
     if std::env::var("BANIME_WHATS_NEW").is_ok_and(|v| v == "1") {
-        let Some(newest) = latest(CHANGELOG) else { return Ok(None) };
-        return Ok(section(CHANGELOG, newest).map(|notes| WhatsNew { version: newest.to_owned(), notes }));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../CHANGELOG.md");
+        let Ok(log) = std::fs::read_to_string(path) else { return Ok(None) };
+        let Some(newest) = latest(&log) else { return Ok(None) };
+        return Ok(section(&log, newest).map(|notes| WhatsNew { version: newest.to_owned(), notes }));
     }
     let version = app.package_info().version.to_string();
     let last = seen(&state).await;
@@ -74,7 +85,7 @@ pub async fn whats_new(app: AppHandle, state: tauri::State<'_, AppState>) -> Res
         db::set_setting(&state.db, SEEN_KEY, &version).await.map_err(msg)?;
         return Ok(None);
     }
-    Ok(section(CHANGELOG, &version).map(|notes| WhatsNew { version, notes }))
+    Ok(notes().map(|notes| WhatsNew { version, notes }))
 }
 
 /// The notes were shown: not again for this version.
@@ -104,7 +115,7 @@ mod tests {
 
     #[test]
     fn the_real_changelog_parses() {
-        assert!(CHANGELOG.contains("## [0.4.4]"));
-        assert!(section(CHANGELOG, "0.4.4").is_some());
+        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../CHANGELOG.md")).unwrap();
+        assert!(section(&log, "0.4.4").is_some());
     }
 }
