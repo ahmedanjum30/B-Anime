@@ -15,7 +15,7 @@ const SECTIONS: { id: DiscoverSection; label: string }[] = [
   { id: "all_time", label: "All-time popular" },
 ];
 const GENRES = [
-  "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music",
+  "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music",
   "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
 ];
 const FORMATS: Record<LibraryKind, string[]> = {

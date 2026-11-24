@@ -262,7 +262,7 @@ export default function Show() {
                       id="rec-h"
                       items={m()
                         .recommendations.nodes.map((n) => n.mediaRecommendation)
-                        .filter((r): r is MediaRef => !!r)
+                        .filter((r): r is MediaRef => !!r && !r.isAdult)
                         .map((node) => ({ node, label: FORMAT_LABEL[node.format ?? ""] ?? null }))}
                     />
 
@@ -345,6 +345,7 @@ function Facts(props: { media: Media }) {
 
 function relations(m: Media) {
   return [...m.relations.edges]
+    .filter((e) => !e.node.isAdult)
     .filter((e) => e.node.type === "ANIME" || e.relationType === "SOURCE" || e.relationType === "ADAPTATION")
     .sort((a, b) => rank(a.relationType) - rank(b.relationType))
     .map((e) => ({ node: e.node, label: RELATION[e.relationType] ?? e.relationType }));

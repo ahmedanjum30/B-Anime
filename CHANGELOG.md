@@ -31,6 +31,7 @@ one line each, written for users (see CLAUDE.md).
 ### Changed
 - Phones: tapping the video shows the controls instead of pausing; play and pause from the middle.
 - Old update downloads are cleaned up, keeping only the newest one waiting to install.
+- Discover leaves out adult and ecchi titles, and show pages no longer suggest adult ones.
 
 ### Fixed
 - Phones: pages no longer show through above the Library, Manga and Discover headers.

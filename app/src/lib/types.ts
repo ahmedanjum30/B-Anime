@@ -65,6 +65,8 @@ export interface MediaRef {
   id: number;
   type: LibraryKind;
   format: string | null;
+  /** Adult titles are left out of related and recommended lists. */
+  isAdult?: boolean;
   status?: string | null;
   title: { userPreferred: string };
   coverImage: { large: string | null; color: string | null };

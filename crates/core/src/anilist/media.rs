@@ -25,11 +25,11 @@ query ($id: Int) {
     relations {
       edges {
         relationType(version: 2)
-        node { id type format status title { userPreferred } coverImage { large color } }
+        node { id type format status isAdult title { userPreferred } coverImage { large color } }
       }
     }
     recommendations(perPage: 10, sort: RATING_DESC) {
-      nodes { mediaRecommendation { id type format title { userPreferred } coverImage { large color } } }
+      nodes { mediaRecommendation { id type format isAdult title { userPreferred } coverImage { large color } } }
     }
   }
 }"#;
