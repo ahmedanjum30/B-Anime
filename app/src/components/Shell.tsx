@@ -176,8 +176,22 @@ export default function Shell(props: ParentProps) {
         </div>
       </Show>
       <WhatsNew />
-      <div class="toast" role="status" aria-live="polite" data-open={toast() ? "" : undefined}>
-        {toast()}
+      <div
+        class="toast"
+        role="status"
+        aria-live="polite"
+        data-open={toast() ? "" : undefined}
+        data-action={homeStore.toastAction() ? "" : undefined}
+        onClick={() => homeStore.toastAction()?.run()}
+      >
+        <span>{toast()}</span>
+        <Show when={homeStore.toastAction()}>
+          {(a) => (
+            <button type="button" class="toast-action" onClick={(e) => (e.stopPropagation(), a().run())}>
+              {a().label}
+            </button>
+          )}
+        </Show>
       </div>
     </div>
   );

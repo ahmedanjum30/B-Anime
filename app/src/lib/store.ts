@@ -1,5 +1,5 @@
 import { createResource, createRoot, createSignal } from "solid-js";
-import { getAccount, getHome, onAndroid, onEvent, onLibraryChanged, syncIfStale, updateStatus } from "./api";
+import { getAccount, getHome, onEvent, onLibraryChanged, syncIfStale, updateStatus, installUpdate, errorText, UPDATE_ACTION } from "./api";
 import { fmtVersion } from "./format";
 import type { ScanStatus } from "./types";
 
@@ -35,11 +35,17 @@ export const homeStore = createRoot(() => {
   /** Show under the pointer/focus; links Up next cards and listings slots. */
   const [hoverMedia, setHoverMedia] = createSignal<number | null>(null);
   const [toast, setToast] = createSignal<string | null>(null);
+  /** A notice can offer one thing to do (clicking the notice does it); it stays up longer. */
+  const [toastAction, setToastAction] = createSignal<{ label: string; run: () => void } | null>(null);
   let toastTimer: number | undefined;
-  const notify = (msg: string) => {
+  const notify = (msg: string, action?: { label: string; run: () => void }) => {
     setToast(msg);
+    setToastAction(action ?? null);
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => setToast(null), 3600);
+    toastTimer = window.setTimeout(() => {
+      setToast(null);
+      setToastAction(null);
+    }, action ? 12000 : 3600);
   };
 
   /** Library scan progress, pushed by the backend. */
@@ -62,11 +68,11 @@ export const homeStore = createRoot(() => {
   });
   void onEvent<{ version: string }>("update-ready", (u) => {
     void refetchUpdate();
-    notify(
-      onAndroid
-        ? `B-Anime ${fmtVersion(u.version)} is ready. Tap its notification, or install it from More.`
-        : `B-Anime ${fmtVersion(u.version)} is ready. Click its notification, or restart to update from the sidebar.`,
-    );
+    // Clicking the notice installs it (as the sidebar's and More's buttons do).
+    notify(`B-Anime ${fmtVersion(u.version)} is ready.`, {
+      label: UPDATE_ACTION,
+      run: () => void installUpdate().catch((e) => notify(errorText(e))),
+    });
   });
   void onEvent<{ episode: number; title: string }>("player-watched", (w) =>
     notify(`Episode ${w.episode} of ${w.title} marked watched on AniList.`),
@@ -74,6 +80,6 @@ export const homeStore = createRoot(() => {
 
   return {
     home, refetch, account, refetchAccount, setAccount, update, refetchUpdate, scan, now,
-    hoverMedia, setHoverMedia, toast, notify,
+    hoverMedia, setHoverMedia, toast, toastAction, notify,
   };
 });

@@ -3527,6 +3527,8 @@ a.slot:focus-visible {
 /* ───────── Toast ───────── */
 /* What's new: once, the first launch after an update. */
 .whats-new {
+  /* The global reset zeroes margins; a modal dialog centres itself with auto ones. */
+  margin: auto;
   width: min(560px, calc(100vw - 32px));
   max-height: min(640px, calc(100dvh - 48px));
   padding: 0;
@@ -3623,6 +3625,8 @@ a.slot:focus-visible {
   }
   .whats-new-foot .btn {
     flex: 1;
+    justify-content: center;
+    text-align: center;
   }
 }
 
@@ -3645,6 +3649,29 @@ a.slot:focus-visible {
 .toast[data-open] {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+/* A notice with something to do: clickable, with its button at the end. */
+.toast[data-open][data-action] {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.toast-action {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--z0);
+  color: var(--z10);
+  font: 600 13px/1 var(--font-body, inherit);
+  cursor: pointer;
+}
+.toast-action:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 
 /* ───────── Narrow windows ───────── */
@@ -3701,6 +3728,12 @@ a.slot:focus-visible {
     padding-top: env(safe-area-inset-top);
     padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
     scrollbar-gutter: auto;
+  }
+  /* Notices sit above the bottom bar, full width less the gutters. */
+  .toast {
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u) * 1.5);
+    width: max-content;
+    max-width: calc(100vw - 32px);
   }
   .rail {
     position: fixed;
