@@ -6,27 +6,50 @@
 # the compiled release dependencies on main (shared key "release"), and release.yml restores
 # them, leaving only B-Anime's own crates to compile.
 #
-# Runs when dependencies or the toolchain change, and by hand (Actions → Release cache → Run).
-# Skipped for "Version X" commits: a release bump changes no dependencies.
+# Runs when dependencies or the toolchain change on main or beta, and by hand (Actions → Release
+# cache → Run). Skipped for "Version X" commits: a release bump changes no dependencies.
+#
+# Betas are tagged from the beta branch, but a tag's run can't read caches saved on beta, only
+# on main. So a push to beta doesn't warm on beta: it starts this workflow again on main, with
+# `source: beta`, which builds beta's code and saves its dependencies where tags can read them.
 name: Release cache
 
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
     paths:
       - Cargo.lock
       - "**/Cargo.toml"
       - rust-toolchain.toml
       - .github/workflows/release-cache.yml
   workflow_dispatch:
+    inputs:
+      source:
+        description: "Branch whose code to build (the caches are saved on main either way)"
+        required: false
+        default: ""
 
 jobs:
+  # A push to beta: run again on main, building beta's code (see above).
+  handoff:
+    if: github.ref == 'refs/heads/beta'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Warm beta's dependencies on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-cache.yml -R "$GITHUB_REPOSITORY" --ref main -f source=beta
+
   warm:
     # A version bump edits Cargo.toml/Cargo.lock but no dependencies, so there's nothing to warm.
-    if: ${{ !startsWith(github.event.head_commit.message, 'Version ') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'Version ') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source || github.ref }}
 
       - uses: actions/setup-node@v7
         with:
@@ -65,12 +88,14 @@ jobs:
   # The same for the Android APK (shared key "android"). Mirrors release.yml's android job up to
   # the build; no signing key needed (an unsigned build compiles the same Rust), nothing uploaded.
   warm-android:
-    if: ${{ !startsWith(github.event.head_commit.message, 'Version ') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'Version ') }}
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: 27.1.12297006
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source || github.ref }}
 
       - uses: actions/setup-java@v6
         with:

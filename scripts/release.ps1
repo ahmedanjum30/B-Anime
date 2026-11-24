@@ -12,8 +12,9 @@
   scripts\release.ps1 -DryRun    # show the next version and stop
   scripts\release.ps1 -Beta      # a beta: only copies on the Beta update channel get it
 
-  A beta is published as a GitHub pre-release. Stable users get it once it's promoted with
-  scripts\promote.ps1 <version> (the same build, no rebuild).
+  Betas are tagged from the beta branch and published as GitHub pre-releases; stable releases
+  are tagged from main. Stable users get a beta once it's promoted with
+  scripts\promote.ps1 <version> (the same build, no rebuild; main moves up to it).
 #>
 param(
   [string]$Bump = "patch",
@@ -31,10 +32,16 @@ function Run([string]$what, [scriptblock]$cmd) {
 }
 
 # --- Checks -----------------------------------------------------------------------------------
+# Betas go out from the beta branch (where work lands); stable releases from main (what stable
+# users run: promoted betas and urgent fixes).
+$want = if ($Beta) { "beta" } else { "main" }
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
-if ($branch -ne "main") { throw "Releases go out from main; you're on '$branch'." }
+if ($branch -ne $want) {
+  $what = if ($Beta) { "Betas go out from the beta branch" } else { "Stable releases go out from main (betas: add -Beta, from beta)" }
+  throw "$what; you're on '$branch'. Run: git switch $want"
+}
 if (git status --porcelain) { throw "There are uncommitted changes. Commit them (or stash them) first: a release is what's committed." }
-Run "git pull" { git pull -q --ff-only origin main }
+Run "git pull" { git pull -q --ff-only origin $branch }
 Run "git fetch --tags" { git fetch -q --tags origin }
 
 # The current version is the newest release tag.
@@ -59,14 +66,14 @@ switch -Regex ($Bump) {
 if ([version]$next -le [version]$current) { throw "$next isn't newer than the current $current." }
 if (git tag --list "v$next") { throw "Tag v$next already exists." }
 
-$unpushed = (git rev-list --count origin/main..HEAD).Trim()
+$unpushed = (git rev-list --count "origin/$branch..HEAD").Trim()
 $kind = if ($Beta) { "beta " } else { "" }
-Write-Host "Releasing $kind$current -> $next (main at $((git rev-parse --short HEAD).Trim()))"
+Write-Host "Releasing $kind$current -> $next ($branch at $((git rev-parse --short HEAD).Trim()))"
 if ($DryRun) { return }
 
 # --- Tag and push -----------------------------------------------------------------------------
 # Local commits not on GitHub yet go up first, so the tag points at something CI can build.
-if ($unpushed -ne "0") { Run "git push main" { git push -q origin main } }
+if ($unpushed -ne "0") { Run "git push $branch" { git push -q origin $branch } }
 # A beta is an annotated tag whose message is "beta"; the Release workflow reads it and publishes
 # a pre-release. Stable releases are plain tags.
 if ($Beta) { Run "git tag" { git tag -a "v$next" -m "beta" } } else { Run "git tag" { git tag "v$next" } }
