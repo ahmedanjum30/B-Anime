@@ -115,7 +115,8 @@
 <script>
   // The room code sits after the "#": browsers never send that part to the server.
   const code = decodeURIComponent(location.hash.slice(1)).trim();
-  if (/^[A-Za-z0-9_-]{16,}$/.test(code)) {
+  // Short codes (K7QM-4X2P-9FTE) and the long form.
+  if (/^[A-Za-z0-9_-]{12,}$/.test(code)) {
     const app = "banime://join/" + code;
     document.getElementById("open").href = app;
     document.getElementById("code").textContent = code;
