@@ -47,8 +47,10 @@ const HOST_GRACE: Duration = Duration::from_secs(10);
 const REJOIN_FOR: Duration = Duration::from_secs(60);
 /// One connection attempt while rejoining.
 const ATTEMPT: Duration = Duration::from_secs(5);
-/// A device that took over hosting and is still alone after this long ends the room.
-const EMPTY_ROOM: Duration = Duration::from_secs(60);
+/// A device that took over hosting and has been alone this long, not playing, ends the room.
+const EMPTY_ROOM: Duration = Duration::from_secs(10 * 60);
+/// Rejoining keeps trying this long: a takeover after the host left takes a few seconds.
+const REJOIN_TRYING: Duration = Duration::from_secs(20);
 /// Positions and connection quality reach the others at most this often: reports only change
 /// those, so each guest gets one roster per interval instead of one per member's report. A
 /// visible change (loading, ready, joining, leaving…) goes out at once.
@@ -754,26 +756,31 @@ impl Room {
         let seed = Seed::random();
         let endpoint = bind(seed).await?;
         // Everyone at once: whoever hosts now answers and keeps the connection; the others (gone,
-        // or not hosting) fail or close it. A room that has ended is known within one attempt.
-        let mut tries = tokio::task::JoinSet::new();
-        for code in codes {
-            let Ok(addr) = parse_code(code) else { continue };
-            let (endpoint, code) = (endpoint.clone(), code.trim().to_owned());
-            tries.spawn(async move {
-                let conn = connect(&endpoint, addr.clone(), ATTEMPT).await.ok()?;
-                // A member that isn't hosting closes the connection at once ("not hosting").
-                if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
-                    return None;
-                }
-                Some((code, addr, conn))
-            });
-        }
-        while let Some(done) = tries.join_next().await {
-            if let Ok(Some((code, addr, conn))) = done {
-                tries.abort_all();
-                tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
-                return Ok(Self::joined(endpoint, seed, name, code, addr, conn).await);
+        // or not hosting) fail or close it. Again, until REJOIN_TRYING: right after the host
+        // left, nobody hosts yet until a guest takes over.
+        let began = Instant::now();
+        while began.elapsed() < REJOIN_TRYING {
+            let mut tries = tokio::task::JoinSet::new();
+            for code in codes {
+                let Ok(addr) = parse_code(code) else { continue };
+                let (endpoint, code) = (endpoint.clone(), code.trim().to_owned());
+                tries.spawn(async move {
+                    let conn = connect(&endpoint, addr.clone(), ATTEMPT).await.ok()?;
+                    // A member that isn't hosting closes the connection at once ("not hosting").
+                    if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
+                        return None;
+                    }
+                    Some((code, addr, conn))
+                });
             }
+            while let Some(done) = tries.join_next().await {
+                if let Ok(Some((code, addr, conn))) = done {
+                    tries.abort_all();
+                    tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
+                    return Ok(Self::joined(endpoint, seed, name, code, addr, conn).await);
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
         endpoint.close().await;
         Err(Error::Network("That room has ended: nobody in it is hosting any more.".into()))
@@ -870,17 +877,23 @@ impl Room {
         }
     }
 
-    /// The host starts the room: everyone plays the chosen episode from where it is. False when
-    /// this device isn't the host or no episode is chosen yet.
+    /// The host starts the room: everyone opens the chosen episode, held at the beginning until
+    /// all have loaded it, then it plays for everyone at once. False when this device isn't the
+    /// host or no episode is chosen yet.
     pub fn start(&self) -> bool {
         let Some(host) = self.shared.host_state() else { return false };
         let Ok(mut h) = host.lock() else { return false };
         let Some(mut state) = h.state.clone() else { return false };
-        state.playing = true;
+        // Started, but held at the beginning: everyone's player opens and loads it, and the host's
+        // plays it for everyone once they all have (as after a switch), so nobody starts behind.
+        h.started = true;
+        state.playing = false;
+        state.held = true;
+        state.position = 0.0;
         state.by = self.shared.me.to_string();
         let state = h.adopt(state, false);
         h.broadcast_state(&state, None);
-        // The host's own player starts through the same path as everyone else's.
+        // The host's own player opens it through the same path as everyone else's.
         let _ = h.events.send(RoomEvent::State(state));
         h.announce();
         true
@@ -979,14 +992,31 @@ async fn guest_loop(shared: Arc<Shared>, mut host: EndpointAddr, first: Connecti
             // an empty room nobody knows about.
             Some(None) => {
                 shared.emit(RoomEvent::Reconnected);
+                // Alone and not playing for EMPTY_ROOM: over. Someone still watching keeps the room
+                // (the others can rejoin it later).
                 let shared = shared.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(EMPTY_ROOM).await;
-                    let empty = shared.host_state().is_some_and(|h| h.lock().map(|h| h.guests.is_empty()).unwrap_or(false));
-                    if empty && !shared.closing() {
-                        tracing::info!("watch: nobody came back after the handover; ending the room");
-                        shared.end("The room ended: nobody else came back.".into());
-                        shared.endpoint.close().await;
+                    let mut empty_since: Option<Instant> = None;
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        let Some(host) = shared.host_state() else { return };
+                        if shared.closing() {
+                            return;
+                        }
+                        let (alone, playing) = host
+                            .lock()
+                            .map(|h| (h.guests.is_empty(), h.state.as_ref().is_some_and(|s| s.playing)))
+                            .unwrap_or((false, false));
+                        if !alone || playing {
+                            empty_since = None;
+                            continue;
+                        }
+                        if empty_since.get_or_insert_with(Instant::now).elapsed() >= EMPTY_ROOM {
+                            tracing::info!("watch: nobody came back after the handover; ending the room");
+                            shared.end("The room ended: nobody else came back.".into());
+                            shared.endpoint.close().await;
+                            return;
+                        }
                     }
                 });
                 return;

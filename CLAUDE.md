@@ -16,3 +16,10 @@ easy to scan:
 - Grouped under `### Added`, `### Changed` and `### Fixed`, newest version first.
 - Add the line when the change lands (in the `## [x.y.z]` section of the version being
   worked on), not at release time.
+
+## Testing on a phone
+
+Local test APKs (`scriptsndroid-build.ps1 -Quick`) keep the repository's version: don't stamp
+a version into `Cargo.toml`/`tauri.conf.json` to install over a newer release. If Android
+refuses the APK as a downgrade, uninstall the app and install it fresh
+(`adb uninstall app.banime.desktop`, then `adb install`); losing the phone's app data is fine.

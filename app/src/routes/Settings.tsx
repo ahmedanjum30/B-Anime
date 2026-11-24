@@ -553,7 +553,7 @@ function About() {
           </div>
         </div>
       </Show>
-      <Show when={inTauri}>
+      <Show when={inTauri && !onAndroid}>
         <div class="setting-row">
           <div class="setting-text">
             <p class="setting-title">Detailed network logs</p>

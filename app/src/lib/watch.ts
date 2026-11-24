@@ -216,10 +216,9 @@ export const watchStore = createRoot(() => {
   /** Back into a room from the recent list, through whoever hosts it now. */
   const rejoin = (entry: RecentRoom, name: string) => {
     rememberName(name);
-    return enter("join", () => watchRejoin(entry.codes, name || "Guest"), entry.key).then((ok) => {
-      if (!ok) forget(entry.key);
-      return ok;
-    });
+    // A failed try keeps the room listed: someone may still be taking over hosting. (Forget
+    // removes it; a room that ended here leaves the list by itself.)
+    return enter("join", () => watchRejoin(entry.codes, name || "Guest"), entry.key);
   };
   /** Leaves; a host ends the room for everyone (`end`) or hands it to the next guest. A room
    *  ended here is gone, so it leaves the recent list too. */

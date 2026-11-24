@@ -42,8 +42,12 @@ async fn enabled(state: &AppState) -> bool {
         .is_some_and(|v| v == "1")
 }
 
-/// At launch: the remembered choice.
+/// At launch: the remembered choice. Desktop only: the phone app has no such switch (and a
+/// choice saved by a build that had one is ignored there).
 pub async fn restore(state: &AppState) {
+    if cfg!(mobile) {
+        return;
+    }
     if enabled(state).await {
         apply(true);
         tracing::info!("detailed network logs are on");
