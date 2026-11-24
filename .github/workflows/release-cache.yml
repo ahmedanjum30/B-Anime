@@ -6,17 +6,16 @@
 # the compiled release dependencies on main (shared key "release"), and release.yml restores
 # them, leaving only B-Anime's own crates to compile.
 #
-# Runs when dependencies or the toolchain change on main or beta, and by hand (Actions → Release
-# cache → Run). Skipped for "Version X" commits: a release bump changes no dependencies.
+# Runs when dependencies or the toolchain change on main, and by hand (Actions → Release cache →
+# Run). Skipped for "Version X" commits: a release bump changes no dependencies.
 #
-# Betas are tagged from the beta branch, but a tag's run can't read caches saved on beta, only
-# on main. So a push to beta doesn't warm on beta: it starts this workflow again on main, with
-# `source: beta`, which builds beta's code and saves its dependencies where tags can read them.
+# Pushes to beta don't warm (a beta release whose dependencies changed since main's last warm
+# compiles them itself). To warm for a beta by hand: Run on main with `source: beta`.
 name: Release cache
 
 on:
   push:
-    branches: [main, beta]
+    branches: [main]
     paths:
       - Cargo.lock
       - "**/Cargo.toml"
@@ -30,18 +29,6 @@ on:
         default: ""
 
 jobs:
-  # A push to beta: run again on main, building beta's code (see above).
-  handoff:
-    if: github.ref == 'refs/heads/beta'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Warm beta's dependencies on main
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release-cache.yml -R "$GITHUB_REPOSITORY" --ref main -f source=beta
-
   warm:
     # A version bump edits Cargo.toml/Cargo.lock but no dependencies, so there's nothing to warm.
     if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'Version ') }}

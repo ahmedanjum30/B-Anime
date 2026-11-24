@@ -79,6 +79,11 @@ export const checkForUpdate = () => call<UpdateStatus>("check_for_update");
 export const installUpdate = () => call<void>("install_update");
 export const setUpdateChannel = (beta: boolean) => call<UpdateStatus>("set_update_channel", { beta });
 
+// ── What's new (the first launch after an update) ──
+export const whatsNew = () =>
+  inTauri ? call<{ version: string; notes: string } | null>("whats_new") : Promise.resolve(null);
+export const whatsNewSeen = () => call<void>("whats_new_seen");
+
 // ── Watch together ──
 export const watchHost = (name: string) => call<RoomInfo>("watch_host", { name });
 export const watchJoin = (code: string, name: string) => call<RoomInfo>("watch_join", { code, name });

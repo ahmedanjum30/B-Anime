@@ -7,6 +7,7 @@ import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzl
 import { homeStore } from "../lib/store";
 import { trackPages } from "../lib/nav";
 import { watchStore } from "../lib/watch";
+import WhatsNew from "./WhatsNew";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 
 // `bar`: kept in the phone's bottom bar; the rest move into the More sheet.
@@ -174,6 +175,7 @@ export default function Shell(props: ParentProps) {
           <SyncFoot />
         </div>
       </Show>
+      <WhatsNew />
       <div class="toast" role="status" aria-live="polite" data-open={toast() ? "" : undefined}>
         {toast()}
       </div>

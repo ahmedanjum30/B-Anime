@@ -10,17 +10,30 @@ commits. Add a `## [x.y.z] - YYYY-MM-DD` section below before you tag a release;
 without one, the release still gets the install notes and the commit list. Betas of x.y.z
 (x.y.z-beta.N) use the same section, so keep it up to date as betas go out.
 
+The app shows a version's section in its "What's new" window after an update, so entries are
+one line each, written for users (see CLAUDE.md).
+
 ## [Unreleased]
 
 ## [0.4.5] - 2026-11-24
 
 ### Added
-- **Watch together.** A new Together page in the sidebar. Start a room and share its code, or
-  join one. Pick a show from your AniList list or search, set the episode, and mark yourself
-  ready; the host starts it for everyone. Play, pause, seeking and episode changes stay in sync,
-  and each device streams from its own source. Devices connect directly (or through an
-  encrypted relay when they can't), so nothing goes through a B-Anime server. In the player, a
-  chip shows the room you're in.
+- Watch together: watch an episode in step with friends, each from your own source.
+- Invite links open B-Anime straight into a room.
+- The host picks the show, episode, Sub or Dub and subtitles; everyone gets ready, then the host starts.
+- A room waits for anyone still loading, rides out dropped connections, and finds a new host if the host leaves.
+- See who can play the episode, and install the host's source in one tap if you can't.
+- Watch together from any show's page.
+- Update notifications: click (Windows) or tap (Android) to install.
+- This "What's new" window, once after each update.
+- Numbered betas (0.4.5 Beta 1, Beta 2…) on their own releases page.
+
+### Changed
+- Phones: tapping the video shows the controls instead of pausing; play and pause from the middle.
+- Old update downloads are cleaned up, keeping only the newest one waiting to install.
+
+### Fixed
+- Phones: pages no longer show through above the Library, Manga and Discover headers.
 
 ## [0.4.4] - 2026-11-24
 

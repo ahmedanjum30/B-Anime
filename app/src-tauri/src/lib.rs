@@ -4,6 +4,7 @@ mod library;
 mod playback;
 mod updates;
 mod watch;
+mod whats_new;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -725,6 +726,8 @@ pub fn run() {
             watch::watch_ready,
             watch::watch_start,
             watch::watch_check,
+            whats_new::whats_new,
+            whats_new::whats_new_seen,
             list_extensions,
             preview_extension,
             install_extension,
