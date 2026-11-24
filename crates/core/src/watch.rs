@@ -45,6 +45,13 @@ const HOST_GRACE: Duration = Duration::from_secs(10);
 const REJOIN_FOR: Duration = Duration::from_secs(60);
 /// One connection attempt while rejoining.
 const ATTEMPT: Duration = Duration::from_secs(5);
+/// Positions and connection quality reach the others at most this often: reports only change
+/// those, so each guest gets one roster per interval instead of one per member's report. A
+/// visible change (loading, ready, joining, leaving…) goes out at once.
+const ROSTER_EVERY: Duration = Duration::from_secs(2);
+/// Only the host moves the timeline: a guest's change this far from where the room is (more
+/// than drift and the host's 2 s reports explain) is a seek, and the room keeps its position.
+const GUEST_SEEK: f64 = 5.0;
 
 /// The room code: the host's id and addresses, as URL-safe base64 of a small JSON object.
 #[derive(Serialize, Deserialize)]
@@ -317,6 +324,9 @@ struct HostState {
     /// In the order they joined (the order in which they'd take over hosting).
     guests: Vec<Guest>,
     events: mpsc::UnboundedSender<RoomEvent>,
+    /// When the roster last went out, and whether a throttled change is waiting for the next.
+    roster_at: Instant,
+    roster_due: bool,
 }
 
 struct Guest {
@@ -363,13 +373,25 @@ impl HostState {
         list
     }
 
-    /// Everyone's list changed: tell the guests and this device.
-    fn announce(&self) {
+    /// Everyone's list changed visibly: tell the guests and this device now.
+    fn announce(&mut self) {
         let roster = Roster { members: self.members(), started: self.started };
         for g in &self.guests {
             let _ = g.tx.send(Msg::Roster(roster.clone()));
         }
         let _ = self.events.send(RoomEvent::Roster(roster));
+        self.roster_at = Instant::now();
+        self.roster_due = false;
+    }
+
+    /// Only positions (or connection quality) changed: at most once per [`ROSTER_EVERY`]; the
+    /// room's ticker sends a change that came too soon.
+    fn announce_later(&mut self) {
+        if self.roster_at.elapsed() >= ROSTER_EVERY {
+            self.announce();
+        } else {
+            self.roster_due = true;
+        }
     }
 
     fn guest_mut(&mut self, id: &EndpointId) -> Option<&mut Guest> {
@@ -482,15 +504,29 @@ impl Shared {
                 started: l.roster.as_ref().is_some_and(|r| r.started),
                 guests: Vec::new(),
                 events: self.events.clone(),
+                roster_at: Instant::now(),
+                roster_due: false,
             }
         };
         let host = Arc::new(Mutex::new(host));
+        // Sends a throttled roster that's waiting, until the room ends here.
+        let ticker = Arc::downgrade(&host);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(ROSTER_EVERY).await;
+                let Some(host) = ticker.upgrade() else { break };
+                let Ok(mut h) = host.lock() else { break };
+                if h.roster_due {
+                    h.announce();
+                }
+            }
+        });
         if let Ok(mut role) = self.role.lock() {
             *role = Role::Host(host.clone());
         }
         tracing::info!("watch: hosting the room");
         self.emit(RoomEvent::Info(self.info()));
-        if let Ok(h) = host.lock() {
+        if let Ok(mut h) = host.lock() {
             h.announce();
         }
     }
@@ -643,8 +679,10 @@ impl Room {
                     let changed = h.buffering != buffering;
                     h.position = position;
                     h.buffering = buffering;
-                    if changed || !h.guests.is_empty() {
+                    if changed {
                         h.announce();
+                    } else if !h.guests.is_empty() {
+                        h.announce_later();
                     }
                 }
             }
@@ -893,13 +931,24 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
     });
     loop {
         match read_msg(&mut recv).await {
-            Ok(Msg::State(asked)) => {
+            Ok(Msg::State(mut asked)) => {
                 if let Ok(mut h) = host.lock() {
                     let lobby = !h.started;
                     let wanted_play = asked.playing;
+                    // Only the host moves the timeline: a guest's play or pause keeps the room's
+                    // position (and the guest is told it, so its player jumps back).
+                    let mut refused_seek = false;
+                    if let Some(room) = &h.state {
+                        let same = room.media_id == asked.media_id && room.episode == asked.episode && room.dub == asked.dub;
+                        if same && (asked.position - h.position).abs() > GUEST_SEEK {
+                            asked.position = h.position;
+                            refused_seek = true;
+                        }
+                    }
                     let state = h.adopt(asked, true);
-                    // A guest's play in the lobby is turned down: the guest is told to stay paused too.
-                    let except = if wanted_play && !state.playing { None } else { Some(&id) };
+                    // A guest's play in the lobby, or a seek, is turned down: the guest hears the
+                    // room's state too.
+                    let except = if (wanted_play && !state.playing) || refused_seek { None } else { Some(&id) };
                     h.broadcast_state(&state, except);
                     let _ = h.events.send(RoomEvent::State(state));
                     if lobby {
@@ -909,11 +958,18 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
             }
             Ok(Msg::Status { position, buffering }) => {
                 if let Ok(mut h) = host.lock() {
+                    let mut changed = false;
                     if let Some(g) = h.guest_mut(&id) {
+                        changed = g.buffering != buffering;
                         g.position = position;
                         g.buffering = buffering;
                     }
-                    h.announce();
+                    // Loading starts and ends at once (waits depend on them); positions batch.
+                    if changed {
+                        h.announce();
+                    } else {
+                        h.announce_later();
+                    }
                 }
             }
             Ok(Msg::Ready { ready }) => {

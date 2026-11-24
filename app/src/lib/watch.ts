@@ -177,18 +177,34 @@ export const watchStore = createRoot(() => {
     s.at - ownSwitch.at < 4000 &&
     (s.mediaId !== ownSwitch.mediaId || s.episode !== ownSwitch.episode);
 
+  /** As host: people the room doesn't pause for while they load (a slow connection). */
+  const [notWaiting, setNotWaiting] = createSignal<ReadonlySet<string>>(new Set());
+  const waitFor = (id: string, wait: boolean) => {
+    const next = new Set(notWaiting());
+    if (wait) next.delete(id);
+    else next.add(id);
+    setNotWaiting(next);
+  };
+  createEffect(on(room, () => setNotWaiting(new Set<string>())));
+
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
-    host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch,
+    host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });
 
 /** Seconds of difference that are corrected by a jump rather than by playing slightly faster or slower. */
-const JUMP = 1.5;
+const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
 const WAIT_FOR = 2000;
+/** A jump to where the room is that isn't loaded yet lands this far ahead, so the room arrives
+ *  about when the video is ready there (instead of stalling behind it again). */
+const JUMP_LEAD = 2;
+/** This many stalls within a minute: a slow connection, so no faster catch-up (it needs 8 % more
+ *  data); drift is left to the jump. */
+const SLOW_STALLS = 2;
 
 /**
  * Keeps a player in step with the room. Local play, pause and seeks go to the room; the room's
@@ -211,6 +227,19 @@ export function syncPlayer(opts: {
   let quietUntil = 0;
   let rateReset: number | undefined;
   let pending: RemoteState | null = null;
+  /** When this device's video stalled to load, recently. */
+  let stalls: number[] = [];
+  const slow = () => {
+    const since = performance.now() - 60_000;
+    stalls = stalls.filter((t) => t > since);
+    return stalls.length >= SLOW_STALLS;
+  };
+  const isLoaded = (v: HTMLVideoElement, at: number) => {
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= at && at + 1 <= v.buffered.end(i)) return true;
+    }
+    return false;
+  };
 
   const current = (): OwnState | null => {
     const v = opts.video();
@@ -250,6 +279,28 @@ export function syncPlayer(opts: {
     if (s) w.send(s);
   };
 
+  // Only the host moves the timeline: a guest's own seek (the bar, ±10 s, keys, a double-tap)
+  // goes back to where the room is.
+  let seekNoticeAt = 0;
+  const onSeeked = () => {
+    if (performance.now() < quietUntil) return;
+    const v = opts.video();
+    const room = w.remote();
+    if (v && w.room() && !w.room()!.host && w.started() && room && room.mediaId === opts.mediaId() && room.episode === opts.episode()) {
+      const expected = room.position + (room.playing ? (performance.now() - room.at) / 1000 : 0);
+      if (Math.abs(v.currentTime - expected) > 2) {
+        quietUntil = performance.now() + 800;
+        v.currentTime = Math.max(0, expected);
+        if (performance.now() - seekNoticeAt > 4000) {
+          seekNoticeAt = performance.now();
+          homeStore.notify("Only the host can move the timeline.");
+        }
+        return;
+      }
+    }
+    sendNow();
+  };
+
   const apply = (s: RemoteState) => {
     const v = opts.video();
     if (!v) return;
@@ -259,12 +310,22 @@ export function syncPlayer(opts: {
     }
     pending = null;
     quietUntil = performance.now() + 800;
+    // Loading right now: no corrections (each would restart the load); the room waits for this
+    // device instead, and play or pause still follows.
+    if (opts.waiting() && s.playing) {
+      if (v.paused) void v.play().catch(() => {});
+      return;
+    }
     const expected = s.position + (s.playing ? (performance.now() - s.at) / 1000 : 0);
     const gap = expected - v.currentTime;
     if (Math.abs(gap) > JUMP || !s.playing) {
-      if (Math.abs(gap) > (s.playing ? JUMP : CLOSE_ENOUGH)) v.currentTime = Math.max(0, expected);
+      if (Math.abs(gap) > (s.playing ? JUMP : CLOSE_ENOUGH)) {
+        // Not loaded there yet: land a little ahead, where the room will be once it has loaded.
+        const lead = s.playing && !isLoaded(v, expected) ? JUMP_LEAD : 0;
+        v.currentTime = Math.max(0, expected + lead);
+      }
       v.playbackRate = 1;
-    } else if (Math.abs(gap) > CLOSE_ENOUGH) {
+    } else if (Math.abs(gap) > CLOSE_ENOUGH && !(gap > 0 && slow())) {
       // Catch up (or let the others catch up) over a few seconds instead of a visible jump.
       v.playbackRate = gap > 0 ? 1.08 : 0.92;
       clearTimeout(rateReset);
@@ -294,10 +355,12 @@ export function syncPlayer(opts: {
   );
 
   // Wait for everyone (the host's player): someone loading for WAIT_FOR pauses the room; once
-  // nobody is, it plays again (only if it was this wait that paused it).
+  // nobody is, it plays again (only if it was this wait that paused it). The host can choose
+  // not to wait for someone (Don't wait, in the notice or the People list).
   let waitingFor: string | null = null;
   let waitTimer: number | undefined;
-  const loadingOthers = () => w.members().filter((m) => m.buffering && m.id !== w.room()?.me);
+  const loadingOthers = () =>
+    w.members().filter((m) => m.buffering && m.id !== w.room()?.me && !w.notWaiting().has(m.id));
   createEffect(
     on(loadingOthers, (loading) => {
       const v = opts.video();
@@ -310,7 +373,14 @@ export function syncPlayer(opts: {
           if (!still.length || v.paused) return;
           waitingFor = still.map((m) => m.name).join(", ");
           v.pause(); // the pause goes to the room like any other
-          homeStore.notify(`Waiting for ${waitingFor} to load…`);
+          homeStore.notify(`Waiting for ${waitingFor} to load…`, {
+            label: "Don't wait",
+            run: () => {
+              for (const m of still) w.waitFor(m.id, false);
+              waitingFor = null;
+              void v.play().catch(() => {});
+            },
+          });
         }, WAIT_FOR);
       } else if (waitingFor) {
         waitingFor = null;
@@ -327,6 +397,10 @@ export function syncPlayer(opts: {
   // Loading starts and ends reach the room at once (not just with the 2 s report), so waits
   // for someone start and end promptly. After the Player has updated `waiting`.
   const statusSoon = () => queueMicrotask(reportStatus);
+  const onStall = () => {
+    stalls.push(performance.now());
+    statusSoon();
+  };
 
   const attach = (v: HTMLVideoElement) => {
     const onReady = () => {
@@ -339,16 +413,16 @@ export function syncPlayer(opts: {
     v.addEventListener("loadedmetadata", onReady);
     v.addEventListener("play", sendNow);
     v.addEventListener("pause", sendNow);
-    v.addEventListener("seeked", sendNow);
-    v.addEventListener("waiting", statusSoon);
+    v.addEventListener("seeked", onSeeked);
+    v.addEventListener("waiting", onStall);
     v.addEventListener("playing", statusSoon);
     v.addEventListener("canplay", statusSoon);
     onCleanup(() => {
       v.removeEventListener("loadedmetadata", onReady);
       v.removeEventListener("play", sendNow);
       v.removeEventListener("pause", sendNow);
-      v.removeEventListener("seeked", sendNow);
-      v.removeEventListener("waiting", statusSoon);
+      v.removeEventListener("seeked", onSeeked);
+      v.removeEventListener("waiting", onStall);
       v.removeEventListener("playing", statusSoon);
       v.removeEventListener("canplay", statusSoon);
       clearTimeout(rateReset);

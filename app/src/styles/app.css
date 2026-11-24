@@ -2501,6 +2501,10 @@ a.slot:focus-visible {
 .watch-member-link[data-slow] {
   color: var(--amber, #d9a441);
 }
+.watch-wait {
+  flex-shrink: 0;
+  font-size: 12px;
+}
 .together-end {
   color: var(--red);
 }

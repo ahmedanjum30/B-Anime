@@ -416,6 +416,23 @@ export default function Together() {
                       <span class="watch-member-state num" data-ready={!w.started() && m.ready ? "" : undefined}>
                         {w.started() ? (m.buffering ? "Loading…" : clock(m.position)) : m.ready ? "Ready" : "Not ready"}
                       </span>
+                      {/* Host: the room pauses while someone loads; not for someone on a slow
+                          connection it shouldn't keep stopping for. */}
+                      <Show when={room().host && w.started() && m.id !== room().me}>
+                        <button
+                          type="button"
+                          class="link-btn watch-wait"
+                          aria-pressed={!w.notWaiting().has(m.id)}
+                          title={
+                            w.notWaiting().has(m.id)
+                              ? `The room plays on while ${m.name} loads`
+                              : `The room pauses while ${m.name} loads`
+                          }
+                          onClick={() => w.waitFor(m.id, w.notWaiting().has(m.id))}
+                        >
+                          {w.notWaiting().has(m.id) ? "Wait for them" : "Don't wait"}
+                        </button>
+                      </Show>
                     </li>
                   )}
                 </For>
