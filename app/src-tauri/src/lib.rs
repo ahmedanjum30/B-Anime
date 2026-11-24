@@ -3,6 +3,7 @@ mod android_install;
 mod library;
 mod playback;
 mod updates;
+mod watch;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,7 @@ pub(crate) struct AppState {
     /// Library folders: scans, the watcher, scan progress.
     library: library::Library,
     updates: updates::Updates,
+    watch: watch::Watch,
     /// Held while a sync runs; a second sync request waits for the first instead of racing it.
     sync_lock: Mutex<()>,
     /// Wakes a sign-in that's waiting on the browser, to cancel it.
@@ -622,6 +624,7 @@ pub fn run() {
                 sync_error: std::sync::Mutex::new(None),
                 library: library::Library::start(app.handle()),
                 updates: updates::Updates::default(),
+                watch: watch::Watch::default(),
             });
             updates::start(app.handle());
 
@@ -691,6 +694,14 @@ pub fn run() {
             updates::check_for_update,
             updates::install_update,
             updates::set_update_channel,
+            watch::watch_host,
+            watch::watch_join,
+            watch::watch_leave,
+            watch::watch_room,
+            watch::watch_send_state,
+            watch::watch_send_status,
+            watch::watch_ready,
+            watch::watch_start,
             list_extensions,
             preview_extension,
             install_extension,

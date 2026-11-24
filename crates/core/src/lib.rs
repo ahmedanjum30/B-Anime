@@ -16,6 +16,7 @@ pub mod scanner;
 pub mod subs;
 pub mod updater;
 pub mod streaming;
+pub mod watch;
 
 pub use error::{Error, Result};
 pub use paths::AppPaths;

@@ -4,7 +4,7 @@ import type Hls from "hls.js";
 
 import {
   ArrowLeft, AudioLines, Captions, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ListVideo, Maximize, Search, Minimize, Pause, PictureInPicture, Play, Settings2,
-  SkipBack, SkipForward, Volume2, VolumeX, X,
+  SkipBack, SkipForward, Users, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
   errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
@@ -18,6 +18,7 @@ import { audioId, recallAudio, rememberAudio, rememberDub } from "../lib/dub";
 import { createSource, recallServer, rememberServer, rememberShowSource, serverName } from "../lib/source";
 import { sameServerIn, startSource } from "../lib/server-pick";
 import { homeStore } from "../lib/store";
+import { syncPlayer, watchStore } from "../lib/watch";
 import type { SkipTime } from "../lib/types";
 
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
@@ -182,6 +183,15 @@ export default function Player() {
   const [volume, setVolume] = createSignal(stored("banime.volume", 1));
   const [muted, setMuted] = createSignal(false);
   const [waiting, setWaiting] = createSignal(true);
+  // Watch together: in step with the room this device is in (nothing happens outside a room).
+  const together = syncPlayer({
+    video: () => video,
+    mediaId,
+    episode,
+    title: () => media()?.title.userPreferred ?? "",
+    dub: () => nextDub(),
+    waiting,
+  });
   /** Started per stream; cleared once the video has data (see the stream effect). */
   let stallTimer: number | undefined;
   onCleanup(() => clearTimeout(stallTimer));
@@ -995,6 +1005,7 @@ export default function Player() {
     }
   };
   onMount(() => {
+    together.attach(video);
     window.addEventListener("keydown", onKey);
     video.textTracks.addEventListener("addtrack", refreshTracks);
     video.textTracks.addEventListener("removetrack", refreshTracks);
@@ -1162,6 +1173,19 @@ export default function Player() {
         >
           <ListVideo size={16} stroke-width={1.75} aria-hidden="true" /> Episodes
         </button>
+        {/* In a room: a chip to the Together page (the room, the people, Ready and Start). */}
+        <Show when={watchStore.room()}>
+          <button
+            type="button"
+            class="btn btn-sm player-together-btn is-live"
+            title={watchStore.started() ? "Watching together" : "In the lobby: the host starts the episode"}
+            onClick={() => navigate("/together")}
+          >
+            <Users size={16} stroke-width={1.75} aria-hidden="true" />
+            <span class="num">{watchStore.members().length}</span>
+            <Show when={!watchStore.started()}><span>· Lobby</span></Show>
+          </button>
+        </Show>
       </header>
 
       <Show when={menu() === "episodes"}>

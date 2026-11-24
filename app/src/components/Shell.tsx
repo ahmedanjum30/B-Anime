@@ -1,11 +1,12 @@
 import type { ParentProps } from "solid-js";
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { errorText, inTauri, installUpdate, onAndroid, openAndroidDownload, openSupport, UPDATE_ACTION, UPDATE_BUSY } from "../lib/api";
-import { A, useLocation } from "@solidjs/router";
-import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzle, RefreshCw, Settings, Smartphone } from "../lib/icons";
+import { A, useLocation, useNavigate } from "@solidjs/router";
+import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzle, RefreshCw, Settings, Smartphone, Users } from "../lib/icons";
 
 import { homeStore } from "../lib/store";
 import { trackPages } from "../lib/nav";
+import { watchStore } from "../lib/watch";
 import { fmtAgo, fmtCount } from "../lib/format";
 
 // `bar`: kept in the phone's bottom bar; the rest move into the More sheet.
@@ -15,6 +16,7 @@ const NAV = [
   { href: "/schedule", label: "Schedule", icon: CalendarDays },
   { href: "/manga", label: "Manga", icon: BookOpen, count: "manga" as const, bar: true },
   { href: "/discover", label: "Discover", icon: Compass, bar: true },
+  { href: "/together", label: "Together", icon: Users, count: "room" as const },
   { href: "/extensions", label: "Extensions", icon: Puzzle },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -24,8 +26,37 @@ export default function Shell(props: ParentProps) {
   const { home, toast } = homeStore;
   trackPages();
   const location = useLocation();
+  const navigate = useNavigate();
 
-  const count = (k: "anime" | "manga") => {
+  // Watch together: when the room moves to another episode (someone picked it), this device
+  // opens it too, from wherever it is in the app.
+  // Only a change of episode moves it: between changes, browsing elsewhere in the app is fine.
+  let followed = "";
+  createEffect(
+    on(watchStore.remote, (r) => {
+      // In the lobby nobody's app opens the episode yet: Start does that (below).
+      if (!r || !watchStore.room() || !watchStore.started() || watchStore.staleForSwitch(r)) return;
+      const path = `/watch/${r.mediaId}/${r.episode}`;
+      if (path === followed) return;
+      followed = path;
+      if (location.pathname !== path) navigate(`${path}${r.dub ? "?dub=1" : ""}`);
+    }),
+  );
+  createEffect(on(watchStore.room, () => (followed = "")));
+  // The host pressed Start: everyone not on the episode yet goes to it (it plays when loaded).
+  createEffect(
+    on(watchStore.started, (started, was) => {
+      const p = watchStore.nowPlaying();
+      if (!started || was || !p || !watchStore.room()) return;
+      const path = `/watch/${p.mediaId}/${p.episode}`;
+      followed = path;
+      if (location.pathname !== path) navigate(`${path}${p.dub ? "?dub=1" : ""}`);
+    }),
+  );
+
+  const count = (k: "anime" | "manga" | "room") => {
+    // Together: how many are in the room this device is in.
+    if (k === "room") return watchStore.room() ? String(watchStore.members().length) : null;
     const h = home();
     if (!h || h.isSample) return null;
     return fmtCount(k === "anime" ? h.animeCount : h.mangaCount);

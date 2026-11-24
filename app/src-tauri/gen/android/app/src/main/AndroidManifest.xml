@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Watch together (iroh): reads which network is active, for direct connections and DNS. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- App updates: open the system installer on a downloaded APK (Android asks the user first). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

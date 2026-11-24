@@ -24,6 +24,7 @@ const Extensions = lazy(() => import("./routes/Extensions"));
 const Player = lazy(() => import("./routes/Player"));
 const Reader = lazy(() => import("./routes/Reader"));
 const Settings = lazy(() => import("./routes/Settings"));
+const Together = lazy(() => import("./routes/Together"));
 
 render(
   () => (
@@ -38,6 +39,7 @@ render(
       <Route path="/discover" component={Discover} />
       <Route path="/extensions" component={Extensions} />
       <Route path="/settings" component={Settings} />
+      <Route path="/together" component={Together} />
     </Router>
   ),
   document.getElementById("root")!,

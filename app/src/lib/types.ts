@@ -351,3 +351,41 @@ export interface HomeData {
   mangaCount: number;
   isSample: boolean;
 }
+
+// ── Watch together ──
+/** What a watch-together room is playing. */
+export interface PlayState {
+  mediaId: number;
+  episode: number;
+  title: string;
+  dub: boolean;
+  /** Seconds into the episode. */
+  position: number;
+  playing: boolean;
+  /** Who made the change. */
+  by: string;
+}
+
+export interface RoomMember {
+  id: string;
+  name: string;
+  host: boolean;
+  position: number;
+  buffering: boolean;
+  /** Said they're ready to start (the lobby). */
+  ready: boolean;
+}
+
+/** Who's in the room, and whether the host has started it (false: the lobby). */
+export interface Roster {
+  members: RoomMember[];
+  started: boolean;
+}
+
+export interface RoomInfo {
+  /** What guests enter to join (the host device's id). */
+  code: string;
+  /** This device's id in the member list. */
+  me: string;
+  host: boolean;
+}

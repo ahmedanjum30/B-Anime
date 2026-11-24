@@ -1,7 +1,7 @@
 import type {
   Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
   LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, Repo,
-  ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus,
+  ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus, RoomInfo, PlayState,
 } from "./types";
 
 // ── Streaming & reading (desktop only) ──
@@ -78,6 +78,16 @@ export const updateStatus = () =>
 export const checkForUpdate = () => call<UpdateStatus>("check_for_update");
 export const installUpdate = () => call<void>("install_update");
 export const setUpdateChannel = (beta: boolean) => call<UpdateStatus>("set_update_channel", { beta });
+
+// ── Watch together ──
+export const watchHost = (name: string) => call<RoomInfo>("watch_host", { name });
+export const watchJoin = (code: string, name: string) => call<RoomInfo>("watch_join", { code, name });
+export const watchLeave = () => call<void>("watch_leave");
+export const watchRoom = () => (inTauri ? call<RoomInfo | null>("watch_room") : Promise.resolve(null));
+export const watchSendState = (play: PlayState) => call<void>("watch_send_state", { play });
+export const watchSendStatus = (position: number, buffering: boolean) => call<void>("watch_send_status", { position, buffering });
+export const watchReady = (ready: boolean) => call<void>("watch_ready", { ready });
+export const watchStart = () => call<void>("watch_start");
 
 /** Listens to a backend event; returns an unsubscribe. */
 export async function onEvent<T>(name: string, fn: (payload: T) => void): Promise<() => void> {

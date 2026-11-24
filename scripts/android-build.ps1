@@ -12,10 +12,12 @@
       or set LIBCLANG_PATH to any folder holding libclang.dll.
 
 .EXAMPLE
-  scripts\android-build.ps1          # release APK
-  scripts\android-build.ps1 -Debug   # debug APK (faster, unsigned-debug key)
+  scripts\android-build.ps1                  # release APK
+  scripts\android-build.ps1 -Quick           # release APK for testing: no LTO, builds much faster
+  scripts\android-build.ps1 -Quick -Install  # ...and install it on the phone adb is connected to
+  scripts\android-build.ps1 -Debug           # debug APK (unsigned-debug key)
 #>
-param([switch]$Debug)
+param([switch]$Debug, [switch]$Quick, [switch]$Install)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -26,7 +28,10 @@ if (-not $env:NDK_HOME) {
   if (-not $ndk) { throw "No NDK under $env:ANDROID_HOME\ndk. Install one from Android Studio's SDK Manager." }
   $env:NDK_HOME = $ndk.FullName
 }
-if (-not $env:LIBCLANG_PATH) { $env:LIBCLANG_PATH = "$env:LOCALAPPDATA\libclang\clang\native" }
+if (-not $env:LIBCLANG_PATH) {
+  $env:LIBCLANG_PATH = @("$env:LOCALAPPDATA\libclang\clang\native", "$env:ProgramFiles\LLVM\bin") |
+    Where-Object { Test-Path "$_\libclang.dll" } | Select-Object -First 1
+}
 if (-not (Test-Path "$env:LIBCLANG_PATH\libclang.dll")) {
   throw "libclang.dll not found in $env:LIBCLANG_PATH. Run: python -m pip install libclang --target `"$env:LOCALAPPDATA\libclang`""
 }
@@ -35,6 +40,16 @@ if (-not (Test-Path "$env:LIBCLANG_PATH\libclang.dll")) {
 $tc = (Join-Path $env:NDK_HOME "toolchains\llvm\prebuilt\windows-x86_64") -replace '\\', '/'
 $clangInc = Get-ChildItem "$tc/lib/clang" -Directory | Sort-Object Name -Descending | Select-Object -First 1
 $env:BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android = "--sysroot=$tc/sysroot -isystem $(($clangInc.FullName) -replace '\\', '/')/include"
+
+# -Quick: the release profile without LTO and with many codegen units, incremental. Same as the
+# workspace's `quick` profile; set through cargo's environment because the Tauri CLI always
+# builds Android with --release.
+if ($Quick) {
+  $env:CARGO_PROFILE_RELEASE_LTO = "false"
+  $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "256"
+  $env:CARGO_PROFILE_RELEASE_INCREMENTAL = "true"
+  $env:CARGO_PROFILE_RELEASE_OPT_LEVEL = "2"
+}
 
 Write-Host "NDK:      $env:NDK_HOME"
 Write-Host "libclang: $env:LIBCLANG_PATH"
@@ -54,3 +69,13 @@ try {
 
 $out = Get-ChildItem "$root\app\src-tauri\gen\android\app\build\outputs\apk" -Recurse -Filter *.apk | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($out) { Write-Host "APK: $($out.FullName) ($([math]::Round($out.Length / 1MB, 1)) MB)" }
+
+if ($Install -and $out) {
+  $adb = "$env:ANDROID_HOME\platform-toolsdb.exe"
+  Write-Host "Installing on the connected phone..."
+  & $adb install -r $out.FullName
+  if ($LASTEXITCODE -ne 0) {
+    throw "Install failed. If it says DOWNGRADE, the phone has a newer version: uninstall it first (adb uninstall app.banime.desktop; this deletes the app's data)."
+  }
+  & $adb shell monkey -p app.banime.desktop -c android.intent.category.LAUNCHER 1 | Out-Null
+}

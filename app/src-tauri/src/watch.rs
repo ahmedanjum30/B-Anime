@@ -1,0 +1,117 @@
+//! Watch together, app side: one room at a time, its events forwarded to the UI.
+
+use banime_core::watch::{PlayState, Room, RoomEvent};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+use tokio::sync::Mutex;
+
+use crate::{AppState, msg};
+
+const WATCH_STATE: &str = "watch-state";
+const WATCH_ROSTER: &str = "watch-roster";
+const WATCH_CLOSED: &str = "watch-closed";
+
+#[derive(Default)]
+pub struct Watch {
+    room: Mutex<Option<Room>>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomInfo {
+    code: String,
+    me: String,
+    host: bool,
+}
+
+fn info(room: &Room) -> RoomInfo {
+    RoomInfo { code: room.code().to_owned(), me: room.me().to_owned(), host: room.is_host() }
+}
+
+fn forward(app: AppHandle, mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let _ = match event {
+                RoomEvent::State(s) => app.emit(WATCH_STATE, &s),
+                RoomEvent::Roster(r) => app.emit(WATCH_ROSTER, &r),
+                RoomEvent::Closed(reason) => app.emit(WATCH_CLOSED, &reason),
+            };
+        }
+    });
+}
+
+/// Replaces any room this device is in.
+async fn enter(app: AppHandle, state: &AppState, made: banime_core::Result<(Room, tokio::sync::mpsc::UnboundedReceiver<RoomEvent>)>) -> Result<RoomInfo, String> {
+    let (room, events) = made.map_err(msg)?;
+    let info = info(&room);
+    let old = state.watch.room.lock().await.replace(room);
+    if let Some(old) = old {
+        old.leave().await;
+    }
+    forward(app, events);
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn watch_host(app: AppHandle, state: tauri::State<'_, AppState>, name: String) -> Result<RoomInfo, String> {
+    enter(app, &state, Room::host(name).await).await
+}
+
+#[tauri::command]
+pub async fn watch_join(app: AppHandle, state: tauri::State<'_, AppState>, code: String, name: String) -> Result<RoomInfo, String> {
+    enter(app, &state, Room::join(&code, name).await).await
+}
+
+#[tauri::command]
+pub async fn watch_leave(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let room = state.watch.room.lock().await.take();
+    if let Some(room) = room {
+        room.leave().await;
+    }
+    Ok(())
+}
+
+/// The room this device is in, if any (the UI asks after a reload).
+#[tauri::command]
+pub async fn watch_room(state: tauri::State<'_, AppState>) -> Result<Option<RoomInfo>, String> {
+    Ok(state.watch.room.lock().await.as_ref().map(info))
+}
+
+#[tauri::command]
+pub async fn watch_send_state(state: tauri::State<'_, AppState>, play: PlayState) -> Result<(), String> {
+    if let Some(room) = state.watch.room.lock().await.as_ref() {
+        room.send_state(play);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn watch_send_status(state: tauri::State<'_, AppState>, position: f64, buffering: bool) -> Result<(), String> {
+    if let Some(room) = state.watch.room.lock().await.as_ref() {
+        room.send_status(position, buffering);
+    }
+    Ok(())
+}
+
+/// Ready to start (or not), in the lobby.
+#[tauri::command]
+pub async fn watch_ready(state: tauri::State<'_, AppState>, ready: bool) -> Result<(), String> {
+    if let Some(room) = state.watch.room.lock().await.as_ref() {
+        room.set_ready(ready);
+    }
+    Ok(())
+}
+
+/// The host starts the room: everyone plays the chosen episode.
+#[tauri::command]
+pub async fn watch_start(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let room = state.watch.room.lock().await;
+    let room = room.as_ref().ok_or("You're not in a room.")?;
+    if !room.is_host() {
+        return Err("Only the host starts the room.".into());
+    }
+    if !room.start() {
+        return Err("Pick an episode first.".into());
+    }
+    Ok(())
+}
