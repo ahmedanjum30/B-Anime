@@ -93,12 +93,14 @@ export default function Show() {
 
   /**
    * Watch together from here: opens a room (or uses the one this device hosts) with this show's
-   * next episode picked, then goes to the room. Guests don't pick; the host does.
+   * next episode picked, then goes to the room. Guests don't pick; the host does, and only in
+   * the lobby: once the room has started, this just goes to it (picking here would stop what
+   * everyone is watching).
    */
   const [opening, setOpening] = createSignal(false);
   const watchTogether = async (m: Media) => {
     const w = watchStore;
-    if (w.room() && !w.room()!.host) return navigate("/together");
+    if (w.room() && (!w.room()!.host || w.started())) return navigate("/together");
     setOpening(true);
     try {
       if (!w.room() && !(await w.host(w.defaultName().trim()))) return;
@@ -178,7 +180,7 @@ export default function Show() {
                       <When when={m().genres.length}>
                         <p class="show-genres">{m().genres.join(" · ")}</p>
                       </When>
-                      <When when={inTauri && m().type === "ANIME" && !(watchStore.room() && !watchStore.room()!.host)}>
+                      <When when={inTauri && m().type === "ANIME" && !(watchStore.room() && !watchStore.room()!.host && !watchStore.started())}>
                         <button
                           type="button"
                           class="btn btn-sm show-together"
@@ -187,7 +189,13 @@ export default function Show() {
                           onClick={() => void watchTogether(m())}
                         >
                           <Users size={16} stroke-width={1.75} aria-hidden="true" />
-                          {opening() ? "Opening a room…" : watchStore.room() ? "Watch this together" : "Watch together"}
+                          {opening()
+                            ? "Opening a room…"
+                            : !watchStore.room()
+                              ? "Watch together"
+                              : watchStore.started()
+                                ? "Back to your room"
+                                : "Pick this for the room"}
                         </button>
                       </When>
                     </div>

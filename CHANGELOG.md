@@ -15,6 +15,11 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
+## [0.4.6]
+
+### Fixed
+- Watch together on a show's page no longer stops what the room is watching.
+
 ## [0.4.5] - 2026-11-24
 
 ### Added
