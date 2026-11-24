@@ -19,6 +19,7 @@ import { createSource, recallServer, rememberServer, rememberShowSource, serverN
 import { sameServerIn, startSource } from "../lib/server-pick";
 import { homeStore } from "../lib/store";
 import { syncPlayer, watchStore } from "../lib/watch";
+import Together from "./Together";
 import type { SkipTime } from "../lib/types";
 
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
@@ -205,7 +206,7 @@ export default function Player() {
   const [videoError, setVideoError] = createSignal<string | null>(null);
   const [tracks, setTracks] = createSignal<TextTrack[]>([]);
   const [activeTrack, setActiveTrack] = createSignal(-1);
-  const [menu, setMenu] = createSignal<null | "subs" | "audio" | "quality" | "external" | "episodes">(null);
+  const [menu, setMenu] = createSignal<null | "subs" | "audio" | "quality" | "external" | "episodes" | "together">(null);
   // The episodes panel opens with an empty search each time.
   createEffect(on(menu, (m) => m !== "episodes" && setEpQuery("")));
   /** Subtitle files the user loaded for this episode. */
@@ -680,6 +681,13 @@ export default function Player() {
   const resumePoint = async () => {
     if (resumed || !inTauri) return null;
     resumed = true;
+    // In a Watch together room nobody resumes their own spot: everyone starts where the room is
+    // (the beginning, at Start), and the room's position puts them in step after that.
+    if (watchStore.room()) {
+      resumeAt = null;
+      resumePending = false;
+      return null;
+    }
     const pos = await getPosition(mediaId(), episode()).catch(() => null);
     resumeAt = pos && pos > 30 ? pos : null;
     resumePending = resumeAt !== null;
@@ -1173,6 +1181,12 @@ export default function Player() {
       </Show>
       <Show when={!failure() && !videoError() && waiting()}>
         <div class="player-spinner" aria-label="Loading" />
+        {/* In a room, say what's loading: the room may just have switched show or episode. */}
+        <Show when={watchStore.room() && watchStore.started()}>
+          <p class="player-spinner-label">
+            Loading {title() || "the episode"} · Episode {episode()} for the room…
+          </p>
+        </Show>
       </Show>
       {/* Touch screens: play and pause from the middle (a tap on the picture only shows the
           controls). Hidden with them, and while loading. */}
@@ -1227,7 +1241,11 @@ export default function Player() {
                   ? "Watching together"
                   : "In the lobby: the host starts the episode"
             }
-            onClick={() => navigate("/together")}
+            aria-haspopup="dialog"
+            aria-expanded={menu() === "together"}
+            // The room opens over the episode, which keeps playing (leaving for the Together page
+            // would close the player).
+            onClick={() => setMenu(menu() === "together" ? null : "together")}
           >
             <Users size={16} stroke-width={1.75} aria-hidden="true" />
             <span class="num">{watchStore.members().length}</span>
@@ -1237,6 +1255,12 @@ export default function Player() {
           </button>
         </Show>
       </header>
+
+      <Show when={menu() === "together"}>
+        <aside class="player-drawer player-together" role="dialog" aria-label="Watch together">
+          <Together embedded onClose={() => setMenu(null)} />
+        </aside>
+      </Show>
 
       <Show when={menu() === "episodes"}>
         <aside class="player-drawer" role="dialog" aria-label="Episodes">

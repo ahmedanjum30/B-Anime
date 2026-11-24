@@ -17,8 +17,17 @@ one line each, written for users (see CLAUDE.md).
 
 ## [0.4.6]
 
+### Added
+- Rejoin your last three rooms, even if someone else took over hosting; closing the app mid-session offers it at the next launch.
+
+### Changed
+- In the player, the room opens over the episode, which keeps playing.
+- In a room, episodes start where the room is, not from your own saved spot.
+- The host switches the room to another show or episode in one click; everyone moves and it plays.
+- Leaving the player no longer pauses the room, and a bar takes you back to the episode.
+
 ### Fixed
-- Watch together on a show's page no longer stops what the room is watching.
+- Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
 
 ## [0.4.5] - 2026-11-24
 

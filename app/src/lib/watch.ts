@@ -1,11 +1,11 @@
 import { createEffect, createRoot, createSignal, on, onCleanup } from "solid-js";
 
 import {
-  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRoom, watchSendState,
-  watchSendStatus, watchStart,
+  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRejoin, watchRoom,
+  watchSendState, watchSendStatus, watchStart,
 } from "./api";
 import { homeStore } from "./store";
-import type { PlayState, RoomInfo, RoomMember, Roster, SourceRef } from "./types";
+import type { PlayState, RecentRoom, RoomInfo, RoomMember, Roster, SourceRef } from "./types";
 
 /** A state from the room, stamped with when it arrived (to account for time passing while playing). */
 export type RemoteState = PlayState & { at: number };
@@ -13,6 +13,20 @@ export type RemoteState = PlayState & { at: number };
 export type OwnState = Omit<PlayState, "by">;
 
 const NAME_KEY = "banime.watch.name";
+const RECENT_KEY = "banime.watch.recent";
+/** Rooms remembered for Rejoin. */
+const RECENT_MAX = 3;
+/** On launch, a room this recent is offered straight away (the app was closed mid-session). */
+const OFFER_REJOIN_MS = 30 * 60 * 1000;
+
+function loadRecent(): RecentRoom[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((r) => r && Array.isArray(r.codes) && r.codes.length) : [];
+  } catch {
+    return [];
+  }
+}
 
 /** The website's join page: opens B-Anime into the room, or offers the download. The code stays
  *  after the "#", which browsers never send to the server. */
@@ -37,21 +51,67 @@ export const watchStore = createRoot(() => {
   const [started, setStarted] = createSignal(false);
   /** What the room is on: the last state from the room or sent from here. */
   const [nowPlaying, setNowPlaying] = createSignal<OwnState | null>(null);
+  /** When `nowPlaying` was last known (performance.now()), to work out where the room is now. */
+  const [nowAt, setNowAt] = createSignal(0);
+  /** Where the room is now: its last known position, moved on by the time since if playing. */
+  const roomPosition = () => {
+    const p = nowPlaying();
+    if (!p) return 0;
+    return p.position + (p.playing ? (performance.now() - nowAt()) / 1000 : 0);
+  };
+  /** The room's episode, as a path. */
+  const roomPath = () => {
+    const p = nowPlaying();
+    return p ? `/watch/${p.mediaId}/${p.episode}${p.dub ? "?dub=1" : ""}` : null;
+  };
   const [busy, setBusy] = createSignal<"host" | "join" | null>(null);
   /** The link to the room dropped and this device is getting back in. */
   const [reconnecting, setReconnecting] = createSignal(false);
   /** A room code from an invite link, waiting for the Together page to join it. */
   const [invite, setInvite] = createSignal<string | null>(null);
+  /** The last rooms this device was in, newest first, to rejoin them. */
+  const [recent, setRecent] = createSignal<RecentRoom[]>(loadRecent());
+  /** A recent room to rejoin from the launch notice, waiting for the Together page. */
+  const [pendingRejoin, setPendingRejoin] = createSignal<RecentRoom | null>(null);
+  /** The entry for the room this device is in (its code when entered). */
+  let recentKey: string | null = null;
+  const saveRecent = (list: RecentRoom[]) => {
+    setRecent(list);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    } catch {
+      /* private mode: not remembered */
+    }
+  };
+  /** Keeps this room's entry current: who's in it (their codes, the host first) and what's on. */
+  const remember = () => {
+    const r = room();
+    if (!r || !recentKey) return;
+    const others = members().filter((m) => m.id !== r.me);
+    const codes = [...others.filter((m) => m.host), ...others.filter((m) => !m.host)].map((m) => m.code).filter(Boolean);
+    if (!codes.length) return;
+    const entry: RecentRoom = {
+      key: recentKey,
+      title: nowPlaying()?.title ?? "",
+      names: others.map((m) => m.name),
+      codes,
+      at: Date.now(),
+    };
+    saveRecent([entry, ...recent().filter((x) => x.key !== recentKey)].slice(0, RECENT_MAX));
+  };
+  const forget = (key: string) => saveRecent(recent().filter((x) => x.key !== key));
 
   void watchRoom().then((r) => r && setRoom(r)).catch(() => {});
   void onEvent<PlayState>("watch-state", (s) => {
     setRemote({ ...s, at: performance.now() });
     setNowPlaying(s);
+    setNowAt(performance.now());
   });
   void onEvent<Roster>("watch-roster", (r) => {
     announceChanges(members(), r.members);
     setMembers(r.members);
     setStarted(r.started);
+    remember();
   });
   void onEvent<RoomInfo>("watch-info", (info) => {
     const was = room();
@@ -117,11 +177,13 @@ export const watchStore = createRoot(() => {
     }
   };
 
-  const enter = async (kind: "host" | "join", run: () => Promise<RoomInfo>) => {
+  const enter = async (kind: "host" | "join", run: () => Promise<RoomInfo>, key?: string) => {
     setBusy(kind);
     try {
       reset();
-      setRoom(await run());
+      const info = await run();
+      recentKey = key ?? info.code;
+      setRoom(info);
       return true;
     } catch (e) {
       homeStore.notify(errorText(e));
@@ -139,11 +201,46 @@ export const watchStore = createRoot(() => {
     const c = codeFromLink(code) ?? code.trim();
     return enter("join", () => watchJoin(c, name || "Guest"));
   };
-  /** Leaves; a host ends the room for everyone (`end`) or hands it to the next guest. */
+  /**
+   * The host picks what the room watches. In the lobby it's just the pick; once started,
+   * everyone moves to it and it plays (the same room, no new one): the caller then opens it here
+   * too (`roomPath`). Anyone still loading is waited for as usual.
+   */
+  const pick = (s: Omit<OwnState, "position" | "playing">) => {
+    send({ ...s, position: 0, playing: started() });
+    return started();
+  };
+
+  /** Back into a room from the recent list, through whoever hosts it now. */
+  const rejoin = (entry: RecentRoom, name: string) => {
+    rememberName(name);
+    return enter("join", () => watchRejoin(entry.codes, name || "Guest"), entry.key).then((ok) => {
+      if (!ok) forget(entry.key);
+      return ok;
+    });
+  };
+  /** Leaves; a host ends the room for everyone (`end`) or hands it to the next guest. A room
+   *  ended here is gone, so it leaves the recent list too. */
   const leave = async (end = false) => {
+    if (end && room()?.host && recentKey) forget(recentKey);
+    recentKey = null;
     reset();
     await watchLeave(end).catch(() => {});
   };
+
+  // Closed mid-session: offer the room again right away.
+  queueMicrotask(() => {
+    const last = recent()[0];
+    if (!inTauri || !last || Date.now() - last.at > OFFER_REJOIN_MS) return;
+    void watchRoom().then((r) => {
+      if (r) return;
+      const who = last.names.length ? ` with ${last.names.join(", ")}` : "";
+      homeStore.notify(`You were watching ${last.title || "together"}${who}.`, {
+        label: "Rejoin",
+        run: () => setPendingRejoin(last),
+      });
+    });
+  });
   /** This device in the member list. */
   const me = () => members().find((m) => m.id === room()?.me);
   const setReady = (ready: boolean) => void watchReady(ready).catch((e) => homeStore.notify(errorText(e)));
@@ -163,6 +260,7 @@ export const watchStore = createRoot(() => {
   const send = (s: OwnState) => {
     if (!room()) return;
     setNowPlaying(s);
+    setNowAt(performance.now());
     void watchSendState({ ...s, by: "" }).catch(() => {});
   };
   const status = (position: number, buffering: boolean) => {
@@ -189,6 +287,7 @@ export const watchStore = createRoot(() => {
 
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
+    recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt,
     host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });
@@ -256,9 +355,12 @@ export function syncPlayer(opts: {
       source: w.room()?.host ? opts.source() : null,
     };
   };
+  /** The player is closing: the browser pauses its video, which isn't anyone's pause. */
+  let closing = false;
+  onCleanup(() => (closing = true));
   const sendNow = () => {
-    if (performance.now() < quietUntil) return;
     const v = opts.video();
+    if (closing || !v?.isConnected || performance.now() < quietUntil) return;
     // In the lobby only Start plays the episode: any other play (the player's own autoplay
     // included) is undone, and the room hears the episode, paused.
     if (v && !v.paused && w.room() && !w.started()) {
@@ -283,8 +385,8 @@ export function syncPlayer(opts: {
   // goes back to where the room is.
   let seekNoticeAt = 0;
   const onSeeked = () => {
-    if (performance.now() < quietUntil) return;
     const v = opts.video();
+    if (closing || !v?.isConnected || performance.now() < quietUntil) return;
     const room = w.remote();
     if (v && w.room() && !w.room()!.host && w.started() && room && room.mediaId === opts.mediaId() && room.episode === opts.episode()) {
       const expected = room.position + (room.playing ? (performance.now() - room.at) / 1000 : 0);
@@ -404,10 +506,14 @@ export function syncPlayer(opts: {
 
   const attach = (v: HTMLVideoElement) => {
     const onReady = () => {
-      if (pending) apply(pending);
-      else {
-        const s = w.remote();
-        if (s && s.mediaId === opts.mediaId() && s.episode === opts.episode()) apply(s);
+      if (pending) return apply(pending);
+      const s = w.remote();
+      if (s && s.mediaId === opts.mediaId() && s.episode === opts.episode()) return apply(s);
+      // Back in the player after browsing (or after picking): the room carried on meanwhile, so
+      // start where it is now. The host hears no states of its own, so this is how it catches up.
+      const p = w.nowPlaying();
+      if (w.room() && w.started() && p && p.mediaId === opts.mediaId() && p.episode === opts.episode()) {
+        apply({ ...p, by: "", position: w.roomPosition(), at: performance.now() });
       }
     };
     v.addEventListener("loadedmetadata", onReady);

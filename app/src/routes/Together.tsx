@@ -4,7 +4,8 @@ import { A, useNavigate } from "@solidjs/router";
 import { errorText, getLibrary, getMedia, getPlayerPrefs, installExtension, localEpisodes } from "../lib/api";
 import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
-import { Copy, Search } from "../lib/icons";
+import { Copy, Search, X } from "../lib/icons";
+import { fmtAgo } from "../lib/format";
 import { createSource } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { LibraryEntry, ListStatus } from "../lib/types";
@@ -32,7 +33,11 @@ const clock = (s: number) => {
  * the host picks the episode and starts it; from then on play, pause, seeks and episode changes
  * are shared. Each device plays from its own source.
  */
-export default function Together() {
+export default function Together(props: {
+  /** Inside the player, over the episode (which keeps playing): no page title, a Back button. */
+  embedded?: boolean;
+  onClose?: () => void;
+}) {
   const w = watchStore;
   const navigate = useNavigate();
   const [name, setName] = createSignal(w.defaultName());
@@ -83,6 +88,14 @@ export default function Together() {
       homeStore.notify("Couldn't copy. Select it and copy it instead.");
     }
   };
+  // Rejoin, from the launch notice.
+  createEffect(
+    on(w.pendingRejoin, (r) => {
+      if (!r || w.busy() || w.room()) return;
+      w.setPendingRejoin(null);
+      void w.rejoin(r, name().trim());
+    }),
+  );
   // An invite link was opened: join it (once a name is known, which it usually is).
   createEffect(
     on(w.invite, (inv) => {
@@ -98,7 +111,7 @@ export default function Together() {
   const setEpisode = (n: number) => {
     const p = w.nowPlaying();
     if (!p || !Number.isFinite(n) || n < 1 || n === p.episode) return;
-    w.send({ ...p, episode: n, position: 0, playing: false });
+    if (w.pick({ ...p, episode: n })) navigate(w.roomPath()!);
   };
   const [epDraft, setEpDraft] = createSignal("");
   // The room's audio and subtitles (the host sets them; everyone's player follows).
@@ -113,15 +126,33 @@ export default function Together() {
     w.start();
     const path = watchPath();
     if (path) navigate(path);
+    props.onClose?.();
   };
 
   return (
-    <div class="page together-page">
-      <h1 class="page-title">Watch together</h1>
-      <p class="page-lede">
-        Watch an episode in step with friends. Everyone plays it from their own source; only play, pause and the
-        position are shared, device to device.
-      </p>
+    <div class="together-page" classList={{ page: !props.embedded, "together-embedded": !!props.embedded }}>
+      <Show
+        when={props.embedded}
+        fallback={
+          <>
+            <h1 class="page-title">Watch together</h1>
+            <p class="page-lede">
+              Watch an episode in step with friends. Everyone plays it from their own source; only play, pause and
+              the position are shared, device to device.
+            </p>
+          </>
+        }
+      >
+        <div class="drawer-head">
+          <div class="drawer-title">
+            <p class="drawer-show">Watch together</p>
+            <p class="drawer-meta">The episode keeps playing behind this.</p>
+          </div>
+          <button type="button" class="btn btn-sm" onClick={() => props.onClose?.()}>
+            Back to the episode
+          </button>
+        </div>
+      </Show>
 
       <Show
         when={w.room()}
@@ -165,6 +196,37 @@ export default function Together() {
                 </button>
               </form>
             </div>
+            <Show when={w.recent().length}>
+              <div class="together-recent">
+                <h3 class="together-subhead">Recent rooms</h3>
+                <ul class="watch-list">
+                  <For each={w.recent()}>
+                    {(r) => (
+                      <li class="watch-member together-recent-row">
+                        <span class="together-recent-text">
+                          <span class="watch-member-name">{r.title || "A room"}</span>
+                          <span class="together-recent-meta">
+                            {r.names.length ? `with ${r.names.join(", ")} · ` : ""}
+                            {fmtAgo(new Date(r.at).toISOString(), homeStore.now())}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          class="btn btn-sm"
+                          disabled={!!w.busy()}
+                          onClick={() => void w.rejoin(r, name().trim())}
+                        >
+                          {w.busy() === "join" ? "Rejoining…" : "Rejoin"}
+                        </button>
+                        <button type="button" class="icon-btn" aria-label={`Forget ${r.title || "this room"}`} onClick={() => w.forget(r.key)}>
+                          <X size={16} stroke-width={1.75} aria-hidden="true" />
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </div>
+            </Show>
           </section>
         }
       >
@@ -342,16 +404,15 @@ export default function Together() {
                                 aria-current={w.nowPlaying()?.mediaId === e.mediaId ? "true" : undefined}
                                 // Sets the room's episode; nothing opens until Start (or, once
                                 // started, everyone moves to it, paused).
-                                onClick={() =>
-                                  w.send({
+                                onClick={() => {
+                                  const moved = w.pick({
                                     mediaId: e.mediaId,
                                     episode: ep(),
                                     title: e.title,
                                     dub: !!recallDub(e.mediaId),
-                                    position: 0,
-                                    playing: false,
-                                  })
-                                }
+                                  });
+                                  if (moved) navigate(w.roomPath()!);
+                                }}
                               >
                                 <Show
                                   when={e.coverUrl}
@@ -412,27 +473,27 @@ export default function Together() {
                             <Show when={m.rttMs !== null}> · {m.rttMs} ms</Show>
                           </span>
                         </Show>
+                          {/* Host: the room pauses while someone loads; not for someone on a slow
+                              connection it shouldn't keep stopping for. */}
+                          <Show when={room().host && w.started() && m.id !== room().me}>
+                            <button
+                              type="button"
+                              class="link-btn watch-wait"
+                              aria-pressed={!w.notWaiting().has(m.id)}
+                              title={
+                                w.notWaiting().has(m.id)
+                                  ? `The room plays on while ${m.name} loads`
+                                  : `The room pauses while ${m.name} loads`
+                              }
+                              onClick={() => w.waitFor(m.id, w.notWaiting().has(m.id))}
+                            >
+                              {w.notWaiting().has(m.id) ? "Wait for them" : "Don't wait"}
+                            </button>
+                          </Show>
                       </span>
                       <span class="watch-member-state num" data-ready={!w.started() && m.ready ? "" : undefined}>
                         {w.started() ? (m.buffering ? "Loading…" : clock(m.position)) : m.ready ? "Ready" : "Not ready"}
                       </span>
-                      {/* Host: the room pauses while someone loads; not for someone on a slow
-                          connection it shouldn't keep stopping for. */}
-                      <Show when={room().host && w.started() && m.id !== room().me}>
-                        <button
-                          type="button"
-                          class="link-btn watch-wait"
-                          aria-pressed={!w.notWaiting().has(m.id)}
-                          title={
-                            w.notWaiting().has(m.id)
-                              ? `The room plays on while ${m.name} loads`
-                              : `The room pauses while ${m.name} loads`
-                          }
-                          onClick={() => w.waitFor(m.id, w.notWaiting().has(m.id))}
-                        >
-                          {w.notWaiting().has(m.id) ? "Wait for them" : "Don't wait"}
-                        </button>
-                      </Show>
                     </li>
                   )}
                 </For>

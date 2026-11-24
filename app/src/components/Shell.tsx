@@ -39,13 +39,20 @@ export default function Shell(props: ParentProps) {
       if (!r || !watchStore.room() || !watchStore.started() || watchStore.staleForSwitch(r)) return;
       const path = `/watch/${r.mediaId}/${r.episode}`;
       if (path === followed) return;
+      const first = !followed;
       followed = path;
-      if (location.pathname !== path) navigate(`${path}${r.dub ? "?dub=1" : ""}`);
+      if (location.pathname !== path) {
+        // Someone moved the room on: say where to, while the new episode loads.
+        if (!first) homeStore.notify(`Switching to ${r.title || "the next show"} · Episode ${r.episode}…`);
+        navigate(`${path}${r.dub ? "?dub=1" : ""}`);
+      }
     }),
   );
   createEffect(on(watchStore.room, () => (followed = "")));
   // An invite link was opened: the Together page joins it.
   createEffect(on(watchStore.invite, (code) => code && location.pathname !== "/together" && navigate("/together")));
+  // Rejoin from the launch notice: the Together page does it.
+  createEffect(on(watchStore.pendingRejoin, (r) => r && location.pathname !== "/together" && navigate("/together")));
   // The host pressed Start: everyone not on the episode yet goes to it (it plays when loaded).
   createEffect(
     on(watchStore.started, (started, was) => {
@@ -176,6 +183,25 @@ export default function Shell(props: ParentProps) {
         </div>
       </Show>
       <WhatsNew />
+      {/* In a running room but not in its player: one click back to the episode (it picks up
+          where the room is). */}
+      <Show when={watchStore.room() && watchStore.started() && watchStore.nowPlaying() && !location.pathname.startsWith("/watch/")}>
+        <div class="room-bar" role="status">
+          <Users size={16} stroke-width={1.75} aria-hidden="true" />
+          <span class="room-bar-text">
+            <strong>{watchStore.nowPlaying()!.title || "Watching together"}</strong>
+            <span class="num"> · Ep {watchStore.nowPlaying()!.episode}</span>
+            <Show when={watchStore.members().length > 1}>
+              <span class="room-bar-who">
+                {" "}· with {watchStore.members().filter((m) => m.id !== watchStore.room()?.me).map((m) => m.name).join(", ")}
+              </span>
+            </Show>
+          </span>
+          <button type="button" class="btn btn-sm btn-primary" onClick={() => navigate(watchStore.roomPath()!)}>
+            Back to the episode
+          </button>
+        </div>
+      </Show>
       <div
         class="toast"
         role="status"

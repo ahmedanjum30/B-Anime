@@ -662,15 +662,46 @@ impl Room {
                 ));
             }
         };
+        Ok(Self::joined(endpoint, seed, name, code.trim().to_owned(), host_addr, conn).await)
+    }
+
+    /// Gets back into a room this device was in: tries each of its members' codes in turn (the
+    /// host first) and joins whoever hosts it now. A room whose host left goes on with one of its
+    /// guests hosting, so the old host's own code may no longer answer.
+    pub async fn rejoin(codes: &[String], name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
+        let seed = Seed::random();
+        let endpoint = bind(seed).await?;
+        for code in codes {
+            let Ok(addr) = parse_code(code) else { continue };
+            let Ok(conn) = connect(&endpoint, addr.clone(), ATTEMPT).await else { continue };
+            // A member that isn't hosting closes the connection at once ("not hosting").
+            if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
+                continue;
+            }
+            tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
+            return Ok(Self::joined(endpoint, seed, name, code.trim().to_owned(), addr, conn).await);
+        }
+        endpoint.close().await;
+        Err(Error::Network("That room has ended: nobody in it is hosting any more.".into()))
+    }
+
+    async fn joined(
+        endpoint: Endpoint,
+        seed: Seed,
+        name: String,
+        code: String,
+        host_addr: EndpointAddr,
+        conn: Connection,
+    ) -> (Room, mpsc::UnboundedReceiver<RoomEvent>) {
         tracing::info!("watch: connected to the room");
         // Its own code goes in the hello (for taking over hosting): wait briefly for the relay.
         let _ = tokio::time::timeout(Duration::from_secs(5), endpoint.online()).await;
         let (events, rx) = mpsc::unbounded_channel();
         let (to_host, outgoing) = mpsc::unbounded_channel();
-        let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: code.trim().to_owned() });
+        let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code });
         tokio::spawn(accept_loop(shared.clone()));
         tokio::spawn(guest_loop(shared.clone(), host_addr, conn, outgoing));
-        Ok((Room { shared }, rx))
+        (Room { shared }, rx)
     }
 
     pub fn info(&self) -> RoomInfo {
@@ -1229,6 +1260,29 @@ mod tests {
         .await;
         guest.leave(false).await;
         host.leave(true).await;
+    }
+
+    /// Real network: a host that closed the app finds its room again through its guests.
+    #[tokio::test]
+    #[ignore]
+    async fn live_room_rejoin_finds_the_new_host() {
+        let (host, mut host_events) = Room::host("Host".into()).await.unwrap();
+        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into()).await.unwrap();
+        let codes = until(&mut host_events, |e| match e {
+            RoomEvent::Roster(r) if r.members.len() == 2 => Some(r.members.into_iter().map(|m| m.code).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .await;
+        until(&mut guest_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
+        // The host goes (as when the app closes: it handed the room over).
+        host.leave(false).await;
+        until(&mut guest_events, |e| matches!(e, RoomEvent::Info(i) if i.host).then_some(())).await;
+        // Back, with the codes it remembered: the old host's own no longer answers; the guest's does.
+        let (back, mut back_events) = Room::rejoin(&codes, "Host again".into()).await.unwrap();
+        assert!(!back.is_host());
+        until(&mut back_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
+        back.leave(false).await;
+        guest.leave(true).await;
     }
 
     /// Real network: the host hands over, the first guest hosts, and the second follows it.

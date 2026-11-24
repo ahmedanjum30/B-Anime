@@ -2501,9 +2501,40 @@ a.slot:focus-visible {
 .watch-member-link[data-slow] {
   color: var(--amber, #d9a441);
 }
+.together-recent {
+  margin-top: calc(var(--u) * 4);
+  max-width: 560px;
+}
+.together-recent .together-subhead {
+  margin-bottom: var(--u);
+}
+.together-recent-text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.together-recent-meta {
+  font-size: 12px;
+  color: var(--z8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Don't wait: with the connection details, as quiet as they are. */
 .watch-wait {
   flex-shrink: 0;
+  font: inherit;
   font-size: 12px;
+  font-weight: 500;
+  line-height: inherit;
+  color: var(--z8);
+  text-decoration: underline;
+  text-decoration-color: var(--z5);
+  text-underline-offset: 2px;
+}
+.watch-wait:hover {
+  color: var(--z10);
 }
 .together-end {
   color: var(--red);
@@ -2558,6 +2589,20 @@ a.slot:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: var(--u);
+}
+
+/* Watch together over the episode: the Together page in a wider panel, scrolling. */
+.player-together {
+  width: min(460px, calc(100% - 48px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.together-embedded .section + .section,
+.together-embedded .section {
+  margin-top: calc(var(--u) * 3);
+}
+.together-embedded .together-pick-list {
+  grid-template-columns: 1fr;
 }
 
 /* The episodes panel: along the right edge, over the picture, under the top bar. */
@@ -3114,6 +3159,20 @@ a.slot:focus-visible {
     pointer-events: none;
   }
 }
+.player-spinner-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 40px);
+  transform: translateX(-50%);
+  max-width: calc(100% - 48px);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: rgb(0 0 0 / 0.55);
+  color: var(--z10);
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+}
 .player-spinner {
   position: absolute;
   left: 50%;
@@ -3529,6 +3588,47 @@ a.slot:focus-visible {
 }
 
 /* ───────── Toast ───────── */
+/* The running room, while browsing away from its player. */
+.room-bar {
+  position: fixed;
+  left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2);
+  bottom: calc(var(--u) * 3);
+  z-index: 20;
+  transform: translateX(-50%);
+  max-width: min(640px, calc(100vw - var(--rail-w) - 32px));
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1.5);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid color-mix(in oklab, var(--red) 45%, var(--z3));
+  border-radius: var(--radius);
+  background: var(--z1);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  color: var(--z10);
+  font-size: 13px;
+}
+.room-bar > svg {
+  flex-shrink: 0;
+  color: var(--red);
+}
+.room-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-bar-who {
+  color: var(--z8);
+}
+.room-bar .btn {
+  flex-shrink: 0;
+}
+
+/* Notices sit above the room bar while it shows. */
+.shell:has(.room-bar) .toast {
+  bottom: calc(var(--u) * 3 + 64px);
+}
+
 /* What's new: once, the first launch after an update. */
 .whats-new {
   /* The global reset zeroes margins; a modal dialog centres itself with auto ones. */
@@ -3733,6 +3833,18 @@ a.slot:focus-visible {
     padding-top: env(safe-area-inset-top);
     padding-bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
     scrollbar-gutter: auto;
+  }
+  .room-bar {
+    left: 50%;
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u));
+    width: calc(100vw - 32px);
+    max-width: none;
+  }
+  .room-bar-who {
+    display: none;
+  }
+  .shell:has(.room-bar) .toast {
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u) + 64px);
   }
   /* Notices sit above the bottom bar, full width less the gutters; the rail is the bottom bar
      here, so they centre on the screen. */

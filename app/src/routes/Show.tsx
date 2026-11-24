@@ -100,7 +100,9 @@ export default function Show() {
   const [opening, setOpening] = createSignal(false);
   const watchTogether = async (m: Media) => {
     const w = watchStore;
-    if (w.room() && (!w.room()!.host || w.started())) return navigate("/together");
+    // A session is running: back to its episode (it picks up where the room is).
+    if (w.room() && w.started()) return navigate(w.roomPath() ?? "/together");
+    if (w.room() && !w.room()!.host) return navigate("/together");
     setOpening(true);
     try {
       if (!w.room() && !(await w.host(w.defaultName().trim()))) return;
@@ -109,16 +111,14 @@ export default function Show() {
       const episode =
         !entry || entry.status === "PLANNING" || entry.status === "COMPLETED" ? 1 : Math.max(1, Math.min(entry.progress + 1, last));
       const e = source.usable().find((x) => x.id === source.ext());
-      w.send({
+      const moved = w.pick({
         mediaId: m.id,
         episode,
         title: m.title.userPreferred,
         dub: dub(),
-        position: 0,
-        playing: false,
         source: e && /^https:\/\//.test(e.sourceUrl) ? { id: e.id, name: e.name, url: e.sourceUrl } : null,
       });
-      navigate("/together");
+      navigate(moved ? w.roomPath()! : "/together");
     } finally {
       setOpening(false);
     }
@@ -194,7 +194,7 @@ export default function Show() {
                             : !watchStore.room()
                               ? "Watch together"
                               : watchStore.started()
-                                ? "Back to your room"
+                                ? "Back to the episode"
                                 : "Pick this for the room"}
                         </button>
                       </When>

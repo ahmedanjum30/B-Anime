@@ -87,6 +87,7 @@ export const whatsNewSeen = () => call<void>("whats_new_seen");
 // ── Watch together ──
 export const watchHost = (name: string) => call<RoomInfo>("watch_host", { name });
 export const watchJoin = (code: string, name: string) => call<RoomInfo>("watch_join", { code, name });
+export const watchRejoin = (codes: string[], name: string) => call<RoomInfo>("watch_rejoin", { codes, name });
 export const watchLeave = (end = false) => call<void>("watch_leave", { end });
 export const watchRoom = () => (inTauri ? call<RoomInfo | null>("watch_room") : Promise.resolve(null));
 export const watchSendState = (play: PlayState) => call<void>("watch_send_state", { play });

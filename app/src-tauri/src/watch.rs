@@ -50,6 +50,12 @@ pub async fn watch_host(app: AppHandle, state: tauri::State<'_, AppState>, name:
     enter(app, &state, Room::host(name).await).await
 }
 
+/// Back into a room this device was in, through whichever of its members hosts it now.
+#[tauri::command]
+pub async fn watch_rejoin(app: AppHandle, state: tauri::State<'_, AppState>, codes: Vec<String>, name: String) -> Result<RoomInfo, String> {
+    enter(app, &state, Room::rejoin(&codes, name).await).await
+}
+
 #[tauri::command]
 pub async fn watch_join(app: AppHandle, state: tauri::State<'_, AppState>, code: String, name: String) -> Result<RoomInfo, String> {
     enter(app, &state, Room::join(&code, name).await).await

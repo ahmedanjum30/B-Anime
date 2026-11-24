@@ -396,12 +396,28 @@ export interface RoomMember {
   direct: boolean | null;
   /** Round trip to the host in ms; null for the host. */
   rttMs: number | null;
+  /** Their own room code (where the room goes if they take over hosting). */
+  code: string;
 }
 
 /** Who's in the room, and whether the host has started it (false: the lobby). */
 export interface Roster {
   members: RoomMember[];
   started: boolean;
+}
+
+/** A room this device was in, kept to rejoin it (the last three). */
+export interface RecentRoom {
+  /** The code the room had when this device entered it. */
+  key: string;
+  /** What it was watching. */
+  title: string;
+  /** The others in it. */
+  names: string[];
+  /** Everyone else's codes, the host first: whoever hosts it now is among them. */
+  codes: string[];
+  /** When this device was last in it (ms). */
+  at: number;
 }
 
 export interface RoomInfo {

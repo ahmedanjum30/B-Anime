@@ -719,6 +719,7 @@ pub fn run() {
             updates::set_update_channel,
             watch::watch_host,
             watch::watch_join,
+            watch::watch_rejoin,
             watch::watch_leave,
             watch::watch_room,
             watch::watch_send_state,
