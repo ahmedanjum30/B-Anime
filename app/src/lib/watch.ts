@@ -391,6 +391,8 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** Paused by someone this far ahead (at most): this device watches up to there instead of skipping to it. */
+const CATCH_UP_MAX = 10;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
 const WAIT_FOR = 2000;
 /** A jump to where the room is that isn't loaded yet lands this far ahead, so the room arrives
@@ -563,9 +565,27 @@ export function syncPlayer(opts: {
     sendNow();
   };
 
+  /** Watching up to where someone paused (see `apply`): stops there, unless something else happens first. */
+  let catchUp: number | undefined;
+  const watchUntil = (v: HTMLVideoElement, until: number) => {
+    const check = () => {
+      catchUp = undefined;
+      // Paused by hand meanwhile (that's the viewer's own, and went to the room), or closing.
+      if (closing || !v.isConnected || v.paused) return;
+      const left = until - v.currentTime;
+      if (left <= 0.05) return selfPause(v);
+      catchUp = window.setTimeout(check, Math.min(250, left * 1000));
+    };
+    check();
+  };
+  onCleanup(() => clearTimeout(catchUp));
+
   const apply = (s: RemoteState) => {
     const v = opts.video();
     if (!v) return;
+    // Each word from the room replaces the last one's catching up.
+    clearTimeout(catchUp);
+    catchUp = undefined;
     if (s.held) s = { ...s, playing: false };
     if (v.readyState < 1) {
       pending = s;
@@ -584,12 +604,28 @@ export function syncPlayer(opts: {
     }
     const expected = s.position + (s.playing ? (performance.now() - s.at) / 1000 : 0);
     const gap = expected - v.currentTime;
-    if (Math.abs(gap) > JUMP || !s.playing) {
-      if (Math.abs(gap) > (s.playing ? JUMP : CLOSE_ENOUGH)) {
-        // Not loaded there yet: land a little ahead, where the room will be once it has loaded.
-        const lead = s.playing && !isLoaded(v, expected) ? JUMP_LEAD : 0;
-        selfSeek(v, Math.max(0, expected + lead));
+    if (!s.playing) {
+      clearTimeout(rateReset);
+      v.playbackRate = 1;
+      if (s.held) {
+        // Held at a start (Start, or a switch): everyone exactly there.
+        if (Math.abs(gap) > CLOSE_ENOUGH) selfSeek(v, Math.max(0, expected));
+      } else if (gap > CLOSE_ENOUGH && gap <= CATCH_UP_MAX && !v.paused) {
+        // Paused by someone a little ahead of this device: it watches up to where they paused
+        // and stops there, rather than skipping the bit in between.
+        return watchUntil(v, expected);
+      } else if (Math.abs(gap) > JUMP) {
+        // Really somewhere else (the host moved it while paused, or this device was far off).
+        selfSeek(v, Math.max(0, expected));
       }
+      // A little ahead (or already stopped a little behind): it just stops where it is; playing
+      // again brings everyone back in step.
+      return selfPause(v);
+    }
+    if (Math.abs(gap) > JUMP) {
+      // Not loaded there yet: land a little ahead, where the room will be once it has loaded.
+      const lead = !isLoaded(v, expected) ? JUMP_LEAD : 0;
+      selfSeek(v, Math.max(0, expected + lead));
       v.playbackRate = 1;
     } else if (Math.abs(gap) > CLOSE_ENOUGH && !(gap > 0 && slow())) {
       // Catch up (or let the others catch up) over a few seconds instead of a visible jump.
@@ -597,8 +633,7 @@ export function syncPlayer(opts: {
       clearTimeout(rateReset);
       rateReset = window.setTimeout(() => (v.playbackRate = 1), (Math.abs(gap) / 0.08) * 1000);
     }
-    if (s.playing) selfPlay(v);
-    else selfPause(v);
+    selfPlay(v);
   };
 
   // The room's changes for this episode (other episodes are the Shell's to follow).

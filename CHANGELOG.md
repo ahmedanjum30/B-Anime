@@ -38,6 +38,7 @@ one line each, written for users (see CLAUDE.md).
 - Your last room stays listed on the Together page while you're in a room.
 - Settings → About (desktop) can record detailed network logs, for troubleshooting connections.
 - You can say you're ready only once your episode has loaded, so a room never starts on one that won't play.
+- When someone pauses, anyone a moment behind keeps watching up to that point instead of skipping ahead.
 
 ### Fixed
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
