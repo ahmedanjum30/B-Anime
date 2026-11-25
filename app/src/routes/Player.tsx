@@ -763,8 +763,29 @@ export default function Player(props: { behind: boolean }) {
     // at the start (the next one after auto-next) whenever AniSkip was slow.
     void video.play().catch(() => {});
     const mal = media()?.idMal;
-    if (mal && inTauri) setSkips(await getSkipTimes(mal, episode(), video.duration || 0).catch(() => []));
+    if (!mal || !inTauri) return;
+    const ep = episode();
+    // A stream's length can still be unknown here (Infinity, with hls.js on Android): the lookup
+    // can't send that, so it failed and the episode had no skip bars or buttons. It waits for the
+    // real length (a few seconds at most), and asks without one if it never comes.
+    const length = await knownDuration(10_000);
+    if (ep !== episode()) return;
+    setSkips(await getSkipTimes(mal, ep, length).catch(() => []));
   };
+  /** The video's length once it's known (a finite number), or 0 after `within` ms. */
+  const knownDuration = (within: number) =>
+    new Promise<number>((resolve) => {
+      const known = () => Number.isFinite(video.duration) && video.duration > 0;
+      if (known()) return resolve(video.duration);
+      const done = () => {
+        video.removeEventListener("durationchange", check);
+        clearTimeout(timer);
+        resolve(known() ? video.duration : 0);
+      };
+      const check = () => known() && done();
+      const timer = window.setTimeout(done, within);
+      video.addEventListener("durationchange", check);
+    });
 
   /**
    * When the episode counts as watched (seconds): 80% of the way through, and when the episode's
