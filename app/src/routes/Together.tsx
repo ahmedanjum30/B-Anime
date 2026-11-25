@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, untrack } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
 import { errorText, getLibrary, getMedia, getPlayerPrefs, getStream, installExtension, localEpisodes, localLength, streamLength, watchMyCode, watchNewLink } from "../lib/api";
@@ -8,7 +8,7 @@ import { Copy, Search, X } from "../lib/icons";
 import { fmtAgo } from "../lib/format";
 import { createSource, recallPlayFrom, rememberPlayFrom, useRoomMatch } from "../lib/source";
 import { homeStore } from "../lib/store";
-import type { LibraryEntry, ListStatus } from "../lib/types";
+import type { LibraryEntry, ListStatus, RoomMember } from "../lib/types";
 import { inviteLink, watchStore } from "../lib/watch";
 
 const TABS: [ListStatus, string][] = [
@@ -43,6 +43,10 @@ export default function Together(props: {
   const [name, setName] = createSignal(w.defaultName());
   const [code, setCode] = createSignal("");
 
+  /** Everyone's id: a row per person that stays while they're in the room (the roster arrives
+   *  every few seconds as new objects; rebuilding the rows each time replaced the rename field
+   *  while typing in it, which closed a phone's keyboard). */
+  const memberIds = createMemo(() => w.members().map((m) => m.id), [], { equals: (a, b) => a.join() === b.join() });
   const isHost = () => !!w.room()?.host;
   const others = () => w.members().filter((m) => m.id !== w.room()?.me);
   /** Ready only once this device's episode has loaded (or there's nothing picked yet). */
@@ -491,14 +495,16 @@ export default function Together(props: {
                 <p class="together-hint">Nobody else yet. Send them the invite link.</p>
               </Show>
               <ul class="watch-list">
-                <For each={w.members()}>
-                  {(m) => (
+                <For each={memberIds()}>
+                  {(id) => {
+                    const m = () => w.members().find((x) => x.id === id) ?? EMPTY_MEMBER;
+                    return (
                     <li class="watch-member">
                       <Show
-                        when={m.id === room().me && editing() === "me"}
+                        when={m().id === room().me && editing() === "me"}
                       >
                         <NameField
-                          value={m.name}
+                          value={m().name}
                           label="Your name"
                           onDone={(v) => {
                             if (v !== null) {
@@ -509,28 +515,28 @@ export default function Together(props: {
                           }}
                         />
                       </Show>
-                      <span class="watch-member-name" classList={{ "is-hidden": m.id === room().me && editing() === "me" }}>
-                        {m.name}
-                        <Show when={m.id === room().me}>
+                      <span class="watch-member-name" classList={{ "is-hidden": m().id === room().me && editing() === "me" }}>
+                        {m().name}
+                        <Show when={m().id === room().me}>
                           {" "}
                           <span class="watch-you">(you)</span>
                         </Show>
                       </span>
-                      <Show when={m.id === room().me && editing() !== "me"}>
+                      <Show when={m().id === room().me && editing() !== "me"}>
                         <button type="button" class="link-btn together-rename" onClick={() => setEditing("me")}>
                           Rename
                         </button>
                       </Show>
-                      <Show when={m.host}><span class="ext-tag watch-host-tag">Host</span></Show>
+                      <Show when={m().host}><span class="ext-tag watch-host-tag">Host</span></Show>
                       <span class="watch-member-meta">
-                        <Show when={m.playable !== null || w.nowPlaying()}>
-                          <span class="watch-member-check" data-bad={m.playable === false ? "" : undefined}>
-                            {m.playable === null ? "Checking…" : m.playable ? m.source ?? "Can play" : "Can't play this"}
+                        <Show when={m().playable !== null || w.nowPlaying()}>
+                          <span class="watch-member-check" data-bad={m().playable === false ? "" : undefined}>
+                            {m().playable === null ? "Checking…" : m().playable ? m().source ?? "Can play" : "Can't play this"}
                           </span>
                         </Show>
                         {/* Their ping to the host (measured, the median of the last few). */}
                         {/* A different cut of the episode (a Blu-ray file against a TV stream). */}
-                        <Show when={w.lengthGap(m)}>
+                        <Show when={w.lengthGap(m())}>
                           {(gap) => (
                             <span
                               class="watch-member-length num"
@@ -540,46 +546,47 @@ export default function Together(props: {
                             </span>
                           )}
                         </Show>
-                        <Show when={m.rttMs !== null}>
+                        <Show when={m().rttMs !== null}>
                           <span
                             class="watch-member-link num"
-                            data-slow={(m.rttMs ?? 0) > 250 ? "" : undefined}
+                            data-slow={(m().rttMs ?? 0) > 250 ? "" : undefined}
                             title="Ping to the host"
                           >
-                            {m.rttMs} ms
+                            {m().rttMs} ms
                           </span>
                         </Show>
                           {/* Host: the room pauses while someone loads; not for someone on a slow
                               connection it shouldn't keep stopping for. */}
-                          <Show when={room().host && w.started() && m.id !== room().me}>
+                          <Show when={room().host && w.started() && m().id !== room().me}>
                             <button
                               type="button"
                               class="link-btn watch-wait"
-                              aria-pressed={!w.notWaiting().has(m.id)}
+                              aria-pressed={!w.notWaiting().has(m().id)}
                               title={
-                                w.notWaiting().has(m.id)
-                                  ? `The room plays on while ${m.name} loads`
-                                  : `The room pauses while ${m.name} loads`
+                                w.notWaiting().has(m().id)
+                                  ? `The room plays on while ${m().name} loads`
+                                  : `The room pauses while ${m().name} loads`
                               }
-                              onClick={() => w.waitFor(m.id, w.notWaiting().has(m.id))}
+                              onClick={() => w.waitFor(m().id, w.notWaiting().has(m().id))}
                             >
-                              {w.notWaiting().has(m.id) ? "Wait for them" : "Don't wait"}
+                              {w.notWaiting().has(m().id) ? "Wait for them" : "Don't wait"}
                             </button>
                           </Show>
                       </span>
-                      <span class="watch-member-state num" data-ready={!w.started() && m.ready ? "" : undefined}>
-                        {m.connected === false
+                      <span class="watch-member-state num" data-ready={!w.started() && m().ready ? "" : undefined}>
+                        {m().connected === false
                           ? "Reconnecting…"
                           : w.started()
-                            ? m.buffering
+                            ? m().buffering
                               ? "Loading…"
-                              : clock(m.position)
-                            : m.ready
+                              : clock(m().position)
+                            : m().ready
                               ? "Ready"
                               : "Not ready"}
                       </span>
                     </li>
-                  )}
+                  );
+                  }}
                 </For>
               </ul>
 
@@ -666,6 +673,12 @@ export default function Together(props: {
  * fix the match, or install the host's source.
  */
 /** Whether an episode loaded from a source (by source and episode id), remembered while the app runs. */
+/** Stands in for a row's person in the moment they leave (the row goes right after). */
+const EMPTY_MEMBER: RoomMember = {
+  id: "", name: "", host: false, position: 0, buffering: false, ready: false, playable: null, source: null,
+  direct: null, rttMs: null, code: "", mediaId: null, episode: null,
+};
+
 type Probe = { ok: boolean; why: string; url?: string; kind?: string };
 const probed = new Map<string, Probe>();
 
@@ -906,9 +919,12 @@ function NameField(props: { value: string; label: string; onDone: (value: string
     <input
       class="watch-input together-name-input"
       aria-label={props.label}
-      value={props.value}
       maxLength={32}
-      ref={(el) => queueMicrotask(() => (el.focus(), el.select()))}
+      // The name as it was when the field opened: updates arriving while typing don't reset it.
+      ref={(el) => {
+        el.value = untrack(() => props.value);
+        queueMicrotask(() => (el.focus(), el.select()));
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") finish(e.currentTarget.value);
         if (e.key === "Escape") finish(null);
