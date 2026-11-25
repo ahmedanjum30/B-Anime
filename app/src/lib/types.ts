@@ -361,6 +361,10 @@ export interface SourceRef {
   name: string;
   /** Its manifest URL. */
   url: string;
+  /** The show on that source the host plays (its id there): guests on the same source play it
+   *  too, even where their own lookup matched another (a different season). */
+  showId?: string;
+  showTitle?: string;
 }
 
 /** What a watch-together room is playing. */

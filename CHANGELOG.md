@@ -27,6 +27,7 @@ one line each, written for users (see CLAUDE.md).
 - Pick where you play the room's episode from: your library or any of your sources.
 - A show with episodes in your library can play from a source instead: pick it under Play from on the show's page, and Home and rooms follow.
 - Guests play from the host's source by default, so everyone has the same copy of the episode.
+- In a room, guests on the host's source play the show the host matched there (the right season), even if their own match differs.
 - The waiting room checks everyone has the same copy of the episode as the host (the same length), since a different cut won't stay in step; Ready waits for it.
 - A room keeps playing, sound and picture, with the app in the background on PC and phone.
 - Leaving the player during a room keeps the episode going: on PC it pops out into a small window, on phone you keep hearing it.

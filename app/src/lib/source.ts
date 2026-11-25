@@ -2,6 +2,7 @@ import { createEffect, createMemo, createResource, createSignal, on } from "soli
 
 import { findSource, inTauri, listExtensions, sourceItems } from "./api";
 import type { ExtKind, InstalledExtension, Media, SourceItem } from "./types";
+import { watchStore } from "./watch";
 
 const LAST_KEY = (kind: ExtKind) => `banime.source.${kind}`;
 const rememberExt = (kind: ExtKind, id: string) => {
@@ -93,6 +94,24 @@ export function recallShowSource(mediaId: number): string | null {
   }
 }
 
+/**
+ * In a Watch together room, a guest playing the host's source plays the show the host matched
+ * there (the room carries it), not whatever its own lookup found: a match picked by hand on the
+ * host's device (the right season) otherwise came out as another season on the guests', and the
+ * same episode number was a different episode. Only for the room; saved matches don't change.
+ */
+export function useRoomMatch(source: SourceState, mediaId: () => number) {
+  createEffect(() => {
+    const room = watchStore.room();
+    const p = watchStore.nowPlaying();
+    const h = p?.source;
+    if (!room || room.host || !p || !h?.showId || p.mediaId !== mediaId() || source.ext() !== h.id) return;
+    if (source.match.loading) return;
+    const m = source.match();
+    if (m?.status === "matched" && m.sourceId === h.showId) return;
+    source.setMatch({ status: "matched", sourceId: h.showId, title: h.showTitle ?? "", auto: false });
+  });
+}
 // ── Session cache ───────────────────────────────────────────────────────────────
 // Matches and episode lists are kept until the app closes, so switching sources (or Sub/Dub)
 // back and forth, or opening the same show again, doesn't repeat the calls. A lookup that's

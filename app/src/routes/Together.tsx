@@ -6,7 +6,7 @@ import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search, X } from "../lib/icons";
 import { fmtAgo } from "../lib/format";
-import { createSource, recallPlayFrom, rememberPlayFrom } from "../lib/source";
+import { createSource, recallPlayFrom, rememberPlayFrom, useRoomMatch } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { LibraryEntry, ListStatus } from "../lib/types";
 import { inviteLink, watchStore } from "../lib/watch";
@@ -778,9 +778,15 @@ function RoomCheck(props: { mediaId: number }) {
     const p = w.nowPlaying();
     const e = source.usable().find((x) => x.id === source.ext());
     if (!w.room()?.host || w.started() || !p || r.playable !== true || r.via === "Library" || !e) return;
-    if (!/^https:\/\//.test(e.sourceUrl) || p.source?.id === e.id) return;
-    w.send({ ...p, source: { id: e.id, name: e.name, url: e.sourceUrl } });
+    // With the show it's matched to there: a guest on the same source plays that show too
+    // (their own lookup may have found another season).
+    const m = source.match();
+    const showId = m?.status === "matched" ? m.sourceId : undefined;
+    const showTitle = m?.status === "matched" ? m.title : undefined;
+    if (!/^https:\/\//.test(e.sourceUrl) || (p.source?.id === e.id && p.source?.showId === showId)) return;
+    w.send({ ...p, source: { id: e.id, name: e.name, url: e.sourceUrl, showId, showTitle } });
   });
+  useRoomMatch(source, () => props.mediaId);
 
   const installHost = async () => {
     const h = hostSource();

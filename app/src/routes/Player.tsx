@@ -16,7 +16,7 @@ import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
 import { audioId, recallAudio, rememberAudio, rememberDub } from "../lib/dub";
-import { createSource, recallServer, rememberServer, rememberShowSource, serverName, recallPlayFrom, rememberPlayFrom, recallShowSource } from "../lib/source";
+import { createSource, recallServer, rememberServer, rememberShowSource, serverName, recallPlayFrom, rememberPlayFrom, recallShowSource, useRoomMatch } from "../lib/source";
 import { sameServerIn, startSource } from "../lib/server-pick";
 import { homeStore } from "../lib/store";
 import { syncPlayer, watchStore } from "../lib/watch";
@@ -138,6 +138,8 @@ export default function Player(props: { behind: boolean }) {
     () => extParam() ?? pickedExt() ?? hostPick() ?? undefined,
     dubParam,
   );
+  // A guest on the host's source plays the show the host matched there (see useRoomMatch).
+  useRoomMatch(source, mediaId);
   // Picked after the player had chosen one (or it chose a remembered one): over to the pick.
   createEffect(() => {
     const want = pickedExt();

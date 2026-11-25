@@ -226,6 +226,12 @@ pub struct SourceRef {
     pub name: String,
     /// Its manifest URL (what installing it takes).
     pub url: String,
+    /// The show on that source the host plays (its id there, and title): guests on the same
+    /// source play that one too, even where their own lookup matched another (a different season).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_title: Option<String>,
 }
 
 /// What the room is playing, as the host's player last reported it (or a guest asked for).
@@ -1780,7 +1786,13 @@ mod tests {
             position: 12.5,
             playing: true,
             by: "x".into(),
-            source: Some(SourceRef { id: "src".into(), name: "Src".into(), url: "https://example.com/m.json".into() }),
+            source: Some(SourceRef {
+                id: "src".into(),
+                name: "Src".into(),
+                url: "https://example.com/m.json".into(),
+                show_id: Some("s1".into()),
+                show_title: None,
+            }),
             subs: Some("en".into()),
             held: false,
         });
