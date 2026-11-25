@@ -720,6 +720,8 @@ pub fn run() {
             playback::pick_subtitle_file,
             playback::local_episodes,
             playback::local_stream,
+            playback::local_length,
+            playback::stream_length,
             playback::play_local,
             library::library_status,
             library::pick_folder,

@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
-import { errorText, getLibrary, getMedia, getPlayerPrefs, getStream, installExtension, localEpisodes, watchMyCode, watchNewLink } from "../lib/api";
+import { errorText, getLibrary, getMedia, getPlayerPrefs, getStream, installExtension, localEpisodes, localLength, streamLength, watchMyCode, watchNewLink } from "../lib/api";
 import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search, X } from "../lib/icons";
@@ -46,10 +46,15 @@ export default function Together(props: {
   const isHost = () => !!w.room()?.host;
   const others = () => w.members().filter((m) => m.id !== w.room()?.me);
   /** Ready only once this device's episode has loaded (or there's nothing picked yet). */
-  const canReady = () => !w.nowPlaying() || w.me()?.playable === true;
+  const canReady = () => !w.nowPlaying() || (w.me()?.playable === true && sameCopy());
+  /** This device's copy of the episode is the host's (the same length), or it isn't known yet. */
+  const sameCopy = () => {
+    const me = w.me();
+    return !me || w.lengthGap(me) === null;
+  };
   // A change (another source, another episode) that doesn't play takes Ready back.
   createEffect(() => {
-    if (!w.started() && w.me()?.ready && w.nowPlaying() && w.me()?.playable === false) w.setReady(false);
+    if (!w.started() && w.me()?.ready && w.nowPlaying() && (w.me()?.playable === false || !sameCopy())) w.setReady(false);
   });
   const allReady = () => w.members().length > 1 && w.members().every((m) => m.ready && m.playable !== false);
   const cantPlay = () => w.members().filter((m) => m.playable === false);
@@ -589,7 +594,7 @@ export default function Together(props: {
                     title={!w.me()?.ready && !canReady() ? "Once your episode loads" : undefined}
                     onClick={() => w.setReady(!w.me()?.ready)}
                   >
-                    {w.me()?.ready ? "Not ready" : canReady() ? "I'm ready" : w.me()?.playable === false ? "Can't play it yet" : "Loading your episode…"}
+                    {w.me()?.ready ? "Not ready" : canReady() ? "I'm ready" : w.me()?.playable === false ? "Can't play it yet" : !sameCopy() ? "Not the host's copy" : "Loading your episode…"}
                   </button>
                   <Show when={isHost()}>
                     <button
@@ -661,7 +666,7 @@ export default function Together(props: {
  * fix the match, or install the host's source.
  */
 /** Whether an episode loaded from a source (by source and episode id), remembered while the app runs. */
-type Probe = { ok: boolean; why: string };
+type Probe = { ok: boolean; why: string; url?: string; kind?: string };
 const probed = new Map<string, Probe>();
 
 function RoomCheck(props: { mediaId: number }) {
@@ -712,13 +717,28 @@ function RoomCheck(props: { mediaId: number }) {
     if (known) return known;
     const [ext, id] = key.split("\u0000");
     return getStream(ext, id).then(
-      () => {
-        const r = { ok: true, why: "" };
+      (stream) => {
+        const first = stream.sources[0];
+        const r: Probe = { ok: true, why: "", url: first?.url, kind: first?.kind };
         probed.set(key, r);
         return r;
       },
       (e) => ({ ok: false, why: errorText(e) }),
     );
+  });
+  // How long this device's copy is, in the waiting room (before anyone plays it): the library
+  // file's own length, or the stream's from its playlist. Compared with the host's, it shows a
+  // different cut (a Blu-ray file against a TV stream) before Start.
+  const lengthKey = createMemo(() => {
+    if (w.started()) return null;
+    if (useLibrary()) return `L\u0000${props.mediaId}\u0000${episode()}`;
+    const p = probe();
+    return p?.ok && p.url && p.kind ? `S\u0000${p.kind}\u0000${p.url}` : null;
+  });
+  const [copyLength] = createResource(lengthKey, (key) => {
+    const [kind, a, b] = key.split("\u0000");
+    const got = kind === "L" ? localLength(Number(a), Number(b)) : streamLength(b, a);
+    return got.catch(() => null);
   });
 
   /** true / false, or null while checking. */
@@ -746,8 +766,13 @@ function RoomCheck(props: { mediaId: number }) {
   ];
   createEffect(() => {
     const r = result();
-    w.check(r.playable, r.via);
+    w.check(r.playable, r.via, copyLength.loading ? null : (copyLength() ?? null));
   });
+  /** This device's copy against the host's (+ longer, − shorter), when it's a different cut. */
+  const myGap = () => {
+    const me = w.me();
+    return me ? w.lengthGap(me) : null;
+  };
   // The host's working source goes with the room's pick (in the lobby), so guests who can't
   // play it can install the same one.
   createEffect(() => {
@@ -784,6 +809,21 @@ function RoomCheck(props: { mediaId: number }) {
             <For each={options()}>{(o) => <option value={o.id}>{o.name}</option>}</For>
           </select>
         </label>
+      </Show>
+      <Show when={myGap()}>
+        {(gap) => (
+          <div class="together-check-fix together-copy">
+            <p class="together-check-line">
+              Your copy is {w.gapText(gap())} than the host's, so it wouldn't stay in step.
+              {hasHostSource() ? "" : " Play it from the same source as the host."}
+            </p>
+            <Show when={hasHostSource() && !w.room()?.host}>
+              <button type="button" class="btn btn-sm btn-primary" onClick={() => pickFrom(hostSource()!.id)}>
+                Play from {hostSource()!.name}
+              </button>
+            </Show>
+          </div>
+        )}
       </Show>
       <p class="together-check-line">
         {result().playable === null

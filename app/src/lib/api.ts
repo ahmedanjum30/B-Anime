@@ -103,7 +103,12 @@ export const watchReady = (ready: boolean) => call<void>("watch_ready", { ready 
 export const watchStart = () => call<void>("watch_start");
 export const watchRename = (name: string) => call<void>("watch_rename", { name });
 export const watchSetRoomName = (name: string) => call<void>("watch_set_room_name", { name });
-export const watchCheck = (playable: boolean | null, source: string | null) => call<void>("watch_check", { playable, source });
+export const watchCheck = (playable: boolean | null, source: string | null, copyLength: number | null) =>
+  call<void>("watch_check", { playable, source, copyLength });
+/** How long a library episode plays (s), from its file; null when the file doesn't say. */
+export const localLength = (mediaId: number, episode: number) => call<number | null>("local_length", { mediaId, episode });
+/** How long a stream plays (s), from its playlist (HLS); null otherwise. */
+export const streamLength = (url: string, kind: string) => call<number | null>("stream_length", { url, kind });
 
 /** Listens to a backend event; returns an unsubscribe. */
 export async function onEvent<T>(name: string, fn: (payload: T) => void): Promise<() => void> {

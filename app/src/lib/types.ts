@@ -394,6 +394,8 @@ export interface RoomMember {
   playable: boolean | null;
   /** What they play it with: an extension's name, or "Library". */
   source: string | null;
+  /** How long that copy of the room's episode is (s), known in the waiting room already. */
+  copyLength?: number | null;
   /** Their link to the host: direct (true) or relayed (false); null for the host. */
   direct: boolean | null;
   /** Round trip to the host in ms; null for the host. */

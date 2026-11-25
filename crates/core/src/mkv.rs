@@ -16,6 +16,7 @@ use crate::subs::{self, AssHeader, Cue};
 const SEGMENT: u32 = 0x1853_8067;
 const INFO: u32 = 0x1549_A966;
 const TIMESTAMP_SCALE: u32 = 0x2A_D7B1;
+const DURATION: u32 = 0x4489;
 const TRACKS: u32 = 0x1654_AE6B;
 const TRACK_ENTRY: u32 = 0xAE;
 const TRACK_NUMBER: u32 = 0xD7;
@@ -348,6 +349,39 @@ fn read_header(r: &mut Reader) -> io::Result<(u64, Vec<SubtitleTrack>)> {
         }
     }
     Ok((scale, tracks))
+}
+
+/// How long an MKV file plays (seconds), from its header. None when it doesn't say.
+pub fn length(path: &Path) -> io::Result<Option<f64>> {
+    let mut r = Reader::open(path)?;
+    match r.header()? {
+        Some((0x1A45_DFA3, size)) => r.skip(size)?,
+        _ => return Ok(None),
+    }
+    while let Some((id, size)) = r.header()? {
+        match id {
+            SEGMENT => continue, // descend
+            CLUSTER => break,
+            INFO if size <= MAX_HEADER => {
+                let body = r.bytes(size)?;
+                let (mut scale, mut ticks) = (1_000_000u64, None::<f64>);
+                children(&body, |id, d| match id {
+                    TIMESTAMP_SCALE if uint(d) > 0 => scale = uint(d),
+                    DURATION => {
+                        ticks = match d.len() {
+                            4 => Some(f32::from_be_bytes(d.try_into().unwrap_or_default()) as f64),
+                            8 => Some(f64::from_be_bytes(d.try_into().unwrap_or_default())),
+                            _ => None,
+                        }
+                    }
+                    _ => {}
+                });
+                return Ok(ticks.filter(|t| t.is_finite() && *t > 0.0).map(|t| t * scale as f64 / 1e9));
+            }
+            _ => r.skip(size)?,
+        }
+    }
+    Ok(None)
 }
 
 /// The text subtitle tracks in an MKV file (reads only the header). Not an MKV: an empty list.

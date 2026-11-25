@@ -267,6 +267,10 @@ pub struct Check {
     pub playable: Option<bool>,
     /// The extension's name (or "Library").
     pub source: Option<String>,
+    /// How long that copy of the episode is (s), known before anyone plays it: in the waiting
+    /// room, a different cut (a Blu-ray file against a TV stream) shows before Start.
+    #[serde(default)]
+    pub copy_length: Option<f64>,
 }
 
 /// Someone in the room.
@@ -1793,7 +1797,7 @@ mod tests {
             position: 0.0,
             buffering: false,
             ready: true,
-            check: Check { playable: Some(true), source: Some("Src".into()) },
+            check: Check { playable: Some(true), source: Some("Src".into()), copy_length: None },
             direct: Some(true),
             rtt_ms: Some(30),
             code: "c".into(),
@@ -1865,7 +1869,7 @@ mod tests {
         guest.send_state(play(31.0, false));
         until(&mut host_events, |e| matches!(e, RoomEvent::State(s) if !s.playing).then_some(())).await;
         // The guest's check reaches the host's roster.
-        guest.set_check(Check { playable: Some(true), source: Some("Src".into()) });
+        guest.set_check(Check { playable: Some(true), source: Some("Src".into()), copy_length: None });
         until(&mut host_events, |e| match e {
             RoomEvent::Roster(r) => r.members.iter().any(|m| !m.host && m.check.playable == Some(true)).then_some(()),
             _ => None,

@@ -182,6 +182,20 @@ pub async fn local_episodes(state: tauri::State<'_, AppState>, media_id: i64) ->
 }
 
 /// A library episode as a stream the built-in player can load.
+/// How long a library episode plays (seconds), read from its file without playing it.
+#[tauri::command]
+pub async fn local_length(state: tauri::State<'_, AppState>, media_id: i64, episode: i64) -> Result<Option<f64>, String> {
+    let Some(path) = scanner::episode_file(&state.db, media_id, episode).await.map_err(msg)? else { return Ok(None) };
+    let path = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || streaming::file_length(&path)).await.map_err(|e| e.to_string())
+}
+
+/// How long a stream plays (seconds), from its playlist (HLS only; None for the rest).
+#[tauri::command]
+pub async fn stream_length(url: String, kind: String) -> Result<Option<f64>, String> {
+    Ok(if kind == "hls" { streaming::hls_length(&url).await } else { None })
+}
+
 #[tauri::command]
 pub async fn local_stream(state: tauri::State<'_, AppState>, media_id: i64, episode: i64) -> Result<streaming::Stream, String> {
     let path = scanner::episode_file(&state.db, media_id, episode)

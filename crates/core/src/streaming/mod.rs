@@ -706,6 +706,86 @@ async fn aniskip(mal_id: i64, episode: i64, length: f64) -> Result<Vec<(SkipTime
         .collect())
 }
 
+/// How long a library file plays (seconds), read from the file without playing it: MKV and WebM
+/// from their header, MP4 from its movie header. None for anything else.
+pub fn file_length(path: &std::path::Path) -> Option<f64> {
+    let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    match ext.as_str() {
+        "mkv" | "webm" => crate::mkv::length(path).ok().flatten(),
+        "mp4" | "m4v" | "mov" => mp4_length(path),
+        _ => None,
+    }
+}
+
+/// An MP4's length from its movie header ('moov' > 'mvhd'): the top-level boxes are skipped over,
+/// so only the header is read.
+fn mp4_length(path: &std::path::Path) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let end = f.metadata().ok()?.len();
+    // Walks boxes from `from` to `to`; returns the body of `want` (start, size).
+    fn find(f: &mut std::fs::File, mut at: u64, to: u64, want: &[u8; 4]) -> Option<(u64, u64)> {
+        while at + 8 <= to {
+            f.seek(SeekFrom::Start(at)).ok()?;
+            let mut h = [0u8; 8];
+            f.read_exact(&mut h).ok()?;
+            let mut size = u32::from_be_bytes(h[..4].try_into().ok()?) as u64;
+            let mut head = 8;
+            if size == 1 {
+                let mut big = [0u8; 8];
+                f.read_exact(&mut big).ok()?;
+                size = u64::from_be_bytes(big);
+                head = 16;
+            } else if size == 0 {
+                size = to - at;
+            }
+            if size < head {
+                return None;
+            }
+            if &h[4..] == want {
+                return Some((at + head, size - head));
+            }
+            at += size;
+        }
+        None
+    }
+    let (moov, moov_len) = find(&mut f, 0, end, b"moov")?;
+    let (mvhd, mvhd_len) = find(&mut f, moov, moov + moov_len, b"mvhd")?;
+    let mut body = vec![0u8; mvhd_len.min(120) as usize];
+    f.seek(SeekFrom::Start(mvhd)).ok()?;
+    f.read_exact(&mut body).ok()?;
+    let (scale, duration) = if body.first() == Some(&1) {
+        (u32::from_be_bytes(body.get(20..24)?.try_into().ok()?) as f64, u64::from_be_bytes(body.get(24..32)?.try_into().ok()?) as f64)
+    } else {
+        (u32::from_be_bytes(body.get(12..16)?.try_into().ok()?) as f64, u32::from_be_bytes(body.get(16..20)?.try_into().ok()?) as f64)
+    };
+    (scale > 0.0 && duration > 0.0).then(|| duration / scale)
+}
+
+/// How long an HLS stream plays (seconds), from its playlist: the first quality's segments
+/// added up. Read the way the player gets it (through the local proxy), without playing it.
+pub async fn hls_length(url: &str) -> Option<f64> {
+    let http = crate::http::client_builder().timeout(std::time::Duration::from_secs(15)).build().ok()?;
+    let get = |u: reqwest::Url| {
+        let http = http.clone();
+        async move { http.get(u).send().await.ok()?.error_for_status().ok()?.text().await.ok() }
+    };
+    let mut at = reqwest::Url::parse(url).ok()?;
+    let mut text = get(at.clone()).await?;
+    // A master playlist lists qualities: any of them has the same length.
+    if text.contains("#EXT-X-STREAM-INF") {
+        let variant = text.lines().skip_while(|l| !l.starts_with("#EXT-X-STREAM-INF")).nth(1)?.trim().to_owned();
+        at = at.join(&variant).ok()?;
+        text = get(at).await?;
+    }
+    let total: f64 = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("#EXTINF:"))
+        .filter_map(|d| d.split(',').next()?.trim().parse::<f64>().ok())
+        .sum();
+    (total > 0.0).then_some(total)
+}
+
 pub async fn save_position(db: &Db, media_id: i64, episode: i64, position: f64, duration: f64) -> Result<()> {
     sqlx::query(
         "INSERT INTO playback (media_id, episode, position_s, duration_s, updated_at) VALUES (?, ?, ?, ?, datetime('now'))

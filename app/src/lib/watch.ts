@@ -333,11 +333,11 @@ export const watchStore = createRoot(() => {
   const start = () => void watchStart().catch((e) => homeStore.notify(errorText(e)));
   /** Whether this device can play the room's episode (null: still checking), and with what. */
   let lastCheck = "";
-  const check = (playable: boolean | null, source: string | null) => {
-    const key = `${playable}|${source}`;
+  const check = (playable: boolean | null, source: string | null, copyLength: number | null) => {
+    const key = `${playable}|${source}|${copyLength}`;
     if (!room() || key === lastCheck) return;
     lastCheck = key;
-    void watchCheck(playable, source).catch(() => {});
+    void watchCheck(playable, source, copyLength).catch(() => {});
   };
   createEffect(on(room, () => (lastCheck = "")));
 
@@ -361,9 +361,14 @@ export const watchStore = createRoot(() => {
   const lengthGap = (m: RoomMember): number | null => {
     const p = nowPlaying();
     const host = members().find((x) => x.host);
-    const on = (x: RoomMember) => !!p && x.mediaId === p.mediaId && x.episode === p.episode && !!x.length;
-    if (!host || m.host || !on(m) || !on(host)) return null;
-    const gap = Math.round(m.length! - host.length!);
+    if (!p || !host || m.host) return null;
+    // The player's own length when it has the room's episode open; else the copy's, which the
+    // waiting room knows before anyone plays it (from the file, or the stream's playlist).
+    const len = (x: RoomMember) =>
+      (x.mediaId === p.mediaId && x.episode === p.episode && x.length) || x.copyLength || null;
+    const [a, b] = [len(m), len(host)];
+    if (!a || !b) return null;
+    const gap = Math.round(a - b);
     return Math.abs(gap) > LENGTH_SLACK ? gap : null;
   };
   /** "40 s shorter" / "2 min longer". */

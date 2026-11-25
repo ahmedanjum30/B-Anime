@@ -169,9 +169,14 @@ pub async fn watch_start(state: tauri::State<'_, AppState>) -> Result<(), String
 
 /// Whether this device can play the room's episode, and with what.
 #[tauri::command]
-pub async fn watch_check(state: tauri::State<'_, AppState>, playable: Option<bool>, source: Option<String>) -> Result<(), String> {
+pub async fn watch_check(
+    state: tauri::State<'_, AppState>,
+    playable: Option<bool>,
+    source: Option<String>,
+    copy_length: Option<f64>,
+) -> Result<(), String> {
     if let Some(room) = state.watch.room.lock().await.as_ref() {
-        room.set_check(Check { playable, source });
+        room.set_check(Check { playable, source, copy_length: copy_length.filter(|l| l.is_finite() && *l > 0.0) });
     }
     Ok(())
 }
