@@ -159,22 +159,43 @@ export const watchStore = createRoot(() => {
   });
 
   /** "Sam paused", "Sam resumed", "Sam jumped to 12:41": someone else's change, as a notice. */
+  /**
+   * "Sam paused", "Sam resumed", "Sam jumped to 12:41": someone else's change, as one notice once
+   * things settle (a second without another change), about where they settled. Holds (a jump
+   * during play, Start, a switch) and the counted start after them aren't anyone's pause, and
+   * say nothing: ten quick jumps used to give ten "paused" and ten "resumed".
+   */
+  let settle: number | undefined;
+  /** The room's state before the current burst of changes (what the notice compares with). */
+  let burstFrom: { playing: boolean; position: number; at: number } | null = null;
+  let quietUntil = 0;
   function announcePlayback(before: OwnState | null, s: PlayState) {
     const me = room()?.me;
-    if (!before || !me || s.by === me || !s.by || s.held || before.held) return;
+    if (!before || !me) return;
     if (before.mediaId !== s.mediaId || before.episode !== s.episode) return;
-    const who = members().find((m) => m.id === s.by)?.name;
-    if (!who) return;
-    if (before.playing && !s.playing) {
-      // An app closing pauses its video, and that pause reaches the room just before its owner
-      // disappears: only said if they're still here a moment later (then it was theirs).
-      const id = s.by;
-      window.setTimeout(() => {
-        const m = members().find((x) => x.id === id);
-        if (m && m.connected !== false && !reconnecting() && room()) homeStore.notify(`${who} paused.`);
-      }, 1500);
-    } else if (!before.playing && s.playing) homeStore.notify(`${who} resumed.`);
-    else if (Math.abs(s.position - roomPositionOf(before)) > 5) homeStore.notify(`${who} jumped to ${clock(s.position)}.`);
+    // A hold, or the start that ends it: the room's own, not a change to tell.
+    if (s.held || before.held || s.startIn || s.startAt) {
+      quietUntil = performance.now() + 3000;
+      burstFrom = null;
+      clearTimeout(settle);
+      return;
+    }
+    if (performance.now() < quietUntil || s.by === me || !s.by) return;
+    burstFrom ??= { playing: before.playing, position: roomPositionOf(before), at: performance.now() };
+    const from = burstFrom;
+    const id = s.by;
+    clearTimeout(settle);
+    settle = window.setTimeout(() => {
+      burstFrom = null;
+      const now = nowPlaying();
+      const who = members().find((m) => m.id === id);
+      // Gone a moment later (an app closing pauses its video on the way out): not theirs.
+      if (!now || !who || who.connected === false || reconnecting() || !room() || now.held) return;
+      const moved = Math.abs(roomPosition() - (from.position + (from.playing ? (performance.now() - from.at) / 1000 : 0)));
+      if (from.playing && !now.playing) homeStore.notify(`${who.name} paused.`);
+      else if (!from.playing && now.playing) homeStore.notify(`${who.name} resumed.`);
+      else if (moved > 5) homeStore.notify(`${who.name} jumped to ${clock(roomPosition())}.`);
+    }, 1200);
   }
   /** Where `p` would be now, from when it was last known. */
   const roomPositionOf = (p: OwnState) => p.position + (p.playing ? (performance.now() - nowAt()) / 1000 : 0);
