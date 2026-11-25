@@ -812,7 +812,9 @@ export default function Player(props: { behind: boolean }) {
     }
   };
 
-  const activeSkip = () => skips().find((s) => time() >= s.start && time() < s.end - 1);
+  /** Skipping moves the timeline: in a running room only the host does it (everyone follows). */
+  const canSkip = () => !(watchStore.room() && watchStore.started() && !watchStore.room()!.host);
+  const activeSkip = () => (canSkip() ? skips().find((s) => time() >= s.start && time() < s.end - 1) : undefined);
   const skip = () => {
     const s = activeSkip();
     if (s) video.currentTime = s.end;
@@ -1698,7 +1700,7 @@ export default function Player(props: { behind: boolean }) {
                     >
                       <span>
                         Auto-skip
-                        <span class="menu-sub">Openings, endings and recaps</span>
+                        <span class="menu-sub">{canSkip() ? "Openings, endings and recaps" : "The host skips for the room"}</span>
                       </span>
                       <span class="menu-switch" aria-hidden="true" />
                     </button>

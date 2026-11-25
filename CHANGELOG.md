@@ -40,6 +40,7 @@ one line each, written for users (see CLAUDE.md).
 - Settings → About (desktop) can record detailed network logs, for troubleshooting connections.
 - You can say you're ready only once your episode has loaded, so a room never starts on one that won't play.
 - When someone pauses, anyone a moment behind keeps watching up to that point instead of skipping ahead.
+- In a room, only the host skips openings, endings and recaps (by hand or automatically), and everyone follows.
 
 ### Fixed
 - On the Mac, videos show their picture instead of a black screen.
