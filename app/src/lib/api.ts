@@ -161,6 +161,9 @@ export const openAndroidDownload = () => call<void>("open_android_download");
 /** True inside the Android app (desktop-only items hide there). */
 export const onAndroid = /Android/i.test(navigator.userAgent);
 
+/** True in the Mac app, whose engine is WebKit (Safari's), not Chromium as on Windows and Android. */
+export const onWebKit = /Macintosh/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
+
 /** Desktop restarts into the update; Android opens its installer and B-Anime keeps running. */
 export const UPDATE_ACTION = onAndroid ? "Install update" : "Restart to update";
 export const UPDATE_BUSY = onAndroid ? "Opening installer…" : "Restarting…";

@@ -26,12 +26,6 @@ const Reader = lazy(() => import("./routes/Reader"));
 const Settings = lazy(() => import("./routes/Settings"));
 const Together = lazy(() => import("./routes/Together"));
 
-// The Mac's engine (WebKit, not WebView2's Chromium): styles that work around one engine's video
-// drawing can break the other's (styles/app.css, [data-webkit]).
-if (/Macintosh/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent)) {
-  document.documentElement.dataset.webkit = "";
-}
-
 render(
   () => (
     <Router root={Shell}>

@@ -9,7 +9,7 @@ import {
 } from "../lib/icons";
 import {
   errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
-  localStream, onAndroid, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
+  localStream, onAndroid, onWebKit, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { PictureTrack, Stream } from "../lib/types";
 import { applyRules } from "../lib/entry";
@@ -353,7 +353,9 @@ export default function Player(props: { behind: boolean }) {
       }, STALL_SECONDS * 1000);
       // HLS goes through hls.js whenever Media Source Extensions exist: newer WebView2 builds
       // claim native HLS support but play proxied streams unreliably, and hls.js gives us levels.
-      const HlsLib = src.kind === "hls" ? (await import("hls.js")).default : null;
+      // Not on the Mac: WebKit plays HLS itself (as Safari does), and some streams that hls.js
+      // repackages for it played with sound and no picture there (anamorphic 1440x1080 H.264).
+      const HlsLib = src.kind === "hls" && !onWebKit ? (await import("hls.js")).default : null;
       if (src.kind === "hls" && !HlsLib?.isSupported() && !video.canPlayType("application/vnd.apple.mpegurl")) {
         return setVideoError("This system can't play HLS streams.");
       }

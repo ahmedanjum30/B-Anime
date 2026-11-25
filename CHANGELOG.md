@@ -42,6 +42,7 @@ one line each, written for users (see CLAUDE.md).
 - When someone pauses, anyone a moment behind keeps watching up to that point instead of skipping ahead.
 
 ### Fixed
+- On the Mac, videos show their picture instead of a black screen.
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
 - The People list shows each person's real ping.
 - Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.

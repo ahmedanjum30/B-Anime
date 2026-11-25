@@ -2099,16 +2099,6 @@ a.slot:focus-visible {
   /* Same as .sub-layer: its own GPU layer, so it stays drawn over a hardware video overlay. */
   will-change: transform;
 }
-/* The Mac (WebKit) draws the video in a layer of its own already. The layers forced above for
-   WebView2's hardware overlay left its picture black there (sound, and the picture in the small
-   window, were fine): none of that on the Mac, and the video gets its layer explicitly. */
-:root[data-webkit] .sub-layer,
-:root[data-webkit] .pgs-layer {
-  will-change: auto;
-}
-:root[data-webkit] .player-video {
-  transform: translateZ(0);
-}
 .pgs-screen {
   position: relative;
   max-height: 100%;
