@@ -168,6 +168,7 @@ async fn source_items(
 
 #[tauri::command]
 async fn get_stream(state: tauri::State<'_, AppState>, ext: String, episode_id: String) -> Result<streaming::Stream, String> {
+    tracing::info!(ext, episode_id, "player opens a source's episode");
     streaming::stream(&state.db, &state.paths.extensions, &state.proxy, &ext, &episode_id).await.map_err(msg)
 }
 

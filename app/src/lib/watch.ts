@@ -60,7 +60,7 @@ export const watchStore = createRoot(() => {
    * files or a source (which one is remembered per show, like everywhere else). Unset: the
    * library when it has the episode.
    */
-  const [playFrom, setPlayFrom] = createSignal<{ mediaId: number; library: boolean } | null>(null);
+  const [playFrom, setPlayFrom] = createSignal<{ mediaId: number; library: boolean; ext?: string } | null>(null);
   /** When `nowPlaying` was last known (performance.now()), to work out where the room is now. */
   const [nowAt, setNowAt] = createSignal(0);
   /** Where the room is now: its last known position, moved on by the time since if playing. */

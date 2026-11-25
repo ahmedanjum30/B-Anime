@@ -198,6 +198,7 @@ pub async fn stream_length(url: String, kind: String) -> Result<Option<f64>, Str
 
 #[tauri::command]
 pub async fn local_stream(state: tauri::State<'_, AppState>, media_id: i64, episode: i64) -> Result<streaming::Stream, String> {
+    tracing::info!(media_id, episode, "player opens a library episode");
     let path = scanner::episode_file(&state.db, media_id, episode)
         .await
         .map_err(msg)?

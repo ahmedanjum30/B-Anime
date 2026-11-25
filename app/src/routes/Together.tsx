@@ -700,7 +700,8 @@ function RoomCheck(props: { mediaId: number }) {
 
   const pickFrom = (value: string) => {
     if (value === "library") return w.setPlayFrom({ mediaId: props.mediaId, library: true });
-    w.setPlayFrom({ mediaId: props.mediaId, library: false });
+    // Which source too: the player follows this pick exactly (not a remembered one).
+    w.setPlayFrom({ mediaId: props.mediaId, library: false, ext: value });
     source.setExt(value);
   };
   // The episode really loading from the source (not just being listed), before Ready: asked

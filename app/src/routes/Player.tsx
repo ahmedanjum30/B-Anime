@@ -122,11 +122,21 @@ export default function Player(props: { behind: boolean }) {
       go(`/watch/${mediaId()}/${episode()}${dubParam() ? "?dub=1" : ""}`);
     }
   });
+  /** The source picked under Playing from, in a room (the player follows it exactly). */
+  const pickedExt = () => {
+    const c = watchStore.playFrom();
+    return watchStore.room() && c && c.mediaId === mediaId() && !c.library ? (c.ext ?? null) : null;
+  };
   const source = createSource(
     () => (local() || checkingLibrary() || fromLibrary() ? undefined : media()),
-    () => extParam() ?? hostPick() ?? undefined,
+    () => extParam() ?? pickedExt() ?? hostPick() ?? undefined,
     dubParam,
   );
+  // Picked after the player had chosen one (or it chose a remembered one): over to the pick.
+  createEffect(() => {
+    const want = pickedExt();
+    if (want && source.ext() && source.ext() !== want && source.usable().some((e) => e.id === want)) source.setExt(want);
+  });
   // A held start waits for everyone to have the host's copy of the episode (the same length):
   // a different cut doesn't line up. Said on the held screen, with the way to the same copy.
   const hostSrc = () => watchStore.nowPlaying()?.source ?? null;
@@ -147,7 +157,7 @@ export default function Player(props: { behind: boolean }) {
   };
   /** Over to the host's source (the same copy as the host's), from the held screen. */
   const toHostSource = (id: string) => {
-    watchStore.setPlayFrom({ mediaId: mediaId(), library: false });
+    watchStore.setPlayFrom({ mediaId: mediaId(), library: false, ext: id });
     if (source.usable().some((e) => e.id === id)) source.setExt(id);
   };
   const item = () => source.byNumber().get(episode());
