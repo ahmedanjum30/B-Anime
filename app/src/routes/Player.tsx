@@ -180,13 +180,22 @@ export default function Player(props: { behind: boolean }) {
   // Which stream to load, as a string: it changes only when the stream should (the copy, the
   // source, the episode). An object made afresh on every update of what it reads (the room's
   // state, every 2 s) counted as a new stream each time: it reloaded from 0:00 every 2 s.
-  const streamKey = createMemo<string | null>(() => {
-    if (local()) return `L\u0000${mediaId()}\u0000${episode()}`;
+  const streamKey = createMemo<string | null>((prev) => {
+    let next: string | null;
+    if (local()) next = `L\u0000${mediaId()}\u0000${episode()}`;
     // In a room, not before the show is the one the host matched on this source: loading this
-    // device's own match first (another season, say) and then the host's started it twice.
-    if (roomMatchPending()) return null;
-    return item() && source.ext() ? `S\u0000${source.ext()}\u0000${item()!.id}` : null;
-  });
+    // device's own match first (another season, say) and then the host's started it twice. Only
+    // for the first load: a stream already playing stays (that check flipping dropped it, and the
+    // player loaded the same stream again every few seconds).
+    else if (roomMatchPending() && !prev) next = null;
+    else if (!item() || !source.ext()) next = prev?.startsWith("S") ? prev : null;
+    else next = `S\u0000${source.ext()}\u0000${item()!.id}`;
+    if (next !== prev) {
+      const show = (k: string | null | undefined) => (k ? k.split("\u0000").join(" ") : "none");
+      uiLog(`player: stream ${show(prev)} → ${show(next)} (local=${local()} pending=${roomMatchPending()})`);
+    }
+    return next;
+  }, null);
   const [stream] = createResource<Stream, string>(streamKey, (k) => {
     const [kind, a, b] = k.split("\u0000");
     return kind === "L" ? localStream(Number(a), Number(b)) : getStream(a, b);
