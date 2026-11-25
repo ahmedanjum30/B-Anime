@@ -15,66 +15,24 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
-## [0.4.6]
+## [0.4.6] - 2026-11-25
 
 ### Added
 - B-Anime for Mac (Apple Silicon): install it with Homebrew, and it updates itself.
-- Rejoin your last room, even if someone else took over hosting; closing the app mid-session offers it at the next launch.
-- Rooms have a name (the host's name by default), which the host can change; anyone can rename themselves.
-- A notice says who paused, resumed or jumped.
-- Your room code and invite link stay the same every time; New link replaces them.
-- Your name and your room's name are remembered for next time.
-- Pick where you play the room's episode from: your library or any of your sources.
-- A show with episodes in your library can play from a source instead: pick it under Play from on the show's page, and Home and rooms follow.
-- Guests play from the host's source by default, so everyone has the same copy of the episode.
-- In a room, guests on the host's source play the show the host matched there (the right season), and keep that match for the show.
-- The waiting room checks everyone has the same copy of the episode as the host (the same length), since a different cut won't stay in step; Ready waits for it.
-- A room keeps playing, sound and picture, with the app in the background on PC and phone.
-- Leaving the player during a room keeps the episode going: on PC it pops out into a small window, on phone you keep hearing it.
-- The room bar can pop the episode out into its small window when it didn't pop out by itself.
+- Watch together keeps playing in the background, and pops out into a small window when you leave the player.
+- Rejoin your last room; your room code and invite link stay the same every time.
+- Name your room and yourself; a notice says who paused, resumed or jumped.
+- Play from: pick your library or a source for each show, in rooms and everywhere else.
 
 ### Changed
-- When someone loses connection mid-episode, the room pauses until they're back (up to a minute), unless the host chose not to wait for them.
-- In the player, the room opens over the episode, which keeps playing.
-- In a room, episodes start where the room is, not from your own saved spot.
-- Start waits until everyone's player has loaded the episode, so everyone begins together; only the host can start without waiting.
-- Everyone's episode starts at the same moment, instead of the others a little behind the host.
-- When the host jumps during play, the room waits until everyone is there and loaded, then plays for all at once.
-- The host switches the room to another show or episode in one click; it plays once everyone has loaded it.
-- Leaving the player no longer pauses the room, and a bar takes you back to the episode.
-- Your last room stays listed on the Together page while you're in a room.
-- Settings → About (desktop) can record detailed network logs, for troubleshooting connections.
-- You can say you're ready only once your episode has loaded, so a room never starts on one that won't play.
-- When someone pauses, anyone a moment behind keeps watching up to that point instead of skipping ahead.
-- In a room, only the host skips openings, endings and recaps (by hand or automatically), and everyone follows.
+- Rooms stay in step: everyone starts together, and jumps or dropped connections wait for everyone.
+- Guests play the host's source by default, and the waiting room checks everyone has the same copy.
+- In a room, only the host skips openings, endings and recaps, and everyone follows.
 
 ### Fixed
-- On the Mac, videos show their picture instead of a black screen.
-- On the Mac, B-Anime no longer asks for your password to reach the Keychain (sign in to AniList once more).
-- Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
-- The People list shows each person's real ping.
-- Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.
-- Someone who closes the app is noticed as gone in 10 seconds instead of 30.
-- A guest's pause no longer gets lost, or undone a moment later, when it lands just after a room update.
-- Coming back to the app as host no longer takes everyone back to where you left.
-- A host who reopens their room carries on from where everyone else is.
-- A new room starts in its lobby even when someone comes back to it from an earlier room.
-- When the host leaves, the room stays paused with its new host until someone presses play.
-- Someone whose connection drops gets back into the room instead of ending up alone in a room of their own.
-- A host whose connection dropped while a guest took over gets back into the room as a guest.
-- Closing the app no longer tells the room you paused.
-- Leaving a room, or the room ending, pauses your player instead of letting it play on out of step.
-- Closing the pop-out window no longer pauses the room for everyone.
-- When the room moves to another episode while the player is popped out, it switches there and you stay on your page.
-- Rejoining a room you hosted opens it again where it was, when nobody else is hosting it.
-- Coming back to a room makes you the same person in it, so it stops waiting for you at once.
-- An episode in your library plays from it in a room, instead of from a source.
-- The player's header keeps its layout with long episode titles and on phones.
-- On Android, online episodes show their skip intro and ending markers and buttons again.
-- On Android, the screen stays on while an episode plays.
-- On Android, full screen respects your phone's rotation lock.
-- A paused phone no longer makes the room wait for it to load.
-- A guest whose player lags or reloads catches up with the room, instead of jumping back to the start and getting stuck loading.
+- Many Watch together fixes for dropped connections, hosts leaving, rejoining and lagging players.
+- On the Mac, videos show their picture, and no more Keychain password prompts (sign in to AniList once more).
+- On Android, the screen stays on while playing, full screen respects the rotation lock, and skip markers are back.
 
 ## [0.4.5] - 2026-11-24
 
