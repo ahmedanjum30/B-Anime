@@ -76,6 +76,8 @@ export const installUpdate = () => call<void>("install_update");
 export const setUpdateChannel = (beta: boolean) => call<UpdateStatus>("set_update_channel", { beta });
 export const networkLogs = () => (inTauri ? call<boolean>("network_logs") : Promise.resolve(false));
 export const setNetworkLogs = (on: boolean) => call<void>("set_network_logs", { on });
+/** Shows B-Anime's log file in Finder / Explorer. */
+export const revealLogs = () => call<void>("reveal_logs");
 
 // ── What's new (the first launch after an update) ──
 export const whatsNew = () =>

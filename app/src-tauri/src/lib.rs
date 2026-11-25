@@ -660,6 +660,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             auth::use_token_file(paths.root.join("anilist-token"));
             paths.ensure()?;
+            logs::to_file(&paths.logs);
             tracing::info!(data_dir = %paths.root.display(), version = %app.package_info().version, "starting B-Anime");
             let db = tauri::async_runtime::block_on(db::open(&paths.db))?;
             let proxy = tauri::async_runtime::block_on(streaming::Proxy::start())?;
@@ -764,6 +765,7 @@ pub fn run() {
             watch::watch_set_room_name,
             logs::network_logs,
             logs::set_network_logs,
+            logs::reveal_logs,
             whats_new::whats_new,
             whats_new::whats_new_seen,
             list_extensions,

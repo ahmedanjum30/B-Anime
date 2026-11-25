@@ -29,6 +29,8 @@ fi
 mkdir -p "$work/out"
 cp -r site/. "$work/out/"
 if [ -d "$work/live/download" ]; then cp -r "$work/live/download" "$work/out/"; fi
+# The release manifests installed copies read for updates (scripts/publish-update-manifest.sh).
+if [ -d "$work/live/updates" ]; then cp -r "$work/live/updates" "$work/out/"; fi
 
 if [ -n "$version" ]; then
   mkdir -p "$work/out/download"

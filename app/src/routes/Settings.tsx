@@ -2,7 +2,7 @@ import { For, Match, Show, Switch, createResource, createSignal, onCleanup } fro
 
 import {
   addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, setUpdateChannel, networkLogs, setNetworkLogs, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
+  installUpdate, setUpdateChannel, networkLogs, setNetworkLogs, revealLogs, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
   setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
@@ -562,10 +562,13 @@ function About() {
             <p class="setting-title">Detailed network logs</p>
             <p class="setting-desc">
               For troubleshooting Watch together connections: records how devices reach each other. Turn it off when
-              you're done.
+              you're done. Logs are saved in B-Anime's log file.
             </p>
           </div>
           <div class="setting-actions">
+            <button type="button" class="btn btn-quiet btn-sm" onClick={() => void revealLogs().catch((e) => homeStore.notify(errorText(e)))}>
+              Show log file
+            </button>
             <div class="segmented" role="group" aria-label="Detailed network logs">
               <button type="button" aria-pressed={!netLogs()} onClick={() => switchNetLogs(false)}>Off</button>
               <button type="button" aria-pressed={!!netLogs()} onClick={() => switchNetLogs(true)}>On</button>

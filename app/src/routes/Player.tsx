@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { playerSlot, targetFromPath, type PlayerTarget } from "../lib/playerSlot";
 import type Hls from "hls.js";
@@ -402,6 +402,26 @@ export default function Player(props: { behind: boolean }) {
 
   /** The stream last loaded, so a server switch (same stream, new index) is told from a new episode. */
   let loadedStream: ReturnType<typeof stream>;
+  let loadedIdx = -1;
+  /**
+   * Mac: the stream's qualities, each its own playlist. WebKit plays the master playlist itself
+   * and offers no choice, so a fixed quality plays that quality's playlist instead.
+   */
+  let nativeMaster = "";
+  let nativeLevelUrls: string[] = [];
+  const loadNativeLevels = async (master: string, s: ReturnType<typeof stream>, idx: number) => {
+    try {
+      const text = await (await fetch(master)).text();
+      if (s !== stream() || idx !== sourceIndex()) return;
+      const found = playlistLevels(text, master);
+      if (!found) return;
+      nativeMaster = master;
+      nativeLevelUrls = found.map((l) => l.url);
+      setLevels(found.map(({ height, bitrate }) => ({ height, bitrate })));
+    } catch {
+      // No list of qualities: Auto only.
+    }
+  };
   /** Bumped to load the same stream again from here (the Mac, back from a long while hidden). */
   const [reattach, setReattach] = createSignal(0);
   /** Whether the video was paused when it was reloaded, so it stays paused. */
@@ -425,12 +445,20 @@ export default function Player(props: { behind: boolean }) {
     on([stream, sourceIndex, reattach], async ([s, idx]) => {
       // Switching servers mid-episode continues from here, not from the saved position.
       const carry = s && s === loadedStream && video && video.currentTime > 1 ? video.currentTime : null;
+      // The same stream and server loaded again (the Mac, back from the background): it keeps
+      // its quality.
+      const reload = !!s && s === loadedStream && idx === loadedIdx;
+      const keepLevel = reload ? untrack(level) : -1;
       loadedStream = s;
+      loadedIdx = idx;
       switchedAt = carry;
       destroy();
       setVideoError(null);
-      setLevels([]);
-      setLevel(-1);
+      if (!reload) {
+        setLevels([]);
+        setLevel(-1);
+        nativeLevelUrls = [];
+      }
       setAudioTracks([]);
       setAudioTrack(-1);
       setWaiting(true);
@@ -527,7 +555,8 @@ export default function Player(props: { behind: boolean }) {
         instance.loadSource(src.url);
         instance.attachMedia(video);
       } else {
-        video.src = src.url;
+        video.src = (keepLevel >= 0 && nativeLevelUrls[keepLevel]) || src.url;
+        if (src.kind === "hls" && !reload) void loadNativeLevels(src.url, s, idx);
       }
     }),
   );
@@ -828,6 +857,7 @@ export default function Player(props: { behind: boolean }) {
     resumePending = false;
     marked = false;
     setSkips([]);
+    skipsFor = "";
     setCountdown(null);
     setActiveTrack(-1);
   }));
@@ -837,6 +867,9 @@ export default function Player(props: { behind: boolean }) {
     void savePosition(mediaId(), episode(), video.currentTime, duration()).catch(() => {});
   };
 
+  /** The episode whose skip times are in (or on their way), so a reload of the same video (a
+   * quality or server switch, back from the background) doesn't ask AniSkip again. */
+  let skipsFor = "";
   const onMeta = async () => {
     setDuration(video.duration || 0);
     video.volume = volume();
@@ -865,12 +898,21 @@ export default function Player(props: { behind: boolean }) {
     const mal = media()?.idMal;
     if (!mal || !inTauri) return;
     const ep = episode();
+    const key = `${mal}:${ep}`;
+    if (skipsFor === key) return;
+    skipsFor = key;
     // A stream's length can still be unknown here (Infinity, with hls.js on Android): the lookup
     // can't send that, so it failed and the episode had no skip bars or buttons. It waits for the
     // real length (a few seconds at most), and asks without one if it never comes.
     const length = await knownDuration(10_000);
     if (ep !== episode()) return;
-    setSkips(await getSkipTimes(mal, ep, length).catch(() => []));
+    setSkips(
+      await getSkipTimes(mal, ep, length).catch(() => {
+        // Ask again on the next load.
+        if (skipsFor === key) skipsFor = "";
+        return [];
+      }),
+    );
   };
   /** The video's length once it's known (a finite number), or 0 after `within` ms. */
   const knownDuration = (within: number) =>
@@ -1057,6 +1099,13 @@ export default function Player(props: { behind: boolean }) {
   };
   const chooseLevel = (i: number) => {
     if (hls) hls.currentLevel = i;
+    else if (video && nativeMaster && (i === -1 || nativeLevelUrls[i])) {
+      // Mac: play that quality's playlist (or the master, for Auto) from here.
+      switchedAt = video.currentTime > 1 ? video.currentTime : null;
+      reattachPaused = video.paused;
+      setWaiting(true);
+      video.src = i === -1 ? nativeMaster : nativeLevelUrls[i];
+    }
     setLevel(i);
     setMenu(null);
   };
@@ -1919,3 +1968,26 @@ export default function Player(props: { behind: boolean }) {
     </div>
   );
 }
+
+/**
+ * A master playlist's qualities (one per height, its highest bitrate), with each one's playlist,
+ * or null when there's no choice to offer: fewer than two, or audio in its own playlists (a
+ * quality's playlist alone would play without sound).
+ */
+function playlistLevels(text: string, base: string): { height: number; bitrate: number; url: string }[] | null {
+  if (/#EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*URI=/.test(text)) return null;
+  const lines = text.split(/\r?\n/);
+  const byHeight = new Map<number, { height: number; bitrate: number; url: string }>();
+  lines.forEach((line, i) => {
+    if (!line.startsWith("#EXT-X-STREAM-INF:")) return;
+    const res = /RESOLUTION=\d+x(\d+)/.exec(line);
+    const uri = lines.slice(i + 1).find((l) => l.trim() && !l.startsWith("#"));
+    if (!res || !uri) return;
+    const height = Number(res[1]);
+    const bitrate = Number(/[:,]BANDWIDTH=(\d+)/.exec(line)?.[1] ?? 0);
+    const prev = byHeight.get(height);
+    if (!prev || bitrate > prev.bitrate) byHeight.set(height, { height, bitrate, url: new URL(uri.trim(), base).href });
+  });
+  return byHeight.size > 1 ? [...byHeight.values()] : null;
+}
+

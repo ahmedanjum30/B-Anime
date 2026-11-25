@@ -7,6 +7,9 @@
 //! silently with `/UPDATE=1` (the installer closes B-Anime, replaces it, and starts it again);
 //! Android hands the APK to the system installer (the app does that); the Mac swaps its app for
 //! the zip's once it has quit, and opens it again.
+//!
+//! What's newest comes from the release manifests on the website (`MANIFESTS`), which carry the
+//! files' links and checksums; GitHub's API is the fallback, for when there are none yet.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,9 +20,10 @@ use sha2::{Digest, Sha256};
 use crate::{Error, Result};
 
 pub const REPO: &str = "ahmedanjum30/B-Anime";
-/// Betas (`x.y.z-beta.N`) are published here, on their own Releases page, so B-Anime's page only
-/// lists stable versions. Copies on the Beta channel look in both.
-pub const BETA_REPO: &str = "ahmedanjum30/B-Anime-Beta";
+/// Where each release also describes itself (`stable.json`, `beta.json`), on the website (GitHub
+/// Pages), written by the release workflow. Reading it isn't limited like GitHub's API (60
+/// requests an hour, shared by every device on a connection), which answered 403 when it ran out.
+pub const MANIFESTS: &str = "https://ahmedanjum30.github.io/B-Anime/updates";
 
 /// A release version: `x.y.z`, or `x.y.z-beta.N` for the Nth beta of `x.y.z`. A beta comes before
 /// its final release: 0.4.5-beta.1 < 0.4.5-beta.2 < 0.4.5 < 0.4.6-beta.1.
@@ -144,21 +148,105 @@ async fn releases(http: &reqwest::Client, url: &str) -> Result<Vec<Release>> {
     res.json().await.map_err(|e| Error::Network(e.to_string()))
 }
 
-/// The newest release, when it's newer than `current`. Stable takes B-Anime's latest release;
-/// `beta` also takes betas, from the beta repository (and any pre-release on B-Anime's page).
+/// A release as its manifest on the website describes it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Manifest {
+    version: String,
+    #[serde(default)]
+    notes: String,
+    published_at: Option<String>,
+    page_url: String,
+    /// File name -> where it is and its SHA-256.
+    files: std::collections::HashMap<String, ManifestFile>,
+}
+
+#[derive(Deserialize)]
+struct ManifestFile {
+    url: String,
+    sha256: String,
+}
+
+/// A channel's manifest: `None` when there's none (yet).
+async fn manifest(http: &reqwest::Client, channel: &str) -> Result<Option<Manifest>> {
+    let res = http
+        .get(format!("{MANIFESTS}/{channel}.json"))
+        .send()
+        .await
+        .map_err(|e| Error::Network(e.to_string()))?;
+    if res.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !res.status().is_success() {
+        return Err(Error::Network(format!("the website answered HTTP {}", res.status().as_u16())));
+    }
+    res.json().await.map(Some).map_err(|e| Error::Network(e.to_string()))
+}
+
+/// The newest release in the manifests, when it's newer than `current`; `None` (outer) when there
+/// are no manifests to go by, so the caller asks GitHub's API instead.
+async fn check_manifests(http: &reqwest::Client, current: &str, beta: bool) -> Option<Result<Option<Update>>> {
+    let channels: &[&str] = if beta { &["stable", "beta"] } else { &["stable"] };
+    let mut found = Vec::new();
+    for channel in channels {
+        match manifest(http, channel).await {
+            Ok(Some(m)) => found.push(m),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, channel, "release manifest unreachable"),
+        }
+    }
+    let m = found
+        .into_iter()
+        .filter_map(|m| Version::parse(&m.version).map(|v| (v, m)))
+        .filter(|(v, _)| beta || !v.is_beta())
+        .max_by_key(|(v, _)| *v)?
+        .1;
+    Some(from_manifest(m, current))
+}
+
+fn from_manifest(m: Manifest, current: &str) -> Result<Option<Update>> {
+    let version = m.version.trim_start_matches('v').to_owned();
+    if !newer(&version, current) {
+        return Ok(None);
+    }
+    let setup_name = asset_name(&version);
+    let file = m
+        .files
+        .get(&setup_name)
+        .ok_or_else(|| Error::Config(format!("release {version} has no {setup_name}")))?;
+    let url = reqwest::Url::parse(&file.url).map_err(|e| Error::Config(e.to_string()))?;
+    if !trusted(&url) {
+        return Err(Error::Config("the update isn't hosted on GitHub; not updating".into()));
+    }
+    let sha256 = file.sha256.to_ascii_lowercase();
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::Config(format!("no checksum for {setup_name}; not updating")));
+    }
+    Ok(Some(Update {
+        version,
+        notes: m.notes,
+        published_at: m.published_at,
+        page_url: m.page_url,
+        setup_url: file.url.clone(),
+        setup_name,
+        sha256,
+    }))
+}
+
+/// The newest release, when it's newer than `current`. Stable takes the latest stable release;
+/// `beta` also takes betas. From the manifests on the website, else GitHub's API.
 pub async fn check(current: &str, beta: bool) -> Result<Option<Update>> {
     let http = client()?;
+    if let Some(found) = check_manifests(&http, current, beta).await {
+        return found;
+    }
     let mut list = releases(&http, &format!("https://api.github.com/repos/{REPO}/releases/latest")).await?;
     if beta {
-        // An unreachable beta repository mustn't stop stable updates on the Beta channel.
-        for url in [
-            format!("https://api.github.com/repos/{BETA_REPO}/releases?per_page=20"),
-            format!("https://api.github.com/repos/{REPO}/releases?per_page=20"),
-        ] {
-            match releases(&http, &url).await {
-                Ok(more) => list.extend(more),
-                Err(e) => tracing::warn!(error = %e, url, "beta releases unreachable"),
-            }
+        // Betas are pre-releases on B-Anime's page. One unreachable mustn't stop stable updates.
+        let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=20");
+        match releases(&http, &url).await {
+            Ok(more) => list.extend(more),
+            Err(e) => tracing::warn!(error = %e, url, "beta releases unreachable"),
         }
     }
     let Some(rel) = newest(list, beta) else { return Ok(None) };
@@ -481,6 +569,33 @@ mod tests {
             "B-Anime-Setup-0.3.0.exe"
         };
         assert_eq!(asset_name("0.3.0"), want);
+    }
+
+    fn manifest_json(version: &str, url_host: &str) -> Manifest {
+        let name = asset_name(version);
+        serde_json::from_value(serde_json::json!({
+            "version": version,
+            "notes": "## What's new",
+            "publishedAt": "2026-11-26T00:00:00Z",
+            "pageUrl": format!("https://github.com/{REPO}/releases/tag/v{version}"),
+            "files": { name.clone(): {
+                "url": format!("https://{url_host}/{REPO}/releases/download/v{version}/{name}"),
+                "sha256": "AB".repeat(32),
+            }},
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_manifest_gives_this_platforms_file_and_checksum() {
+        let u = from_manifest(manifest_json("0.4.7-beta.1", "github.com"), "0.4.6").unwrap().unwrap();
+        assert_eq!(u.version, "0.4.7-beta.1");
+        assert_eq!(u.setup_name, asset_name("0.4.7-beta.1"));
+        assert_eq!(u.sha256, "ab".repeat(32));
+        // Not newer: nothing to do.
+        assert!(from_manifest(manifest_json("0.4.6", "github.com"), "0.4.6").unwrap().is_none());
+        // Files only from GitHub.
+        assert!(from_manifest(manifest_json("0.4.7", "example.com"), "0.4.6").is_err());
     }
 
     #[test]

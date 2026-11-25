@@ -51,8 +51,13 @@ the `gh-pages` branch, `/ (root)`.
 
 ## How installed copies update
 
-- B-Anime checks the latest GitHub release 3 seconds after launch, and when Check for updates is
+- B-Anime checks for a newer release 3 seconds after launch, and when Check for updates is
   clicked in Settings (release builds only; `npm run tauri dev` never updates itself).
+- It reads the release manifests on the website, `updates/stable.json` (and `beta.json` on the
+  Beta channel) at https://ahmedanjum30.github.io/B-Anime/, which the release workflow writes
+  after publishing (`scripts/publish-update-manifest.sh`): the version, each file's link and its
+  SHA-256. They aren't limited like GitHub's API (60 requests an hour per connection, shared by
+  every device on it). Without manifests it asks GitHub's API instead.
 - When the release is newer, it downloads `B-Anime-Setup-<version>.exe`, only from GitHub's own
   hosts, and checks its SHA-256 against the release's `SHA256SUMS.txt`. A release without
   checksums, or a download that doesn't match, is refused.

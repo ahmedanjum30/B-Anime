@@ -5,8 +5,10 @@
 # The tag is the version: each build writes it into the version files (scripts/set-version.mjs)
 # before building, so releases need no version-bump commits.
 #
-# Installed copies of B-Anime find the release, download their file (the setup on Windows, the
-# APK on Android, the zipped app on a Mac), check it against SHA256SUMS.txt, and offer to update.
+# Installed copies of B-Anime find the release through its manifest on the website
+# (updates/stable.json or beta.json, written by the update-manifest job), download their file (the
+# setup on Windows, the APK on Android, the zipped app on a Mac), check its SHA-256, and offer to
+# update.
 #
 # The Mac app is for Apple Silicon, signed ad hoc (no Apple Developer ID). A stable release also
 # updates its Homebrew cask in ahmedanjum30/homebrew-tap (brew install --cask
@@ -424,6 +426,47 @@ jobs:
             gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
               --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
           fi
+
+          # The release's manifest for installed copies (updates/stable.json or beta.json on the
+          # website): its files' links and checksums, read without GitHub's API rate limit.
+          repo="$GITHUB_REPOSITORY"; token="$GH_TOKEN"
+          if [ "$BETA" = "true" ] && [ -n "$BETA_TOKEN" ]; then repo="$GITHUB_REPOSITORY_OWNER/B-Anime-Beta"; token="$BETA_TOKEN"; fi
+          channel=stable; [ "$BETA" = "true" ] && channel=beta
+          mkdir -p "$GITHUB_WORKSPACE/manifest"
+          GH_TOKEN="$token" gh release view "$GITHUB_REF_NAME" -R "$repo" --json url,publishedAt,assets > release.json
+          jq -n --arg version "$version" --rawfile notes "$GITHUB_WORKSPACE/notes.md" \
+            --slurpfile rel release.json --rawfile sums SHA256SUMS.txt '
+            ($sums | gsub("\r"; "") | split("\n") | map(select(length > 0) | split(" ") | map(select(length > 0)))
+              | map({key: (.[1] | ltrimstr("*")), value: (.[0] | ascii_downcase)}) | from_entries) as $sha
+            | {version: $version, notes: $notes, publishedAt: $rel[0].publishedAt, pageUrl: $rel[0].url,
+               files: ($rel[0].assets | map(select($sha[.name] != null) | {key: .name, value: {url: .url, sha256: $sha[.name]}}) | from_entries)}
+          ' > "$GITHUB_WORKSPACE/manifest/$channel.json"
+          cat "$GITHUB_WORKSPACE/manifest/$channel.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: update-manifest
+          path: manifest/
+
+  # The manifest goes to the website (updates/<channel>.json on gh-pages), betas included: it's
+  # how installed copies find this release. Nothing else on the site changes.
+  update-manifest:
+    needs: publish
+    runs-on: ubuntu-latest
+    # One writer to gh-pages at a time (site.yml and the pages job use the same group).
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: update-manifest
+          path: manifest
+      - name: Publish the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-update-manifest.sh manifest
 
   # The new version's cask goes to the Homebrew tap (ahmedanjum30/homebrew-tap), so
   # `brew install --cask ahmedanjum30/tap/b-anime` gets it. Stable versions only. Skipped without

@@ -17,6 +17,10 @@ one line each, written for users (see CLAUDE.md).
 
 ## [0.4.7] - 2026-11-26
 
+### Added
+- B-Anime keeps a log file; Settings → About shows it, for reporting problems.
+- On the Mac, pick the video quality in the player (Auto picks it for you, as before).
+
 ### Changed
 - B-Anime looks for updates when it starts (or when you check in Settings), no longer every 6 hours.
 
@@ -24,6 +28,7 @@ one line each, written for users (see CLAUDE.md).
 - On the Mac, videos keep their picture when you come back to B-Anime after a while in another app.
 - Home, Library, Schedule and Extensions no longer blink when B-Anime starts or syncs with AniList.
 - A background sync no longer clears a match search you're typing in Settings.
+- Checking for updates no longer fails when several devices share your internet connection.
 
 ## [0.4.6] - 2026-11-25
 
