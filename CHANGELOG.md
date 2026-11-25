@@ -73,6 +73,7 @@ one line each, written for users (see CLAUDE.md).
 - On Android, the screen stays on while an episode plays.
 - On Android, full screen respects your phone's rotation lock.
 - A paused phone no longer makes the room wait for it to load.
+- A guest whose player lags or reloads catches up with the room, instead of jumping back to the start and getting stuck loading.
 
 ## [0.4.5] - 2026-11-24
 

@@ -555,6 +555,9 @@ export function syncPlayer(opts: {
       if (s) w.send({ ...s, playing: false });
       return;
     }
+    // A guest's player (re)loading the episode hasn't taken the room's place yet: its plays and
+    // pauses are its own starting up, not the viewer's.
+    if (!joined && guest()) return;
     // Held after a switch: plays (the player's own autoplay) wait for everyone, quietly.
     if (v && !v.paused && w.room() && w.nowPlaying()?.held) {
       selfPause(v);
@@ -580,21 +583,29 @@ export function syncPlayer(opts: {
   // Only the host moves the timeline: a guest's own seek (the bar, ±10 s, keys, a double-tap)
   // goes back to where the room is.
   let seekNoticeAt = 0;
+  /** A guest in a running room: only the host moves the timeline. */
+  const guest = () => !!w.room() && !w.room()!.host && w.started();
+  /**
+   * The viewer's own seek (the bar, ±10 s, keys, a double-tap), asked before it happens: a guest
+   * is told only the host moves the timeline, and nothing moves. (Guessing from the video's
+   * "seeked" events instead caught the player's own jumps: starting a stream, recovering from a
+   * stall. Each was sent back with that notice, the stream started over, and so on.)
+   */
+  const mayMoveTimeline = () => {
+    if (!guest()) return true;
+    if (performance.now() - seekNoticeAt > 4000) {
+      seekNoticeAt = performance.now();
+      homeStore.notify("Only the host can move the timeline.");
+    }
+    return false;
+  };
   const onSeeked = () => {
     const v = opts.video();
     if (closing || !v?.isConnected || ours("seek")) return;
-    const room = w.remote();
-    if (v && w.room() && !w.room()!.host && w.started() && room && room.mediaId === opts.mediaId() && room.episode === opts.episode()) {
-      const expected = room.position + (room.playing ? (performance.now() - room.at) / 1000 : 0);
-      if (Math.abs(v.currentTime - expected) > 2) {
-        selfSeek(v, Math.max(0, expected));
-        if (performance.now() - seekNoticeAt > 4000) {
-          seekNoticeAt = performance.now();
-          homeStore.notify("Only the host can move the timeline.");
-        }
-        return;
-      }
-    }
+    // A guest's player moving by itself (a stream starting, a stall's recovery, the small
+    // window's buttons) isn't the room's: the room's next update (every 2 s) puts it back if it's
+    // off. Nor is a player that's still (re)loading and hasn't taken the room's place yet.
+    if (guest() || (!joined && w.room())) return;
     sendNow();
   };
 
@@ -847,6 +858,13 @@ export function syncPlayer(opts: {
       }
     };
     v.addEventListener("loadedmetadata", onReady);
+    // A new stream in the same video (another server, a reload): it joins the room again.
+    const onEmptied = () => {
+      joined = false;
+      clearTimeout(startTimer);
+    };
+    v.addEventListener("emptied", onEmptied);
+    onCleanup(() => v.removeEventListener("emptied", onEmptied));
     if (v.readyState >= 1) queueMicrotask(onReady);
     v.addEventListener("play", onPlayEvent);
     v.addEventListener("pause", onPauseEvent);
@@ -916,5 +934,5 @@ export function syncPlayer(opts: {
     ),
   );
 
-  return { attach, startNow };
+  return { attach, startNow, mayMoveTimeline };
 }

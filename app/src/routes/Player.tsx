@@ -168,12 +168,22 @@ export default function Player(props: { behind: boolean }) {
     if (source.usable().some((e) => e.id === id)) source.setExt(id);
     rememberPlayFrom(mediaId(), "source");
   };
+  /** In a room, the host's match on this source hasn't been taken on yet (see useRoomMatch). */
+  const roomMatchPending = () => {
+    const h = watchStore.hostSourceFor(mediaId());
+    if (!h?.showId || source.ext() !== h.id) return false;
+    const m = source.match();
+    return !(m?.status === "matched" && m.sourceId === h.showId);
+  };
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
   type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
   const [stream] = createResource<Stream, Key>(
     (): Key | null => {
       if (local()) return { local: true, id: mediaId(), ep: episode() };
+      // In a room, not before the show is the one the host matched on this source: loading this
+      // device's own match first (another season, say) and then the host's started it twice.
+      if (roomMatchPending()) return null;
       return item() && source.ext() ? { local: false, ext: source.ext()!, id: item()!.id } : null;
     },
     (k) => (k.local ? localStream(k.id, k.ep) : getStream(k.ext, k.id)),
@@ -763,12 +773,15 @@ export default function Player(props: { behind: boolean }) {
   const resumePoint = async () => {
     if (resumed || !inTauri) return null;
     resumed = true;
-    // In a Watch together room nobody resumes their own spot: everyone starts where the room is
-    // (the beginning, at Start), and the room's position puts them in step after that.
+    // In a Watch together room nobody resumes their own spot: everyone starts where the room is.
+    // A stream starts there itself (hls.js begins at this position: a jump made before it had
+    // loaded was undone, back to 0:00); the room's updates keep it in step after that.
     if (watchStore.room()) {
       resumeAt = null;
       resumePending = false;
-      return null;
+      const p = watchStore.nowPlaying();
+      const at = watchStore.started() && p && p.mediaId === mediaId() && p.episode === episode() && !p.held ? watchStore.roomPosition() : 0;
+      return at > 1 ? at : null;
     }
     const pos = await getPosition(mediaId(), episode()).catch(() => null);
     resumeAt = pos && pos > 30 ? pos : null;
@@ -939,7 +952,10 @@ export default function Player(props: { behind: boolean }) {
 
   // ── Controls
   const toggle = () => (video.paused ? void video.play() : video.pause());
-  const seekBy = (d: number) => (video.currentTime = Math.max(0, Math.min(duration(), video.currentTime + d)));
+  const seekBy = (d: number) => {
+    if (!together.mayMoveTimeline()) return;
+    video.currentTime = Math.max(0, Math.min(duration(), video.currentTime + d));
+  };
 
   // ── Taps on the picture (touch screens)
   // A tap shows the controls, or hides them if they're up: it never pauses, so the controls can
@@ -1200,7 +1216,7 @@ export default function Player(props: { behind: boolean }) {
           return true;
       }
       if (/^[0-9]$/.test(k) && duration()) {
-        video.currentTime = (Number(k) / 10) * duration();
+        if (together.mayMoveTimeline()) video.currentTime = (Number(k) / 10) * duration();
         return true;
       }
       return false;
@@ -1621,7 +1637,10 @@ export default function Player(props: { behind: boolean }) {
             value={time()}
             aria-label="Seek"
             aria-valuetext={`${fmtClock(time())} of ${fmtClock(duration())}`}
-            onInput={(e) => (video.currentTime = Number(e.currentTarget.value))}
+            onInput={(e) => {
+              if (together.mayMoveTimeline()) video.currentTime = Number(e.currentTarget.value);
+              else e.currentTarget.value = String(video.currentTime);
+            }}
           />
         </div>
 
