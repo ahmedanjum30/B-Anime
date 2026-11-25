@@ -3,6 +3,7 @@ import { A } from "@solidjs/router";
 
 import WeekListings from "../components/WeekListings";
 import { getSchedule, inTauri, onLibraryChanged } from "../lib/api";
+import { keepSame } from "../lib/keep";
 import { fmtCount, startOfWeek } from "../lib/format";
 import { homeStore } from "../lib/store";
 import type { AiringSlot, ScheduleItem, ScheduleScope } from "../lib/types";
@@ -37,7 +38,7 @@ export default function Schedule() {
   const key = createMemo(() => ({ scope: scope(), from: Math.floor(weekStart() / 1000) }), undefined, {
     equals: (a, b) => a.scope === b.scope && a.from === b.from,
   });
-  const [items, { refetch }] = createResource(key, (k) => getSchedule(k.scope, k.from, k.from + 7 * DAY));
+  const [items, { refetch }] = createResource(key, (k) => getSchedule(k.scope, k.from, k.from + 7 * DAY), { storage: keepSame });
 
   let unlisten: (() => void) | undefined;
   void onLibraryChanged(() => scope() === "mine" && void refetch()).then((u) => (unlisten = u));

@@ -298,7 +298,8 @@ export default function Show() {
 }
 
 function BackLink() {
-  const back = () => (history.length > 1 ? history.back() : (location.href = "/library"));
+  const navigate = useNavigate();
+  const back = () => (history.length > 1 ? history.back() : navigate("/library"));
   return (
     <button type="button" class="back-link" onClick={back}>
       <ArrowLeft size={16} stroke-width={2} aria-hidden="true" /> Back

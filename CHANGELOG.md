@@ -22,6 +22,8 @@ one line each, written for users (see CLAUDE.md).
 
 ### Fixed
 - On the Mac, videos keep their picture when you come back to B-Anime after a while in another app.
+- Home, Library, Schedule and Extensions no longer blink when B-Anime starts or syncs with AniList.
+- A background sync no longer clears a match search you're typing in Settings.
 
 ## [0.4.6] - 2026-11-25
 

@@ -771,10 +771,16 @@ function RoomCheck(props: { mediaId: number }) {
     return { playable: true, via: extName() };
   });
   /** Where this device can play from: the library (when it has the episode) and each source. */
-  const options = () => [
-    ...(hasLocal() ? [{ id: "library", name: "Your library" }] : []),
-    ...source.usable().map((e) => ({ id: e.id, name: e.name })),
-  ];
+  // The same list while its choices don't change, so the menu isn't rebuilt (and its choice
+  // reset) whenever the source list is read again.
+  const options = createMemo(
+    () => [
+      ...(hasLocal() ? [{ id: "library", name: "Your library" }] : []),
+      ...source.usable().map((e) => ({ id: e.id, name: e.name })),
+    ],
+    [],
+    { equals: (a, b) => a.length === b.length && a.every((o, i) => o.id === b[i].id && o.name === b[i].name) },
+  );
   createEffect(() => {
     const r = result();
     w.check(r.playable, r.via, copyLength.loading ? null : (copyLength() ?? null));

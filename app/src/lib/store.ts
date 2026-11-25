@@ -1,22 +1,29 @@
 import { createResource, createRoot, createSignal } from "solid-js";
 import { getAccount, getHome, onEvent, onLibraryChanged, syncIfStale, updateStatus, installUpdate, errorText, UPDATE_ACTION } from "./api";
 import { fmtVersion } from "./format";
+import { keepSame } from "./keep";
 import type { ScanStatus } from "./types";
 
 // App-wide state. Home data and the AniList account are fetched once and refreshed whenever
 // the backend says lists or library changed (sign-in, sync, sign-out, a scan).
 export const homeStore = createRoot(() => {
-  const [home, { refetch }] = createResource(getHome);
-  const [account, { refetch: refetchAccount, mutate: setAccount }] = createResource(getAccount);
+  // Home and the account load once the "library changed" listener is attached: a sync that
+  // finished while the UI was still loading emitted its event before anyone was listening, so
+  // loading earlier meant loading twice at every launch (and Home drawn twice).
+  const [listening, setListening] = createSignal(false);
+  const [home, { refetch }] = createResource(listening, getHome, { storage: keepSame });
+  const [account, { refetch: refetchAccount, mutate: setAccount }] = createResource(listening, getAccount);
   const [update, { refetch: refetchUpdate }] = createResource(updateStatus);
 
   const refresh = () => {
+    if (!listening()) return;
     void refetch();
     void refetchAccount();
   };
-  // Refetch once the listener is attached too: a sync that finished while the UI was still
-  // loading emitted its event before anyone was listening.
-  void onLibraryChanged(refresh).then(refresh);
+  void onLibraryChanged(refresh).then(
+    () => setListening(true),
+    () => setListening(true),
+  );
 
   // Automatic sync triggers (launch and a 15-minute timer run in the backend).
   // Coming back to the app syncs if the last sync is over 5 minutes old.

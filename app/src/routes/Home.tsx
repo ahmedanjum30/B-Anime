@@ -55,7 +55,7 @@ export default function Home() {
         <p class="dateline">{fmtDateLine(now())}</p>
       </header>
 
-      <Switch>
+      <Switch fallback={<HomeSkeleton />}>
         <Match when={home.error}>
           <div class="notice is-error" role="alert">
             <p>
@@ -116,9 +116,6 @@ export default function Home() {
           )}
         </Match>
 
-        <Match when={home.loading}>
-          <HomeSkeleton />
-        </Match>
       </Switch>
     </div>
   );

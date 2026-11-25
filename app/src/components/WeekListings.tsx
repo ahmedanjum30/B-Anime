@@ -20,17 +20,35 @@ export default function WeekListings(props: {
 }) {
   const { hoverMedia, setHoverMedia } = homeStore;
 
+  // The week's Monday as a number, so the clock ticking (every minute on Home, 30 s on
+  // Schedule) doesn't make new days, and with them a whole new grid.
+  const weekStart = createMemo(() => (props.weekStart ?? startOfWeek(props.now)).getTime());
   const days = createMemo(() => {
-    const start = props.weekStart ?? startOfWeek(props.now);
+    const start = new Date(weekStart());
     return Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
   });
 
+  // Each episode keeps its object while nothing about it changes (the slots come in new after
+  // every sync and clock tick), so its cell stays as it is instead of being drawn again.
+  let kept = new Map<string, Placed>();
   // Only what airs in the week shown: anything else would add empty time rows to the grid and
   // match no day on phones.
   const placed = createMemo<Placed[]>(() => {
     const from = days()[0].getTime();
     const to = new Date(from).setDate(days()[0].getDate() + 7);
-    return props.slots.map((s) => ({ ...s, at: new Date(s.airsAt) })).filter((s) => s.at.getTime() >= from && s.at.getTime() < to);
+    const next = new Map<string, Placed>();
+    const out: Placed[] = [];
+    for (const s of props.slots) {
+      const at = new Date(s.airsAt);
+      if (at.getTime() < from || at.getTime() >= to) continue;
+      const key = `${s.mediaId}|${s.episode}|${s.airsAt}`;
+      const old = kept.get(key);
+      const p = old && sameSlot(old, s) ? old : { ...s, at };
+      next.set(key, p);
+      out.push(p);
+    }
+    kept = next;
+    return out;
   });
 
   // One row per distinct local time slot, earliest first.
@@ -58,33 +76,35 @@ export default function WeekListings(props: {
 
   // Phones: the same week as a column of days, each listing its slots by time. Only days with
   // something on, plus today.
-  const byDay = createMemo(() =>
-    days()
-      .map((d) => ({
-        day: d,
-        today: sameDay(d, props.now),
-        slots: placed()
-          .filter((s) => sameDay(s.at, d))
-          .sort((a, b) => a.at.getTime() - b.at.getTime()),
-      }))
-      .filter((g) => g.slots.length || g.today),
-  );
+  const byDayMap = createMemo(() => {
+    const map = new Map<string, Placed[]>();
+    for (const s of [...placed()].sort((a, b) => a.at.getTime() - b.at.getTime())) {
+      const key = s.at.toDateString();
+      const list = map.get(key);
+      if (list) list.push(s);
+      else map.set(key, [s]);
+    }
+    return map;
+  });
+  const slotsOn = (d: Date) => byDayMap().get(d.toDateString()) ?? [];
+  const isToday = (d: Date) => sameDay(d, props.now);
+  const shownDays = createMemo(() => days().filter((d) => slotsOn(d).length || isToday(d)));
 
   return (
     <>
     <ol class="week-days" aria-label={props.caption ?? "Episodes airing this week for shows on your Watching list"}>
-      <For each={byDay()}>
-        {(g) => (
-          <li class="week-day" data-today={g.today ? "" : undefined}>
+      <For each={shownDays()}>
+        {(d) => (
+          <li class="week-day" data-today={isToday(d) ? "" : undefined}>
             <h3 class="week-day-head">
-              {fmtDay(g.day)} <span class="num">{g.day.getDate()}</span>
-              <Show when={g.today}>
+              {fmtDay(d)} <span class="num">{d.getDate()}</span>
+              <Show when={isToday(d)}>
                 <span class="week-day-today">Today</span>
               </Show>
             </h3>
-            <Show when={g.slots.length} fallback={<p class="week-day-empty">Nothing airs today.</p>}>
+            <Show when={slotsOn(d).length} fallback={<p class="week-day-empty">Nothing airs today.</p>}>
               <ul class="week-slots">
-                <For each={g.slots}>
+                <For each={slotsOn(d)}>
                   {(s) => (
                     <li>
                       <A
@@ -124,7 +144,7 @@ export default function WeekListings(props: {
           </th>
           <For each={days()}>
             {(d) => (
-              <th scope="col" class="listings-day" data-today={sameDay(d, props.now) ? "" : undefined}>
+              <th scope="col" class="listings-day" data-today={isToday(d) ? "" : undefined}>
                 {fmtDay(d)} <span class="num">{d.getDate()}</span>
               </th>
             )}
@@ -138,7 +158,7 @@ export default function WeekListings(props: {
               <th scope="row" class="listings-time num">{time}</th>
               <For each={days()}>
                 {(d) => (
-                  <td data-today={sameDay(d, props.now) ? "" : undefined}>
+                  <td data-today={isToday(d) ? "" : undefined}>
                     <For each={cell(time, d)}>
                       {(s) => (
                         <A
@@ -175,4 +195,9 @@ export default function WeekListings(props: {
     </table>
     </>
   );
+}
+
+/** Whether a kept slot still says the same as its new copy (the fields its cell shows). */
+function sameSlot(a: AiringSlot, b: AiringSlot): boolean {
+  return (Object.keys(b) as (keyof AiringSlot)[]).every((k) => a[k] === b[k]);
 }

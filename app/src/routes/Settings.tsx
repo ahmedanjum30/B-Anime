@@ -6,6 +6,7 @@ import {
   setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
 } from "../lib/api";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
+import { keepSameBy } from "../lib/keep";
 import { homeStore } from "../lib/store";
 import { SUB_LANGS } from "../lib/langs";
 import type { MediaCard, PlayerChoice, UnmatchedGroup } from "../lib/types";
@@ -139,7 +140,9 @@ const PHASE: Record<string, string> = {
 function LibraryFolders() {
   const { notify, scan, now } = homeStore;
   const [status, { refetch }] = createResource(libraryStatus);
-  const [unmatched, { refetch: refetchUnmatched }] = createResource(unmatchedFiles);
+  // Kept across syncs (matched by title), so a sync doesn't redraw the list and wipe a match search
+  // being typed in it.
+  const [unmatched, { refetch: refetchUnmatched }] = createResource(unmatchedFiles, { storage: keepSameBy("title") });
   const [error, setError] = createSignal<string | null>(null);
 
   let unlisten: (() => void) | undefined;

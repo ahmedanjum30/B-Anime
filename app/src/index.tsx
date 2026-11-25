@@ -26,7 +26,19 @@ const Reader = lazy(() => import("./routes/Reader"));
 const Settings = lazy(() => import("./routes/Settings"));
 const Together = lazy(() => import("./routes/Together"));
 
-render(
+// Draw the first frame in the app's own fonts: they ship with the app and load in a few ms, but
+// drawing before that showed the text in a fallback font and then swapped it (a blink at launch).
+// Never waits more than 300 ms.
+const fontsReady = Promise.race([
+  Promise.all(
+    ["400 1em Archivo", "500 1em Archivo", "600 1em Archivo", "600 1em 'Archivo Narrow'", "700 1em 'Archivo Narrow'"].map((f) =>
+      document.fonts.load(f),
+    ),
+  ),
+  new Promise((done) => setTimeout(done, 300)),
+]).catch(() => {});
+
+void fontsReady.then(() => render(
   () => (
     <Router root={Shell}>
       <Route path="/" component={Home} />
@@ -43,4 +55,4 @@ render(
     </Router>
   ),
   document.getElementById("root")!,
-);
+));

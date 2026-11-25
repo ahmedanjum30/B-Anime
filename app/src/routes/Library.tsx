@@ -5,6 +5,7 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import CoverCard, { FORMAT_LABEL } from "../components/CoverCard";
 import { Search } from "../lib/icons";
 import { getLibrary, inTauri, onLibraryChanged } from "../lib/api";
+import { keepSame } from "../lib/keep";
 import { fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
 import type { LibraryEntry, LibraryKind, ListStatus } from "../lib/types";
@@ -52,7 +53,7 @@ function makeView() {
 export default function Library(props: { kind: LibraryKind }) {
   const v = views[props.kind];
   const { account } = homeStore;
-  const [entries, { refetch }] = createResource(() => props.kind, getLibrary);
+  const [entries, { refetch }] = createResource(() => props.kind, getLibrary, { storage: keepSame });
 
   let unlisten: (() => void) | undefined;
   void onLibraryChanged(() => void refetch()).then((u) => (unlisten = u));

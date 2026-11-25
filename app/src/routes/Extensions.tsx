@@ -6,6 +6,7 @@ import {
   installLocalExtension, isLocalExtension, officialExtensionRepo, onEvent,
 } from "../lib/api";
 import { Plus, Search } from "../lib/icons";
+import { keepSameBy } from "../lib/keep";
 import { homeStore } from "../lib/store";
 import type { ExtCallOutput, ExtKind, ExtManifest, InstalledExtension, Repo, RepoEntry } from "../lib/types";
 
@@ -27,7 +28,7 @@ const [tab, setTab] = createSignal<Tab>("browse");
 
 export default function Extensions() {
   const { notify } = homeStore;
-  const [installed, { refetch, mutate }] = createResource(listExtensions);
+  const [installed, { refetch, mutate }] = createResource(listExtensions, { storage: keepSameBy("id") });
   const [updates, { refetch: recheck }] = createResource(checkExtensionUpdates);
   const updateFor = (id: string) => updates()?.find((u) => u.id === id)?.version;
   // Launch-time auto-updates can land while this page is open: show the new versions.
