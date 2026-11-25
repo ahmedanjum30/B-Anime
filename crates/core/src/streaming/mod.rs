@@ -638,8 +638,53 @@ pub struct SkipTime {
     pub end: f64,
 }
 
+/// How far a file's length may be from the one skip times were submitted for and still use
+/// them (shifted): a Blu-ray and a TV cut of an episode differ by a minute or so.
+const SKIP_LENGTH_SLACK: f64 = 120.0;
+
 /// Community intro/outro timestamps from api.aniskip.com (keyed by MyAnimeList id). Best effort.
+///
+/// AniSkip only answers for episodes about as long as the one people submitted times for, so a
+/// different cut (a Blu-ray file 40 s shorter than the TV broadcast) got none. Then the nearest
+/// submitted length's times are used, lined up with this file: openings and recaps stay where they
+/// are (they're near the start, before the cuts differ), endings move by the difference in length
+/// (they're anchored to the end).
 pub async fn skip_times(mal_id: i64, episode: i64, episode_length: f64) -> Result<Vec<SkipTime>> {
+    let length = episode_length.max(0.0).round();
+    let exact = aniskip(mal_id, episode, length).await?;
+    if !exact.is_empty() || length <= 0.0 {
+        return Ok(exact.into_iter().map(|(t, _)| t).collect());
+    }
+    // Every submitted length, then the closest one's times.
+    let all = aniskip(mal_id, episode, 0.0).await?;
+    let Some(nearest) = all
+        .iter()
+        .map(|(_, len)| *len)
+        .filter(|len| (len - length).abs() <= SKIP_LENGTH_SLACK)
+        .min_by(|a, b| (a - length).abs().total_cmp(&(b - length).abs()))
+    else {
+        return Ok(Vec::new());
+    };
+    let shift = length - nearest;
+    let mut kinds = std::collections::HashSet::new();
+    Ok(all
+        .into_iter()
+        .filter(|(_, len)| (len - nearest).abs() < 1.0)
+        // One of each kind (several submissions of the same length can overlap).
+        .filter(|(t, _)| kinds.insert(t.kind.clone()))
+        .filter_map(|(mut t, _)| {
+            if t.kind.ends_with("ed") {
+                t.start += shift;
+                t.end += shift;
+            }
+            (t.start >= 0.0 && t.end > t.start && t.end <= length + 1.0).then_some(t)
+        })
+        .collect())
+}
+
+/// One AniSkip lookup: the times with the episode length each was submitted for. `length` 0 asks
+/// for every length.
+async fn aniskip(mal_id: i64, episode: i64, length: f64) -> Result<Vec<(SkipTime, f64)>> {
     #[derive(Deserialize)]
     struct Resp {
         #[serde(default)]
@@ -650,6 +695,8 @@ pub async fn skip_times(mal_id: i64, episode: i64, episode_length: f64) -> Resul
     struct Item {
         interval: Interval,
         skip_type: String,
+        #[serde(default)]
+        episode_length: f64,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -658,15 +705,35 @@ pub async fn skip_times(mal_id: i64, episode: i64, episode_length: f64) -> Resul
         end_time: f64,
     }
     let url = format!(
-        "https://api.aniskip.com/v2/skip-times/{mal_id}/{episode}?types[]=op&types[]=ed&types[]=recap&types[]=mixed-op&types[]=mixed-ed&episodeLength={}",
-        episode_length.max(0.0).round()
+        "https://api.aniskip.com/v2/skip-times/{mal_id}/{episode}?types[]=op&types[]=ed&types[]=recap&types[]=mixed-op&types[]=mixed-ed&episodeLength={length}"
     );
     let client = crate::http::client_builder()
         .user_agent(concat!("B-Anime/", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(8))
+        // Phones loading the episode's video at the same moment answered slowly: 8 s timed out.
+        .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| Error::Network(e.to_string()))?;
-    let res = client.get(url).send().await.map_err(|e| Error::Network(e.to_string()))?;
+    let began = std::time::Instant::now();
+    let mut tries = 0;
+    let res = loop {
+        tries += 1;
+        match client.get(&url).send().await {
+            Ok(res) => break res,
+            // Once more after a timeout or a dropped connection.
+            Err(e) if tries < 2 && (e.is_timeout() || e.is_connect()) => continue,
+            Err(e) => {
+                // The whole chain: reqwest's own message ("error sending request") hides the reason.
+                let mut why = e.to_string();
+                let mut source = std::error::Error::source(&e);
+                while let Some(s) = source {
+                    why.push_str(&format!(": {s}"));
+                    source = s.source();
+                }
+                return Err(Error::Network(format!("{why} (after {:.1} s, {tries} tries)", began.elapsed().as_secs_f64())));
+            }
+        }
+    };
+    tracing::info!(ms = began.elapsed().as_millis() as u64, tries, length, "aniskip answered");
     if res.status().as_u16() == 404 {
         return Ok(vec![]);
     }
@@ -674,8 +741,22 @@ pub async fn skip_times(mal_id: i64, episode: i64, episode_length: f64) -> Resul
     Ok(body
         .results
         .into_iter()
-        .map(|i| SkipTime { kind: i.skip_type, start: i.interval.start_time, end: i.interval.end_time })
+        .map(|i| (SkipTime { kind: i.skip_type, start: i.interval.start_time, end: i.interval.end_time }, i.episode_length))
         .collect())
+}
+
+/// Real network: a Blu-ray file 40 s shorter than the TV cut people timed (Gintama' 44) still
+/// gets its opening, and its ending moved 40 s earlier.
+#[cfg(test)]
+#[tokio::test]
+#[ignore]
+async fn live_skip_times_for_a_different_cut() {
+    let tv = skip_times(9969, 44, 1481.0).await.unwrap();
+    let bd = skip_times(9969, 44, 1441.0).await.unwrap();
+    assert!(!tv.is_empty(), "AniSkip has times for the TV cut");
+    let ed = |v: &[SkipTime]| v.iter().find(|t| t.kind == "ed").map(|t| t.start);
+    assert_eq!(bd.iter().find(|t| t.kind == "op").map(|t| t.start), tv.iter().find(|t| t.kind == "op").map(|t| t.start));
+    assert_eq!(ed(&bd).zip(ed(&tv)).map(|(b, t)| (t - b).round()), Some(40.0));
 }
 
 pub async fn save_position(db: &Db, media_id: i64, episode: i64, position: f64, duration: f64) -> Result<()> {
