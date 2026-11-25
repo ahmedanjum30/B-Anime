@@ -412,6 +412,12 @@ fn open_anilist(app: AppHandle, id: u64, kind: banime_core::library::Kind) -> Re
 /// The project's Patreon page (Support in the sidebar).
 const SUPPORT_URL: &str = "https://www.patreon.com/cw/ahmedanjum30";
 
+/// A note from the app's pages (the player's switches between copies, say) in the app's log.
+#[tauri::command]
+fn ui_log(message: String) {
+    tracing::info!(target: "banime_ui", "{}", message.chars().take(500).collect::<String>());
+}
+
 /// Opens the Patreon page in the browser. The address is fixed here, not passed in.
 #[tauri::command]
 fn open_support(app: AppHandle) -> Result<(), String> {
@@ -766,6 +772,7 @@ pub fn run() {
             read_extension_repo,
             open_anilist,
             open_support,
+            ui_log,
             open_android_download,
             get_account,
             anilist_login,

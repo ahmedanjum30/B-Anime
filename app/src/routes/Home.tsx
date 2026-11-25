@@ -8,6 +8,7 @@ import { homeStore } from "../lib/store";
 import { fmtDateLine } from "../lib/format";
 import type { UpNext } from "../lib/types";
 import { playLibraryEpisode } from "../lib/play";
+import { recallPlayFrom } from "../lib/source";
 import { getPlayerPrefs, inTauri } from "../lib/api";
 import { recallDub } from "../lib/dub";
 
@@ -26,7 +27,8 @@ export default function Home() {
       notify(`"${item.title}" is a sample show. Add a library folder to play your own episodes.`);
       return;
     }
-    if (!item.source) {
+    // Not on disk, or this show plays from its source (picked on its page or in a room).
+    if (!item.source || recallPlayFrom(item.mediaId) === "source") {
       // Not on disk: straight to the player, which streams it from the source last used for
       // this kind of show (the show page's choice), in Sub or Dub as last watched for this show
       // (else the preferred audio).

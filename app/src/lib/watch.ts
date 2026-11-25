@@ -60,7 +60,7 @@ export const watchStore = createRoot(() => {
    * files or a source (which one is remembered per show, like everywhere else). Unset: the
    * library when it has the episode.
    */
-  const [playFrom, setPlayFrom] = createSignal<{ mediaId: number; library: boolean; ext?: string } | null>(null);
+
   /** When `nowPlaying` was last known (performance.now()), to work out where the room is now. */
   const [nowAt, setNowAt] = createSignal(0);
   /** Where the room is now: its last known position, moved on by the time since if playing. */
@@ -151,7 +151,6 @@ export const watchStore = createRoot(() => {
     setStarted(false);
     setRoomName("");
     setNowPlaying(null);
-    setPlayFrom(null);
     setReconnecting(false);
   };
   void onEvent<string>("watch-closed", (reason) => {
@@ -411,7 +410,7 @@ export const watchStore = createRoot(() => {
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
     recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt, roomName, rename, nameRoom,
-    playFrom, setPlayFrom, lengthGap, gapText, hostSourceFor,
+    lengthGap, gapText, hostSourceFor,
     host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });

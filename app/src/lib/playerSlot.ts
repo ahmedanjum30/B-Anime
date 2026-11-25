@@ -1,5 +1,6 @@
 import { createRoot, createSignal } from "solid-js";
 import { watchStore } from "./watch";
+import { recallPlayFrom } from "./source";
 
 /** The episode the player has open, from its /watch address. */
 export interface PlayerTarget {
@@ -34,9 +35,9 @@ export function sameEpisode(current: PlayerTarget | null, t: PlayerTarget): bool
   // In a room, the copy must also be the one picked under Playing from (the library, or a
   // source): a library copy left open doesn't stand in for a source, nor the other way round.
   if (!watchStore.room()) return true;
-  const choice = watchStore.playFrom();
+  const from = recallPlayFrom(current.id);
   // Not picked: a guest plays the host's source when the host plays from one.
-  const library = choice && choice.mediaId === current.id ? choice.library : watchStore.hostSourceFor(current.id) ? false : null;
+  const library = from ? from === "library" : watchStore.hostSourceFor(current.id) ? false : null;
   return library === null || library === current.local;
 }
 

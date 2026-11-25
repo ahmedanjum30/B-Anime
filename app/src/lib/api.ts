@@ -166,6 +166,8 @@ export async function getMedia(id: number): Promise<MediaPage> {
 export const openAniList = (id: number, type: LibraryKind) => call<void>("open_anilist", { id, kind: type });
 /** Opens the project's Patreon page in the browser. */
 export const openSupport = () => call<void>("open_support");
+/** A note in the app's log (for troubleshooting what a page did). */
+export const uiLog = (message: string) => void (inTauri ? call<void>("ui_log", { message }).catch(() => {}) : undefined);
 export const openAndroidDownload = () => call<void>("open_android_download");
 
 /** True inside the Android app (desktop-only items hide there). */

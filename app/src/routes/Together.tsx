@@ -6,7 +6,7 @@ import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search, X } from "../lib/icons";
 import { fmtAgo } from "../lib/format";
-import { createSource } from "../lib/source";
+import { createSource, recallPlayFrom, rememberPlayFrom } from "../lib/source";
 import { homeStore } from "../lib/store";
 import type { LibraryEntry, ListStatus } from "../lib/types";
 import { inviteLink, watchStore } from "../lib/watch";
@@ -685,24 +685,21 @@ function RoomCheck(props: { mediaId: number }) {
   const hasLocal = () => !!localEps()?.includes(episode());
   /** Not picked: the host's source, when the host plays from one and this device has it (the same
    *  copy as the host's, so it lines up); else the library when it has the episode. */
-  const hostDefault = () => {
-    const c = w.playFrom();
-    return !(c && c.mediaId === props.mediaId) && !!w.hostSourceFor(props.mediaId) && hasHostSource();
-  };
+  const hostDefault = () => recallPlayFrom(props.mediaId) === null && !!w.hostSourceFor(props.mediaId) && hasHostSource();
   // Shown as picked: the host's source (by default), else whichever this source list has.
   const shownExt = () => (hostDefault() ? hostSource()!.id : source.ext());
   /** Playing from the library: picked, or (not picked) by default (above). */
   const useLibrary = () => {
-    const c = w.playFrom();
-    if (c && c.mediaId === props.mediaId) return hasLocal() && c.library;
+    const from = recallPlayFrom(props.mediaId);
+    if (from) return hasLocal() && from === "library";
     return hasLocal() && !hostDefault();
   };
 
   const pickFrom = (value: string) => {
-    if (value === "library") return w.setPlayFrom({ mediaId: props.mediaId, library: true });
-    // Which source too: the player follows this pick exactly (not a remembered one).
-    w.setPlayFrom({ mediaId: props.mediaId, library: false, ext: value });
+    // The show's own choice (its page and Home use it too), and which source.
+    if (value === "library") return rememberPlayFrom(props.mediaId, "library");
     source.setExt(value);
+    rememberPlayFrom(props.mediaId, "source");
   };
   // The episode really loading from the source (not just being listed), before Ready: asked
   // once per source and episode (remembered), and only in the lobby. Once the room plays, the

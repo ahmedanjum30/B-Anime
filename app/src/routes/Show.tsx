@@ -5,7 +5,7 @@ import ListEditor from "../components/ListEditor";
 import EpisodeList from "../components/EpisodeList";
 import ChapterList from "../components/ChapterList";
 import SourcePanel from "../components/SourcePanel";
-import { createSource } from "../lib/source";
+import { createSource, recallPlayFrom } from "../lib/source";
 import { recallDub, rememberDub } from "../lib/dub";
 import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
@@ -255,7 +255,7 @@ export default function Show() {
                           (source.match.loading || source.items.loading || (!source.match() && !source.match.error))
                         }
                         onPlay={(ep) =>
-                          p().localFiles.some((f) => f.episode === ep)
+                          p().localFiles.some((f) => f.episode === ep) && recallPlayFrom(m().id) !== "source"
                             ? void playLibraryEpisode(m().id, ep, navigate, notify)
                             : navigate(
                                 `/watch/${m().id}/${ep}?ext=${encodeURIComponent(source.ext()!)}${source.isDub() ? "&dub=1" : ""}`,

@@ -8,7 +8,7 @@ import {
   SkipBack, SkipForward, Users, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
-  errorText, externalPlayers, getMedia, listExtensions, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
+  errorText, externalPlayers, getMedia, listExtensions, uiLog, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
   localStream, onAndroid, onWebKit, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { PictureTrack, Stream } from "../lib/types";
@@ -16,7 +16,7 @@ import { applyRules } from "../lib/entry";
 import { fmtClock } from "../lib/format";
 import { leaveTo } from "../lib/nav";
 import { audioId, recallAudio, rememberAudio, rememberDub } from "../lib/dub";
-import { createSource, recallServer, rememberServer, rememberShowSource, serverName } from "../lib/source";
+import { createSource, recallServer, rememberServer, rememberShowSource, serverName, recallPlayFrom, rememberPlayFrom, recallShowSource } from "../lib/source";
 import { sameServerIn, startSource } from "../lib/server-pick";
 import { homeStore } from "../lib/store";
 import { syncPlayer, watchStore } from "../lib/watch";
@@ -103,9 +103,11 @@ export default function Player(props: { behind: boolean }) {
     const h = watchStore.hostSourceFor(mediaId());
     return h && installed()?.some((e) => e.id === h.id && e.enabled) ? h.id : null;
   };
+  /** Library (true) or source (false): the show's choice, else in a room the host's source by
+   *  default; null for the library when it has the episode. */
   const roomChoice = () => {
-    const c = watchStore.playFrom();
-    if (c && c.mediaId === mediaId()) return c.library;
+    const from = recallPlayFrom(mediaId());
+    if (from) return from === "library";
     return hostPick() ? false : null;
   };
   const [libraryEps] = createResource(
@@ -115,18 +117,22 @@ export default function Player(props: { behind: boolean }) {
   const fromLibrary = () =>
     !local() && !!watchStore.room() && roomChoice() !== false && !!libraryEps()?.includes(episode());
   const checkingLibrary = () => !local() && !!watchStore.room() && roomChoice() !== false && libraryEps.loading;
+  const why = () =>
+    `pick=${recallPlayFrom(mediaId())} ext=${recallShowSource(mediaId())} choice=${roomChoice()} hostPick=${hostPick()} local=${local()} ` +
+    `libraryEps=${libraryEps.loading ? "loading" : JSON.stringify(libraryEps()?.length ?? null)} target=${target().path}`;
   createEffect(() => {
-    if (fromLibrary()) go(`/watch/${mediaId()}/${episode()}?local=1`);
+    if (fromLibrary()) {
+      uiLog(`player → library copy: ${why()}`);
+      go(`/watch/${mediaId()}/${episode()}?local=1`);
+    }
     // Picked a source (or the host's by default) while the library copy plays: over to it.
     else if (local() && watchStore.room() && roomChoice() === false) {
+      uiLog(`player → source: ${why()}`);
       go(`/watch/${mediaId()}/${episode()}${dubParam() ? "?dub=1" : ""}`);
     }
   });
   /** The source picked under Playing from, in a room (the player follows it exactly). */
-  const pickedExt = () => {
-    const c = watchStore.playFrom();
-    return watchStore.room() && c && c.mediaId === mediaId() && !c.library ? (c.ext ?? null) : null;
-  };
+  const pickedExt = () => (watchStore.room() && recallPlayFrom(mediaId()) === "source" ? recallShowSource(mediaId()) : null);
   const source = createSource(
     () => (local() || checkingLibrary() || fromLibrary() ? undefined : media()),
     () => extParam() ?? pickedExt() ?? hostPick() ?? undefined,
@@ -157,8 +163,8 @@ export default function Player(props: { behind: boolean }) {
   };
   /** Over to the host's source (the same copy as the host's), from the held screen. */
   const toHostSource = (id: string) => {
-    watchStore.setPlayFrom({ mediaId: mediaId(), library: false, ext: id });
     if (source.usable().some((e) => e.id === id)) source.setExt(id);
+    rememberPlayFrom(mediaId(), "source");
   };
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);

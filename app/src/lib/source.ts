@@ -26,10 +26,38 @@ const SHOW_KEY = (mediaId: number) => `banime.source.show.${mediaId}`;
 /** Remembers the source a show was watched/read on (the player and reader call this too). */
 export function rememberShowSource(mediaId: number, ext: string) {
   try {
+    if (localStorage.getItem(SHOW_KEY(mediaId)) === ext) return;
     localStorage.setItem(SHOW_KEY(mediaId), ext);
   } catch {
     /* storage unavailable: just don't remember */
   }
+  setChoiceChanged((n) => n + 1);
+}
+
+// Per show: where its episodes play from when the library has them too. "library" (the files),
+// "source" (the show's source, above), or not picked: the library. One answer for the show page,
+// Home, the player and Watch together rooms (a room's guests default to the host's source).
+const PLAY_FROM_KEY = (mediaId: number) => `banime.playfrom.show.${mediaId}`;
+/** Bumped when a show's choice changes, so pages and the player follow at once. */
+const [choiceChanged, setChoiceChanged] = createSignal(0);
+export type PlayFrom = "library" | "source";
+/** Where this show plays from when the library has the episode too (null: not picked). */
+export function recallPlayFrom(mediaId: number): PlayFrom | null {
+  choiceChanged();
+  try {
+    const v = localStorage.getItem(PLAY_FROM_KEY(mediaId));
+    return v === "library" || v === "source" ? v : null;
+  } catch {
+    return null;
+  }
+}
+export function rememberPlayFrom(mediaId: number, from: PlayFrom) {
+  try {
+    localStorage.setItem(PLAY_FROM_KEY(mediaId), from);
+  } catch {
+    /* storage unavailable: just don't remember */
+  }
+  setChoiceChanged((n) => n + 1);
 }
 // The server (one of an episode's streams, e.g. "Settlar") last picked in the player, by name,
 // since a stream's URL changes every episode. Kept per show, and the last pick anywhere is the
@@ -57,6 +85,7 @@ export function recallServer(mediaId: number): string | null {
 
 /** The source this show was last watched/read on, if any. */
 export function recallShowSource(mediaId: number): string | null {
+  choiceChanged();
   try {
     return localStorage.getItem(SHOW_KEY(mediaId));
   } catch {

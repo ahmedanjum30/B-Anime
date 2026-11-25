@@ -2,14 +2,15 @@ import { For, Match, Show, Switch, createSignal } from "solid-js";
 import { A } from "@solidjs/router";
 
 import { clearSourceMatch, errorText, inTauri, searchSource, setSourceMatch } from "../lib/api";
-import { searchTitles, type SourceState } from "../lib/source";
+import { recallPlayFrom, rememberPlayFrom, searchTitles, type SourceState } from "../lib/source";
 import type { Media, SourceResult } from "../lib/types";
 
 /** Which online source this show uses and what it matched to, with a way to fix the match. */
 export default function SourcePanel(props: {
   media: Media;
   source: SourceState;
-  /** The library already has episodes: keep an unmatched source to one quiet line. */
+  /** The library already has episodes: keep an unmatched source to one quiet line, and offer
+   *  "Your library" as where its episodes play from. */
   quiet?: boolean;
   /** Sub/Dub switch (anime): the current choice and how to change it. */
   dub?: boolean;
@@ -80,12 +81,25 @@ export default function SourcePanel(props: {
           <Match when={s().ext()}>
             <div class="source-line">
               <Show
-                when={s().usable().length > 1}
+                when={s().usable().length > 1 || (props.quiet && s().kind() === "anime")}
                 fallback={<span class="source-name">{extName()}</span>}
               >
+                {/* With episodes in the library: where they play from (the library's files, or a
+                    source), remembered for this show everywhere (Home, rooms too). */}
                 <label class="select select-sm">
-                  <span class="select-label">Source</span>
-                  <select value={s().ext() ?? ""} onChange={(e) => s().setExt(e.currentTarget.value)}>
+                  <span class="select-label">{props.quiet && s().kind() === "anime" ? "Play from" : "Source"}</span>
+                  <select
+                    value={props.quiet && s().kind() === "anime" && recallPlayFrom(props.media.id) !== "source" ? "library" : (s().ext() ?? "")}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      if (v === "library") return rememberPlayFrom(props.media.id, "library");
+                      if (props.quiet) rememberPlayFrom(props.media.id, "source");
+                      s().setExt(v);
+                    }}
+                  >
+                    <Show when={props.quiet && s().kind() === "anime"}>
+                      <option value="library">Your library</option>
+                    </Show>
                     <For each={s().usable()}>{(e) => <option value={e.id}>{e.name}</option>}</For>
                   </select>
                 </label>
