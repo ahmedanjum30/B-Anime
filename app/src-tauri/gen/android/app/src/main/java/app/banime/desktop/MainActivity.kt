@@ -85,8 +85,9 @@ class MainActivity : TauriActivity() {
           // A swipe from the edge shows them for a moment, then they hide again.
           bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
           bars.hide(WindowInsetsCompat.Type.systemBars())
-          // Either landscape side, following how the phone is held.
-          requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+          // Landscape; which side follows how the phone is held only with auto-rotate on (the
+          // phone's rotation lock is respected).
+          requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
         } else {
           bars.show(WindowInsetsCompat.Type.systemBars())
           requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
