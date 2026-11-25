@@ -55,6 +55,12 @@ export const watchStore = createRoot(() => {
   const [roomName, setRoomName] = createSignal("");
   /** What the room is on: the last state from the room or sent from here. */
   const [nowPlaying, setNowPlaying] = createSignal<OwnState | null>(null);
+  /**
+   * Where this device plays the room's show from, as picked on the Together page: its library's
+   * files or a source (which one is remembered per show, like everywhere else). Unset: the
+   * library when it has the episode.
+   */
+  const [playFrom, setPlayFrom] = createSignal<{ mediaId: number; library: boolean } | null>(null);
   /** When `nowPlaying` was last known (performance.now()), to work out where the room is now. */
   const [nowAt, setNowAt] = createSignal(0);
   /** Where the room is now: its last known position, moved on by the time since if playing. */
@@ -94,12 +100,15 @@ export const watchStore = createRoot(() => {
     const others = members().filter((m) => m.id !== r.me);
     const codes = [...others.filter((m) => m.host), ...others.filter((m) => !m.host)].map((m) => m.code).filter(Boolean);
     if (!codes.length) return;
+    const p = nowPlaying();
     const entry: RecentRoom = {
       key: recentKey,
-      title: roomName() || nowPlaying()?.title || "",
+      title: roomName() || p?.title || "",
       names: others.map((m) => m.name),
       codes,
       at: Date.now(),
+      place: p ? { state: { ...p, by: "", position: roomPosition(), held: false }, started: started(), name: roomName() } : undefined,
+      hosted: r.host,
     };
     saveRecent([entry, ...recent().filter((x) => x.key !== recentKey)].slice(0, RECENT_MAX));
   };
@@ -111,7 +120,10 @@ export const watchStore = createRoot(() => {
     setRemote({ ...s, at: performance.now() });
     setNowPlaying(s);
     setNowAt(performance.now());
+    remember();
   });
+  // Where the room is, kept for a Rejoin after the app closes.
+  window.setInterval(() => remember(), 5000);
   void onEvent<Roster>("watch-roster", (r) => {
     announceChanges(members(), r.members);
     setMembers(r.members);
@@ -121,9 +133,15 @@ export const watchStore = createRoot(() => {
   });
   void onEvent<RoomInfo>("watch-info", (info) => {
     const was = room();
+    const oldHost = members().find((m) => m.host && m.id !== was?.me)?.name;
+    const left = oldHost ? `${oldHost} (the host) left` : "The host left";
     setRoom(info);
-    if (info.host && !was?.host) homeStore.notify("The host left. You're hosting the room now.");
-    else if (was && info.code !== was.code) homeStore.notify("The host left. The room carries on with a new host.");
+    // This device was hosting and lost its connection; the room went on with a guest hosting,
+    // and this device is back in it as a guest.
+    if (was?.host && !info.host) return homeStore.notify("Your connection dropped and someone else took over hosting. You're back in the room.");
+    // Taking over, the room stays paused (everyone stopped while it changed hands).
+    if (was && info.host && !was.host) homeStore.notify(`${left}. You're hosting now; press play to carry on.`);
+    else if (was && info.code !== was.code) homeStore.notify(`${left}. The room carries on paused; press play to carry on.`);
   });
   void onEvent<"reconnecting" | "connected">("watch-link", (state) => setReconnecting(state === "reconnecting"));
   const reset = () => {
@@ -133,6 +151,7 @@ export const watchStore = createRoot(() => {
     setStarted(false);
     setRoomName("");
     setNowPlaying(null);
+    setPlayFrom(null);
     setReconnecting(false);
   };
   void onEvent<string>("watch-closed", (reason) => {
@@ -147,8 +166,15 @@ export const watchStore = createRoot(() => {
     if (before.mediaId !== s.mediaId || before.episode !== s.episode) return;
     const who = members().find((m) => m.id === s.by)?.name;
     if (!who) return;
-    if (before.playing && !s.playing) homeStore.notify(`${who} paused.`);
-    else if (!before.playing && s.playing) homeStore.notify(`${who} resumed.`);
+    if (before.playing && !s.playing) {
+      // An app closing pauses its video, and that pause reaches the room just before its owner
+      // disappears: only said if they're still here a moment later (then it was theirs).
+      const id = s.by;
+      window.setTimeout(() => {
+        const m = members().find((x) => x.id === id);
+        if (m && m.connected !== false && !reconnecting() && room()) homeStore.notify(`${who} paused.`);
+      }, 1500);
+    } else if (!before.playing && s.playing) homeStore.notify(`${who} resumed.`);
     else if (Math.abs(s.position - roomPositionOf(before)) > 5) homeStore.notify(`${who} jumped to ${clock(s.position)}.`);
   }
   /** Where `p` would be now, from when it was last known. */
@@ -167,7 +193,12 @@ export const watchStore = createRoot(() => {
     if (!before.length || !me) return;
     const was = new Set(before.map((m) => m.id));
     const now = new Set(after.map((m) => m.id));
-    for (const m of after) if (!was.has(m.id) && m.id !== me) homeStore.notify(`${m.name} joined the room.`);
+    const lost = new Set(before.filter((m) => m.connected === false).map((m) => m.id));
+    for (const m of after) {
+      if (m.id === me) continue;
+      if (!was.has(m.id)) homeStore.notify(`${m.name} joined the room.`);
+      else if (lost.has(m.id) && m.connected !== false) homeStore.notify(`${m.name} is back.`);
+    }
     for (const m of before) if (!now.has(m.id) && m.id !== me && !m.host) homeStore.notify(`${m.name} left the room.`);
   }
 
@@ -272,7 +303,7 @@ export const watchStore = createRoot(() => {
     rememberName(name);
     // A failed try keeps the room listed: someone may still be taking over hosting. (Forget
     // removes it; a room that ended here leaves the list by itself.)
-    return enter("join", () => watchRejoin(entry.codes, name || "Guest"), entry.key);
+    return enter("join", () => watchRejoin(entry.codes, name || "Guest", entry.place ?? null, !!entry.hosted), entry.key);
   };
   /** Leaves; a host ends the room for everyone (`end`) or hands it to the next guest. A room
    *  ended here is gone, so it leaves the recent list too. */
@@ -339,10 +370,19 @@ export const watchStore = createRoot(() => {
     setNotWaiting(next);
   };
   createEffect(on(room, () => setNotWaiting(new Set<string>())));
+  // On the phone, while in a room: keeps playing and connected with the app in the background.
+  createEffect(
+    on(
+      () => !!room(),
+      (inRoom) =>
+        (window as unknown as { BAnimeAndroid?: { setKeepAlive?(on: boolean): void } }).BAnimeAndroid?.setKeepAlive?.(inRoom),
+    ),
+  );
 
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
     recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt, roomName, rename, nameRoom,
+    playFrom, setPlayFrom,
     host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });
@@ -444,12 +484,29 @@ export function syncPlayer(opts: {
       held: !!w.nowPlaying()?.held && w.nowPlaying()?.mediaId === opts.mediaId() && w.nowPlaying()?.episode === opts.episode(),
     };
   };
-  /** The player is closing: the browser pauses its video, which isn't anyone's pause. */
+  /**
+   * This video hasn't taken the room's place yet (it just opened): its first play or seek is
+   * the player starting up, not the host moving the room, so it joins the room instead of
+   * sending its own spot (which took everyone back to it).
+   */
+  let joined = false;
+  /** The player (or the whole app) is closing: the browser pauses its video, which isn't
+   *  anyone's pause (it reached the room as "… paused" just before its owner disappeared). */
   let closing = false;
   onCleanup(() => (closing = true));
+  const onUnload = () => (closing = true);
+  window.addEventListener("pagehide", onUnload);
+  window.addEventListener("beforeunload", onUnload);
+  onCleanup(() => {
+    window.removeEventListener("pagehide", onUnload);
+    window.removeEventListener("beforeunload", onUnload);
+  });
+  /** The phone app is closing (swiped away): its page gets no unload of its own. */
+  const appClosing = () =>
+    !!(window as unknown as { BAnimeAndroid?: { isClosing?(): boolean } }).BAnimeAndroid?.isClosing?.();
   const sendNow = () => {
     const v = opts.video();
-    if (closing || !v?.isConnected) return;
+    if (closing || !v?.isConnected || (v.paused && appClosing())) return;
     // In the lobby only Start plays the episode: any other play (the player's own autoplay
     // included) is undone, and the room hears the episode, paused.
     if (v && !v.paused && w.room() && !w.started()) {
@@ -467,6 +524,14 @@ export function syncPlayer(opts: {
     if (v && !v.paused && w.room() && w.nowPlaying()?.held) {
       selfPause(v);
       return;
+    }
+    // Just opened, the room already going: take its place first.
+    if (!joined && w.room()?.host && w.started()) {
+      const p = w.nowPlaying();
+      if (p && !p.held && p.mediaId === opts.mediaId() && p.episode === opts.episode()) {
+        apply({ ...p, by: "", position: w.roomPosition(), at: performance.now() });
+        return;
+      }
     }
     // A play by hand ends a wait for someone loading (they'll catch up by jumping).
     if (v && !v.paused) waitingFor = null;
@@ -507,6 +572,7 @@ export function syncPlayer(opts: {
       return;
     }
     pending = null;
+    joined = true;
     // Crossed in flight with this viewer's own play or pause: the room hasn't heard it yet.
     if (own && performance.now() - own.at < 1500 && s.playing !== own.playing && !s.held) return;
     appliedAt = performance.now();
@@ -560,7 +626,17 @@ export function syncPlayer(opts: {
   let waitingFor: string | null = null;
   let waitTimer: number | undefined;
   const loadingOthers = () =>
-    w.members().filter((m) => m.buffering && m.id !== w.room()?.me && !w.notWaiting().has(m.id));
+    w.members().filter(
+      (m) => (m.buffering || m.connected === false) && m.id !== w.room()?.me && !w.notWaiting().has(m.id),
+    );
+  /** "Waiting for Ana to load, Ben to reconnect…" */
+  const waitText = (list: RoomMember[]) => {
+    const lost = list.filter((m) => m.connected === false).map((m) => m.name);
+    const loading = list.filter((m) => m.connected !== false).map((m) => m.name);
+    if (lost.length && !loading.length) return `${lost.join(", ")} lost connection. Waiting for them to come back…`;
+    if (!lost.length) return `Waiting for ${loading.join(", ")} to load…`;
+    return `Waiting for ${loading.join(", ")} to load and ${lost.join(", ")} to reconnect…`;
+  };
   createEffect(
     on(loadingOthers, (loading) => {
       const v = opts.video();
@@ -573,7 +649,7 @@ export function syncPlayer(opts: {
           if (!still.length || v.paused) return;
           waitingFor = still.map((m) => m.name).join(", ");
           v.pause(); // the pause goes to the room like any other
-          homeStore.notify(`Waiting for ${waitingFor} to load…`, {
+          homeStore.notify(waitText(still), {
             label: "Don't wait",
             run: () => {
               for (const m of still) w.waitFor(m.id, false);
@@ -589,6 +665,15 @@ export function syncPlayer(opts: {
     }),
   );
   onCleanup(() => clearTimeout(waitTimer));
+
+  // This device lost its link to the room: it pauses too (the room waits for it), and follows
+  // the room again once it's back.
+  createEffect(
+    on(w.reconnecting, (lost) => {
+      const v = opts.video();
+      if (lost && v && w.started() && !w.room()?.host) selfPause(v);
+    }),
+  );
 
   // Held at Start or after a switch (the host's player): once everyone's player is on the
   // episode and has loaded it, play it for everyone. Never by itself otherwise: the host decides
@@ -628,15 +713,31 @@ export function syncPlayer(opts: {
   const onPlayEvent = () => {
     if (!ours("play")) sendNow();
   };
+  /** When the video last left the small window (picture in picture). */
+  let pipLeftAt = -1e9;
+  const onLeftPip = () => (pipLeftAt = performance.now());
   const onPauseEvent = () => {
-    if (!ours("pause")) sendNow();
+    if (ours("pause")) return;
+    const v = opts.video();
+    // The small window's close button pauses the video on its way out, and the player puts it
+    // back playing (the room still is): that pause goes to the room only if it stays.
+    if (v && (document.pictureInPictureElement === v || performance.now() - pipLeftAt < 800)) {
+      // Meanwhile it's this viewer's pause as far as the room's updates go (they don't undo it).
+      own = { playing: false, at: performance.now() };
+      window.setTimeout(() => v.paused && sendNow(), 500);
+      return;
+    }
+    sendNow();
   };
 
   const attach = (v: HTMLVideoElement) => {
+    joined = false;
     const onReady = () => {
       if (pending) return apply(pending);
+      // A guest follows the room's last word. Not the host: its own changes since (a pause, say)
+      // aren't in it, but they are in nowPlaying, below.
       const s = w.remote();
-      if (s && s.mediaId === opts.mediaId() && s.episode === opts.episode()) return apply(s);
+      if (s && !w.room()?.host && s.mediaId === opts.mediaId() && s.episode === opts.episode()) return apply(s);
       // Back in the player after browsing (or after picking): the room carried on meanwhile, so
       // start where it is now. The host hears no states of its own, so this is how it catches up.
       const p = w.nowPlaying();
@@ -645,8 +746,10 @@ export function syncPlayer(opts: {
       }
     };
     v.addEventListener("loadedmetadata", onReady);
+    if (v.readyState >= 1) queueMicrotask(onReady);
     v.addEventListener("play", onPlayEvent);
     v.addEventListener("pause", onPauseEvent);
+    v.addEventListener("leavepictureinpicture", onLeftPip);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("waiting", onStall);
     v.addEventListener("playing", statusSoon);
@@ -655,6 +758,7 @@ export function syncPlayer(opts: {
       v.removeEventListener("loadedmetadata", onReady);
       v.removeEventListener("play", onPlayEvent);
       v.removeEventListener("pause", onPauseEvent);
+      v.removeEventListener("leavepictureinpicture", onLeftPip);
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("waiting", onStall);
       v.removeEventListener("playing", statusSoon);
@@ -663,14 +767,53 @@ export function syncPlayer(opts: {
     });
   };
 
+  /**
+   * The host's player out of step with the room (it couldn't follow a guest's play, pause or
+   * the time passing while the app was in the background): it catches up with the room, instead
+   * of its regular report taking everyone back to where it stopped. True when it had to.
+   */
+  const followRoom = () => {
+    const v = opts.video();
+    const s = current();
+    const p = w.nowPlaying();
+    if (!v || !s || !p || !w.room()?.host || !w.started() || p.held) return false;
+    if (p.mediaId !== opts.mediaId() || p.episode !== opts.episode()) return false;
+    // This viewer's own play or pause is on its way to the room: it's the room's new state.
+    if (own && performance.now() - own.at < 1500) return false;
+    const at = w.roomPosition();
+    if (s.playing === p.playing && Math.abs(at - s.position) <= JUMP) return false;
+    apply({ ...p, by: "", position: at, at: performance.now() });
+    return true;
+  };
+
   // The host's regular position (guests correct drift from it) and everyone's status.
   const tick = window.setInterval(() => {
     if (!w.room()) return;
     reportStatus();
+    if (followRoom()) return;
     const s = current();
     if (w.room()?.host && s && performance.now() - appliedAt > 800) w.send(s);
   }, 2000);
   onCleanup(() => clearInterval(tick));
+  // Back from the background: catch up at once, before anything is reported.
+  const onVisible = () => {
+    if (document.visibilityState === "visible") followRoom();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
+
+  // Out of the room (left it, or it ended): the player pauses rather than playing on by
+  // itself, out of step; play carries on alone.
+  createEffect(
+    on(
+      w.room,
+      (r, was) => {
+        const v = opts.video();
+        if (was && !r && v) selfPause(v);
+      },
+      { defer: true },
+    ),
+  );
 
   return { attach, startNow };
 }

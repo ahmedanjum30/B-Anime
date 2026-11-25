@@ -1,5 +1,5 @@
 import type { ParentProps } from "solid-js";
-import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, lazy, on, onCleanup } from "solid-js";
 import { errorText, inTauri, installUpdate, onAndroid, openAndroidDownload, openSupport, UPDATE_ACTION, UPDATE_BUSY } from "../lib/api";
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import { House, Heart, Library, CalendarDays, BookOpen, Compass, Ellipsis, Puzzle, RefreshCw, Settings, Smartphone, Users } from "../lib/icons";
@@ -8,6 +8,9 @@ import { homeStore } from "../lib/store";
 import { trackPages } from "../lib/nav";
 import { watchStore } from "../lib/watch";
 import WhatsNew from "./WhatsNew";
+import { playerSlot, sameEpisode, targetFromPath } from "../lib/playerSlot";
+
+const Player = lazy(() => import("../routes/Player"));
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 
 // `bar`: kept in the phone's bottom bar; the rest move into the More sheet.
@@ -33,6 +36,13 @@ export default function Shell(props: ParentProps) {
   // opens it too, from wherever it is in the app.
   // Only a change of episode moves it: between changes, browsing elsewhere in the app is fine.
   let followed = "";
+  /** Opens the room's episode: where the player is now. Playing out of sight (you're browsing),
+   *  it switches there and you stay on your page; otherwise its page opens. */
+  const openEpisode = (path: string) => {
+    const t = playerSlot.target() && !playerSlot.onPage() ? targetFromPath(path) : null;
+    if (!t) return navigate(path);
+    if (!sameEpisode(playerSlot.target(), t)) playerSlot.setTarget(t);
+  };
   createEffect(
     on(watchStore.remote, (r) => {
       // In the lobby nobody's app opens the episode yet: Start does that (below).
@@ -44,7 +54,7 @@ export default function Shell(props: ParentProps) {
       if (location.pathname !== path) {
         // Someone moved the room on: say where to, while the new episode loads.
         if (!first) homeStore.notify(`Switching to ${r.title || "the next show"} · Episode ${r.episode}…`);
-        navigate(`${path}${r.dub ? "?dub=1" : ""}`);
+        openEpisode(`${path}${r.dub ? "?dub=1" : ""}`);
       }
     }),
   );
@@ -60,7 +70,7 @@ export default function Shell(props: ParentProps) {
       if (!started || was || !p || !watchStore.room()) return;
       const path = `/watch/${p.mediaId}/${p.episode}`;
       followed = path;
-      if (location.pathname !== path) navigate(`${path}${p.dub ? "?dub=1" : ""}`);
+      if (location.pathname !== path) openEpisode(`${path}${p.dub ? "?dub=1" : ""}`);
     }),
   );
 
@@ -71,6 +81,12 @@ export default function Shell(props: ParentProps) {
     if (!h || h.isSample) return null;
     return fmtCount(k === "anime" ? h.animeCount : h.mangaCount);
   };
+
+  // The player stays open behind the app only in a running room; otherwise leaving its page
+  // closes it, as always.
+  createEffect(() => {
+    if (!playerSlot.onPage() && !(watchStore.room() && watchStore.started())) playerSlot.setTarget(null);
+  });
 
   // Phone only: the More sheet. Closes on navigation, Esc and a tap outside.
   const [moreOpen, setMoreOpen] = createSignal(false);
@@ -149,7 +165,12 @@ export default function Shell(props: ParentProps) {
         <UpdateNotice />
         <SyncFoot />
       </nav>
-      <main class="main">{props.children}</main>
+      <main class="main">
+        {props.children}
+        <Show when={playerSlot.target()}>
+          <Player behind={!playerSlot.onPage()} />
+        </Show>
+      </main>
       <Show when={moreOpen()}>
         <div class="more-scrim" aria-hidden="true" onClick={() => setMoreOpen(false)} />
         <div class="more-sheet" id="more-sheet" role="dialog" aria-label="More">
@@ -197,7 +218,13 @@ export default function Shell(props: ParentProps) {
               </span>
             </Show>
           </span>
-          <button type="button" class="btn btn-sm btn-primary" onClick={() => navigate(watchStore.roomPath()!)}>
+          {/* The picture didn't pop out by itself (the browser allows it only on a click). */}
+          <Show when={!onAndroid && playerSlot.target() && !playerSlot.onPage() && !playerSlot.inPip()}>
+            <button type="button" class="btn btn-sm" onClick={() => playerSlot.popOut()}>
+              Pop out
+            </button>
+          </Show>
+          <button type="button" class="btn btn-sm btn-primary" onClick={() => navigate(playerSlot.target()?.path ?? watchStore.roomPath()!)}>
             Back to the episode
           </button>
         </div>

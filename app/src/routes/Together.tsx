@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 
-import { errorText, getLibrary, getMedia, getPlayerPrefs, installExtension, localEpisodes, watchMyCode, watchNewLink } from "../lib/api";
+import { errorText, getLibrary, getMedia, getPlayerPrefs, getStream, installExtension, localEpisodes, watchMyCode, watchNewLink } from "../lib/api";
 import { SUB_LANGS, subLangName } from "../lib/langs";
 import { recallDub } from "../lib/dub";
 import { Copy, Search, X } from "../lib/icons";
@@ -45,6 +45,12 @@ export default function Together(props: {
 
   const isHost = () => !!w.room()?.host;
   const others = () => w.members().filter((m) => m.id !== w.room()?.me);
+  /** Ready only once this device's episode has loaded (or there's nothing picked yet). */
+  const canReady = () => !w.nowPlaying() || w.me()?.playable === true;
+  // A change (another source, another episode) that doesn't play takes Ready back.
+  createEffect(() => {
+    if (!w.started() && w.me()?.ready && w.nowPlaying() && w.me()?.playable === false) w.setReady(false);
+  });
   const allReady = () => w.members().length > 1 && w.members().every((m) => m.ready && m.playable !== false);
   const cantPlay = () => w.members().filter((m) => m.playable === false);
   const watchPath = () => {
@@ -198,7 +204,7 @@ export default function Together(props: {
               <Show when={myCode()}>
                 {(c) => (
                   <div class="together-mylink">
-                    <span class="watch-label">Your room's invite link, the same every time</span>
+                    <span class="watch-label">Your room's invite link, the same every time. It works while your room is open.</span>
                     <div class="watch-code-row">
                       <code class="watch-code-text" title={inviteLink(c())}>{inviteLink(c())}</code>
                       <button type="button" class="btn btn-sm" onClick={() => void copyText(inviteLink(c()), "Invite link copied.")}>
@@ -546,7 +552,15 @@ export default function Together(props: {
                           </Show>
                       </span>
                       <span class="watch-member-state num" data-ready={!w.started() && m.ready ? "" : undefined}>
-                        {w.started() ? (m.buffering ? "Loading…" : clock(m.position)) : m.ready ? "Ready" : "Not ready"}
+                        {m.connected === false
+                          ? "Reconnecting…"
+                          : w.started()
+                            ? m.buffering
+                              ? "Loading…"
+                              : clock(m.position)
+                            : m.ready
+                              ? "Ready"
+                              : "Not ready"}
                       </span>
                     </li>
                   )}
@@ -560,9 +574,11 @@ export default function Together(props: {
                     class="btn"
                     classList={{ "btn-primary": !w.me()?.ready }}
                     aria-pressed={!!w.me()?.ready}
+                    disabled={!w.me()?.ready && !canReady()}
+                    title={!w.me()?.ready && !canReady() ? "Once your episode loads" : undefined}
                     onClick={() => w.setReady(!w.me()?.ready)}
                   >
-                    {w.me()?.ready ? "Not ready" : "I'm ready"}
+                    {w.me()?.ready ? "Not ready" : canReady() ? "I'm ready" : w.me()?.playable === false ? "Can't play it yet" : "Loading your episode…"}
                   </button>
                   <Show when={isHost()}>
                     <button
@@ -633,6 +649,10 @@ export default function Together(props: {
  * lists the episode. Tells the room (the others see it), and when it can't: change source,
  * fix the match, or install the host's source.
  */
+/** Whether an episode loaded from a source (by source and episode id), remembered while the app runs. */
+type Probe = { ok: boolean; why: string };
+const probed = new Map<string, Probe>();
+
 function RoomCheck(props: { mediaId: number }) {
   const w = watchStore;
   const [page] = createResource(() => props.mediaId, getMedia);
@@ -645,9 +665,44 @@ function RoomCheck(props: { mediaId: number }) {
   const hasHostSource = () => !!hostSource() && source.usable().some((e) => e.id === hostSource()!.id);
   const [installing, setInstalling] = createSignal(false);
 
+  /** The library has the room's episode. */
+  const hasLocal = () => !!localEps()?.includes(episode());
+  /** Playing from the library: picked, or (not picked) whenever it has the episode. */
+  const useLibrary = () => {
+    const c = w.playFrom();
+    return hasLocal() && (c && c.mediaId === props.mediaId ? c.library : true);
+  };
+  const pickFrom = (value: string) => {
+    if (value === "library") return w.setPlayFrom({ mediaId: props.mediaId, library: true });
+    w.setPlayFrom({ mediaId: props.mediaId, library: false });
+    source.setExt(value);
+  };
+  // The episode really loading from the source (not just being listed), before Ready: asked
+  // once per source and episode (remembered), and only in the lobby. Once the room plays, the
+  // player itself shows whether it does. The library's files are on this device already.
+  const probeKey = createMemo(() => {
+    if (w.started() || useLibrary() || localEps.loading) return null;
+    const item = source.byNumber().get(episode());
+    const ext = source.ext();
+    return item && ext ? `${ext}\u0000${item.id}` : null;
+  });
+  const [probe] = createResource(probeKey, (key): Probe | Promise<Probe> => {
+    const known = probed.get(key);
+    if (known) return known;
+    const [ext, id] = key.split("\u0000");
+    return getStream(ext, id).then(
+      () => {
+        const r = { ok: true, why: "" };
+        probed.set(key, r);
+        return r;
+      },
+      (e) => ({ ok: false, why: errorText(e) }),
+    );
+  });
+
   /** true / false, or null while checking. */
   const result = createMemo<{ playable: boolean | null; via: string | null; why?: string }>(() => {
-    if (localEps()?.includes(episode())) return { playable: true, via: "Library" };
+    if (useLibrary()) return { playable: true, via: "Library" };
     if (page.loading || localEps.loading || source.exts.loading) return { playable: null, via: null };
     if (!source.usable().length) return { playable: false, via: null, why: "No anime source installed." };
     const m = source.match();
@@ -657,8 +712,17 @@ function RoomCheck(props: { mediaId: number }) {
     if (source.items.loading) return { playable: null, via: extName() };
     if (!source.byNumber().has(episode()))
       return { playable: false, via: extName(), why: `${extName()} doesn't have episode ${episode()}.` };
+    if (w.started()) return { playable: true, via: extName() };
+    const p = probe();
+    if (probe.loading || !p) return { playable: null, via: extName() };
+    if (!p.ok) return { playable: false, via: extName(), why: `${extName()} couldn't load episode ${episode()}. ${p.why}` };
     return { playable: true, via: extName() };
   });
+  /** Where this device can play from: the library (when it has the episode) and each source. */
+  const options = () => [
+    ...(hasLocal() ? [{ id: "library", name: "Your library" }] : []),
+    ...source.usable().map((e) => ({ id: e.id, name: e.name })),
+  ];
   createEffect(() => {
     const r = result();
     w.check(r.playable, r.via);
@@ -692,23 +756,23 @@ function RoomCheck(props: { mediaId: number }) {
 
   return (
     <div class="together-check" data-state={result().playable === null ? "checking" : result().playable ? "ok" : "bad"}>
+      <Show when={options().length > 1}>
+        <label class="select select-sm together-from">
+          <span class="select-label">Playing from</span>
+          <select value={useLibrary() ? "library" : (source.ext() ?? "")} onChange={(e) => pickFrom(e.currentTarget.value)}>
+            <For each={options()}>{(o) => <option value={o.id}>{o.name}</option>}</For>
+          </select>
+        </label>
+      </Show>
       <p class="together-check-line">
         {result().playable === null
-          ? `Checking you can play it${result().via ? ` on ${result().via}` : ""}…`
+          ? `Loading the episode${result().via ? ` from ${result().via === "Library" ? "your library" : result().via}` : ""} to check it plays…`
           : result().playable
             ? `You can play it${result().via ? ` from ${result().via === "Library" ? "your library" : result().via}` : ""}.`
             : `You can't play it yet. ${result().why ?? ""}`}
       </p>
       <Show when={result().playable === false}>
         <div class="together-check-fix">
-          <Show when={source.usable().length > 1}>
-            <label class="select select-sm">
-              <span class="select-label">Source</span>
-              <select value={source.ext() ?? ""} onChange={(e) => source.setExt(e.currentTarget.value)}>
-                <For each={source.usable()}>{(e) => <option value={e.id}>{e.name}</option>}</For>
-              </select>
-            </label>
-          </Show>
           <Show when={hostSource() && !hasHostSource()}>
             <button type="button" class="btn btn-sm btn-primary" disabled={installing()} onClick={() => void installHost()}>
               {installing() ? "Installing…" : `Install ${hostSource()!.name} (the host's source)`}

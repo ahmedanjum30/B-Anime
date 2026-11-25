@@ -403,6 +403,8 @@ export interface RoomMember {
   /** The episode their player is on (with `buffering`: whether it has loaded). */
   mediaId: number | null;
   episode: number | null;
+  /** False while their connection is lost (they didn't leave); the room waits for them. */
+  connected?: boolean;
 }
 
 /** Who's in the room, and whether the host has started it (false: the lobby). */
@@ -425,6 +427,17 @@ export interface RecentRoom {
   codes: string[];
   /** When this device was last in it (ms). */
   at: number;
+  /** Where the room was then: a room that has reopened carries on from it. */
+  place?: RoomSoFar;
+  /** This device was hosting it (Rejoin opens it again here when nobody else hosts it). */
+  hosted?: boolean;
+}
+
+/** Where a room was, as a member last knew it. */
+export interface RoomSoFar {
+  state: PlayState;
+  started: boolean;
+  name: string;
 }
 
 export interface RoomInfo {

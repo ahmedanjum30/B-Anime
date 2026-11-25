@@ -8,6 +8,9 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-fullscreen",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "core:window:allow-show",
     "dialog:allow-open",
     "deep-link:default"
   ]

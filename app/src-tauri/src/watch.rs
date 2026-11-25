@@ -87,13 +87,22 @@ pub async fn watch_new_link(state: tauri::State<'_, AppState>) -> Result<String,
 
 /// Back into a room this device was in, through whichever of its members hosts it now.
 #[tauri::command]
-pub async fn watch_rejoin(app: AppHandle, state: tauri::State<'_, AppState>, codes: Vec<String>, name: String) -> Result<RoomInfo, String> {
-    enter(app, &state, Room::rejoin(&codes, name).await).await
+pub async fn watch_rejoin(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    codes: Vec<String>,
+    name: String,
+    so_far: Option<room::RoomSoFar>,
+    hosted: Option<bool>,
+) -> Result<RoomInfo, String> {
+    let seed = device_seed(&state).await?;
+    enter(app, &state, Room::rejoin(&codes, name, Some(seed), so_far, hosted.unwrap_or(false)).await).await
 }
 
 #[tauri::command]
 pub async fn watch_join(app: AppHandle, state: tauri::State<'_, AppState>, code: String, name: String) -> Result<RoomInfo, String> {
-    enter(app, &state, Room::join(&code, name).await).await
+    let seed = device_seed(&state).await?;
+    enter(app, &state, Room::join(&code, name, Some(seed)).await).await
 }
 
 /// Leaves the room. A host either ends it for everyone (`end`) or hands it to the next guest.

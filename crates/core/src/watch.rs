@@ -18,10 +18,10 @@
 //! Messages are JSON, each sent as a 4-byte big-endian length followed by the bytes.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::{Connection, RecvStream, SendStream, presets};
+use iroh::endpoint::{Connection, ConnectionError, RecvStream, SendStream, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -50,6 +50,10 @@ const ATTEMPT: Duration = Duration::from_secs(5);
 const GONE_AFTER: Duration = Duration::from_secs(10);
 /// A device that took over hosting and has been alone this long, not playing, ends the room.
 const EMPTY_ROOM: Duration = Duration::from_secs(10 * 60);
+/// A host that lost its guests looks for them hosting the room elsewhere for this long.
+const LOOK_FOR_ROOM: Duration = Duration::from_secs(5 * 60);
+/// Guests lost within this of each other went together: the host's own connection dropped.
+const LOST_TOGETHER: Duration = Duration::from_secs(20);
 /// Rejoining keeps trying this long: a takeover after the host left takes a few seconds.
 const REJOIN_TRYING: Duration = Duration::from_secs(20);
 /// Positions and connection quality reach the others at most this often: reports only change
@@ -145,7 +149,7 @@ pub fn new_seed() -> u64 {
 
 /// The room code a device with this seed hosts under.
 pub fn code_for_seed(seed: u64) -> String {
-    short_code(Seed(seed & ((1 << (5 * CODE_SEED_CHARS)) - 1)))
+    short_code(device_seed(Some(seed)))
 }
 
 /// Connects to whichever of `addrs` answers first (the same host through different relays, or
@@ -163,6 +167,55 @@ async fn connect_any(endpoint: &Endpoint, addrs: Vec<EndpointAddr>, within: Dura
         }
     }
     None
+}
+
+/// What a member answered when this device looked for the room's host there.
+enum Reply {
+    /// It hosts the room: the connection, to join on.
+    Hosting(EndpointAddr, Connection),
+    /// It doesn't host, but it's in the room with the host: the host isn't gone.
+    HasHost,
+    /// It doesn't host, and it has lost the host too.
+    LostHost,
+    /// No answer: it's gone, or this device is offline.
+    Unreachable,
+}
+
+/// Why a member that isn't hosting closes a connection: whether it's still with the host.
+const NOT_HOSTING_WITH_HOST: &[u8] = b"not hosting; with the host";
+const NOT_HOSTING_LOST_HOST: &[u8] = b"not hosting; lost the host";
+
+/// Looks for the room's host at one member (`addrs`: that member through each relay).
+async fn ask(endpoint: &Endpoint, addrs: Vec<EndpointAddr>, within: Duration) -> Reply {
+    let Some((addr, conn)) = connect_any(endpoint, addrs, within).await else { return Reply::Unreachable };
+    // A member that isn't hosting closes the connection at once, saying whether it has the host.
+    match tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await {
+        Err(_) => Reply::Hosting(addr, conn),
+        Ok(ConnectionError::ApplicationClosed(c)) if c.reason.as_ref() == NOT_HOSTING_WITH_HOST => Reply::HasHost,
+        Ok(_) => Reply::LostHost,
+    }
+}
+
+/// Asks several members at once (each a number of the caller's and its addresses), until one of
+/// them hosts. Each reply comes with its member's number.
+async fn ask_all(endpoint: &Endpoint, members: Vec<(usize, Vec<EndpointAddr>)>, within: Duration) -> Vec<(usize, Reply)> {
+    let mut tries = tokio::task::JoinSet::new();
+    for (n, addrs) in members {
+        let endpoint = endpoint.clone();
+        tries.spawn(async move { (n, ask(&endpoint, addrs, within).await) });
+    }
+    let mut replies = Vec::new();
+    while let Some(done) = tries.join_next().await {
+        if let Ok(reply) = done {
+            let hosting = matches!(reply.1, Reply::Hosting(..));
+            replies.push(reply);
+            if hosting {
+                tries.abort_all();
+                break;
+            }
+        }
+    }
+    replies
 }
 
 /// The extension someone plays the episode with, so others can install the same one.
@@ -240,6 +293,14 @@ pub struct Member {
     /// The episode their player is on (with `buffering`: whether it has loaded it).
     pub media_id: Option<i64>,
     pub episode: Option<f64>,
+    /// False while their connection is lost (they didn't leave): the room waits for them to
+    /// come back, for up to [`REJOIN_FOR`].
+    #[serde(default = "connected_default")]
+    pub connected: bool,
+}
+
+fn connected_default() -> bool {
+    true
 }
 
 /// Who's in the room and whether the host has started it.
@@ -250,6 +311,16 @@ pub struct Roster {
     /// False in the lobby: everyone gathers, says they're ready, and the host starts.
     pub started: bool,
     /// The room's name ("Ahmed's room" unless the host renamed it).
+    #[serde(default)]
+    pub name: String,
+}
+
+/// Where a room was, as a returning guest last knew it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomSoFar {
+    pub state: PlayState,
+    pub started: bool,
     #[serde(default)]
     pub name: String,
 }
@@ -280,7 +351,17 @@ pub struct RoomInfo {
 #[serde(tag = "t", rename_all = "camelCase")]
 enum Msg {
     /// A guest's first message; after a reconnect it carries what the guest had said before.
-    Hello { name: String, code: String, ready: bool, check: Check },
+    Hello {
+        name: String,
+        code: String,
+        ready: bool,
+        check: Check,
+        /// A guest coming back: where the room was. A room that has just opened (its host came
+        /// back and opened it again under the same code) carries on from here instead of from
+        /// its own player.
+        #[serde(default)]
+        room: Option<RoomSoFar>,
+    },
     /// Host → guests: the room's state. Guest → host: a change the guest made.
     State(PlayState),
     /// Guest → host: where the guest is.
@@ -298,6 +379,8 @@ enum Msg {
     Check(Check),
     /// Guest → host: the guest's new name.
     Rename { name: String },
+    /// Guest → host: leaving on purpose (not a lost connection: nobody waits for them).
+    Bye,
     /// Host → guests: everyone in the room, and whether it has started.
     Roster(Roster),
     /// Host → guest: why it was turned away.
@@ -400,6 +483,8 @@ struct Shared {
     /// What this device has said and seen, kept across reconnects and a change of host.
     local: Mutex<Local>,
     closing: AtomicBool,
+    /// A guest with a live connection to the host (what it tells members looking for the host).
+    linked: AtomicBool,
 }
 
 #[derive(Default)]
@@ -411,6 +496,20 @@ struct Local {
     /// The room's last state and roster (a guest that takes over hosting starts from them).
     state: Option<PlayState>,
     roster: Option<Roster>,
+}
+
+impl Local {
+    /// Starts from where a room was (this device was in it before).
+    fn carry(&mut self, r: RoomSoFar) {
+        self.position = r.state.position;
+        self.state = Some(r.state);
+        self.roster = Some(Roster { members: Vec::new(), started: r.started, name: r.name });
+    }
+}
+
+/// This device's seed (kept, so it's the same member and code every time), or a new one.
+fn device_seed(seed: Option<u64>) -> Seed {
+    seed.map(|s| Seed(s & ((1 << (5 * CODE_SEED_CHARS)) - 1))).unwrap_or_else(Seed::random)
 }
 
 enum Role {
@@ -438,6 +537,23 @@ struct HostState {
     /// When the roster last went out, and whether a throttled change is waiting for the next.
     roster_at: Instant,
     roster_due: bool,
+    /// Guests whose connection was lost (they didn't leave), while they may come back.
+    dropped: Vec<DroppedGuest>,
+    /// Opened here as a new room and nobody has joined yet: a returning guest's room wins.
+    fresh: bool,
+    /// Guests whose connection was lost lately (id, code, when), in the lobby too: where this
+    /// host looks for the room, should it turn out to be the one that was cut off.
+    lost: Vec<(EndpointId, String, Instant)>,
+}
+
+/// A guest whose connection was lost: listed (as not connected) until it's back or gone for good.
+struct DroppedGuest {
+    id: EndpointId,
+    name: String,
+    code: String,
+    position: f64,
+    on: Option<(i64, f64)>,
+    since: Instant,
 }
 
 struct Guest {
@@ -511,6 +627,7 @@ impl HostState {
             code: self.code.clone(),
             media_id: self.on.map(|o| o.0),
             episode: self.on.map(|o| o.1),
+            connected: true,
         }];
         list.extend(self.guests.iter().map(|g| {
             let (direct, quic_rtt) = quality(&g.conn);
@@ -529,7 +646,24 @@ impl HostState {
                 code: g.code.clone(),
                 media_id: g.on.map(|o| o.0),
                 episode: g.on.map(|o| o.1),
+                connected: true,
             }
+        }));
+        // Last: they're the last to try if the host leaves meanwhile.
+        list.extend(self.dropped.iter().map(|d| Member {
+            id: d.id.to_string(),
+            name: d.name.clone(),
+            host: false,
+            position: d.position,
+            buffering: false,
+            ready: false,
+            check: Check::default(),
+            direct: None,
+            rtt_ms: None,
+            code: d.code.clone(),
+            media_id: d.on.map(|o| o.0),
+            episode: d.on.map(|o| o.1),
+            connected: false,
         }));
         list
     }
@@ -625,6 +759,7 @@ impl Shared {
             role: Mutex::new(role),
             local: Mutex::new(Local::default()),
             closing: AtomicBool::new(false),
+            linked: AtomicBool::new(false),
         })
     }
 
@@ -660,19 +795,34 @@ impl Shared {
         }
     }
 
-    /// Hosts the room from what this device knows of it (a new room, or taking over).
-    fn become_host(&self) {
+    /// Hosts the room from what this device knows of it. `fresh`: it has just opened (new, or
+    /// reopened by its host), so the first member back brings where everyone is; not when a
+    /// guest takes over a room that's going on.
+    fn become_host(self: &Arc<Self>, fresh: bool) {
         let host = {
             let l = self.local.lock().unwrap_or_else(|p| p.into_inner());
             let name = self.my_name();
             // Taking over keeps the room's name; a new room is named after its host.
             let room_name = l.roster.as_ref().map(|r| r.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| default_room_name(&name));
+            // Taking over from a host that left: the room carries on paused, where this device's
+            // player is, until someone plays it (the others stopped while it changed hands).
+            let state = l.state.clone().map(|mut s| {
+                if !fresh {
+                    s.playing = false;
+                    // Nobody's pause (no "… paused" notice): the room changed hands.
+                    s.by = String::new();
+                    if l.position > 0.0 {
+                        s.position = l.position;
+                    }
+                }
+                s
+            });
             HostState {
                 me: self.me.to_string(),
                 name,
                 room_name,
                 code: self.my_code(),
-                state: l.state.clone(),
+                state,
                 position: l.position,
                 buffering: l.buffering,
                 on: None,
@@ -683,9 +833,13 @@ impl Shared {
                 events: self.events.clone(),
                 roster_at: Instant::now(),
                 roster_due: false,
+                dropped: Vec::new(),
+                fresh,
+                lost: Vec::new(),
             }
         };
         let host = Arc::new(Mutex::new(host));
+        tokio::spawn(look_for_moved_room(self.clone(), Arc::downgrade(&host)));
         // Sends a throttled roster that's waiting, until the room ends here.
         let ticker = Arc::downgrade(&host);
         tokio::spawn(async move {
@@ -703,9 +857,34 @@ impl Shared {
         }
         tracing::info!("watch: hosting the room");
         self.emit(RoomEvent::Info(self.info()));
+        // This device's player pauses too.
+        if !fresh {
+            if let Some(state) = host.lock().ok().and_then(|h| h.state.clone()) {
+                self.emit(RoomEvent::State(state));
+            }
+        }
         if let Ok(mut h) = host.lock() {
             h.announce();
         }
+    }
+
+    /// This device stops hosting and joins the room where it went on without it (`addr`, whose
+    /// code is `code`): it had lost its connection, and a guest took over meanwhile.
+    fn become_guest(self: &Arc<Self>, addr: EndpointAddr, conn: Connection, code: String) {
+        if let Some(host) = self.host_state() {
+            if let Ok(h) = host.lock() {
+                let mut l = self.local.lock().unwrap_or_else(|p| p.into_inner());
+                l.state = h.state.clone();
+                l.position = h.position;
+                l.roster = Some(Roster { members: h.members(), started: h.started, name: h.room_name.clone() });
+            }
+        }
+        let (to_host, outgoing) = mpsc::unbounded_channel();
+        if let Ok(mut role) = self.role.lock() {
+            *role = Role::Guest { to_host, code };
+        }
+        self.emit(RoomEvent::Info(self.info()));
+        tokio::spawn(guest_loop(self.clone(), addr, conn, outgoing));
     }
 
     fn end(&self, reason: String) {
@@ -720,14 +899,14 @@ impl Room {
     /// Opens a room on this device, named `room_name` (or "<host>'s room"), under the code of
     /// `seed` (a kept one gives the device the same code every time).
     pub async fn host(name: String, room_name: Option<String>, seed: Option<u64>) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
-        let seed = seed.map(|s| Seed(s & ((1 << (5 * CODE_SEED_CHARS)) - 1))).unwrap_or_else(Seed::random);
+        let seed = device_seed(seed);
         let endpoint = bind(seed).await?;
         // Reachable (home relay picked) before the code is handed out.
         endpoint.online().await;
         let (events, rx) = mpsc::unbounded_channel();
         let (to_host, _) = mpsc::unbounded_channel();
         let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: String::new() });
-        shared.become_host();
+        shared.become_host(true);
         if let Some(room_name) = room_name.filter(|n| !clean_name(n).is_empty()) {
             if let Some(host) = shared.host_state() {
                 if let Ok(mut h) = host.lock() {
@@ -741,11 +920,12 @@ impl Room {
         Ok((Room { shared }, rx))
     }
 
-    /// Joins the room with this code.
-    pub async fn join(code: &str, name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
+    /// Joins the room with this code, as this device (`seed`: the same one it hosts under, so
+    /// it's the same member every time it comes back).
+    pub async fn join(code: &str, name: String, seed: Option<u64>) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
         let addrs = parse_code(code)?;
         tracing::info!(host = %addrs[0].id.fmt_short(), "watch: joining room");
-        let seed = Seed::random();
+        let seed = device_seed(seed);
         let endpoint = bind(seed).await?;
         let (host_addr, conn) = match connect_any(&endpoint, addrs, JOIN_TIMEOUT).await {
             Some(found) => found,
@@ -757,14 +937,24 @@ impl Room {
                 ));
             }
         };
-        Ok(Self::joined(endpoint, seed, name, short_code_of(code), host_addr, conn).await)
+        Ok(Self::joined(endpoint, seed, name, short_code_of(code), host_addr, conn, None).await)
     }
 
     /// Gets back into a room this device was in: tries each of its members' codes in turn (the
     /// host first) and joins whoever hosts it now. A room whose host left goes on with one of its
     /// guests hosting, so the old host's own code may no longer answer.
-    pub async fn rejoin(codes: &[String], name: String) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
-        let seed = Seed::random();
+    ///
+    /// `so_far` is where the room was when this device was last in it: a room that has just
+    /// reopened carries on from there. `hosted`: this device was hosting it, so when nobody else
+    /// is, it opens the room again itself (under its own code, where the others look for it).
+    pub async fn rejoin(
+        codes: &[String],
+        name: String,
+        seed: Option<u64>,
+        so_far: Option<RoomSoFar>,
+        hosted: bool,
+    ) -> Result<(Room, mpsc::UnboundedReceiver<RoomEvent>)> {
+        let seed = device_seed(seed);
         let endpoint = bind(seed).await?;
         // Everyone at once: whoever hosts now answers and keeps the connection; the others (gone,
         // or not hosting) fail or close it. Again, until REJOIN_TRYING: right after the host
@@ -776,20 +966,35 @@ impl Room {
                 let Ok(addrs) = parse_code(code) else { continue };
                 let (endpoint, code) = (endpoint.clone(), short_code_of(code));
                 tries.spawn(async move {
-                    let (addr, conn) = connect_any(&endpoint, addrs, ATTEMPT).await?;
-                    // A member that isn't hosting closes the connection at once ("not hosting").
-                    if tokio::time::timeout(Duration::from_millis(1500), conn.closed()).await.is_ok() {
-                        return None;
+                    match ask(&endpoint, addrs, ATTEMPT).await {
+                        Reply::Hosting(addr, conn) => Some((code, addr, conn)),
+                        _ => None,
                     }
-                    Some((code, addr, conn))
                 });
             }
             while let Some(done) = tries.join_next().await {
                 if let Ok(Some((code, addr, conn))) = done {
                     tries.abort_all();
                     tracing::info!(host = %addr.id.fmt_short(), "watch: rejoined a room");
-                    return Ok(Self::joined(endpoint, seed, name, code, addr, conn).await);
+                    return Ok(Self::joined(endpoint, seed, name, code, addr, conn, so_far).await);
                 }
+            }
+            // Nobody else hosts it: its host (this device) opens it again, where it was.
+            if hosted {
+                tracing::info!("watch: nobody else hosts the room; reopening it here");
+                endpoint.online().await;
+                let (events, rx) = mpsc::unbounded_channel();
+                let (to_host, _) = mpsc::unbounded_channel();
+                let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: String::new() });
+                if let Some(r) = so_far {
+                    shared.local.lock().unwrap_or_else(|p| p.into_inner()).carry(r);
+                }
+                shared.become_host(true);
+                if let Some(state) = shared.local.lock().unwrap_or_else(|p| p.into_inner()).state.clone() {
+                    shared.emit(RoomEvent::State(state));
+                }
+                tokio::spawn(accept_loop(shared.clone()));
+                return Ok((Room { shared }, rx));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
@@ -804,6 +1009,7 @@ impl Room {
         code: String,
         host_addr: EndpointAddr,
         conn: Connection,
+        so_far: Option<RoomSoFar>,
     ) -> (Room, mpsc::UnboundedReceiver<RoomEvent>) {
         tracing::info!("watch: connected to the room");
         // Its own code goes in the hello (for taking over hosting): wait briefly for the relay.
@@ -811,6 +1017,10 @@ impl Room {
         let (events, rx) = mpsc::unbounded_channel();
         let (to_host, outgoing) = mpsc::unbounded_channel();
         let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code });
+        // Where the room was: goes in the hello, for a room that has just reopened.
+        if let Some(r) = so_far {
+            shared.local.lock().unwrap_or_else(|p| p.into_inner()).carry(r);
+        }
         tokio::spawn(accept_loop(shared.clone()));
         tokio::spawn(guest_loop(shared.clone(), host_addr, conn, outgoing));
         (Room { shared }, rx)
@@ -977,6 +1187,10 @@ impl Room {
             }
             // Let the goodbye reach them before the connections close.
             tokio::time::sleep(Duration::from_millis(400)).await;
+        } else {
+            // Leaving, not lost: the room doesn't wait for this device.
+            self.to_host(Msg::Bye);
+            tokio::time::sleep(Duration::from_millis(300)).await;
         }
         self.shared.endpoint.close().await;
     }
@@ -1077,11 +1291,21 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
     let Ok((mut send, recv)) = conn.open_bi().await else { return Outcome::Dropped };
     let hello = {
         let l = shared.local.lock().unwrap_or_else(|p| p.into_inner());
-        Msg::Hello { name: shared.my_name(), code: shared.my_code(), ready: l.ready, check: l.check.clone() }
+        // Back after a lost connection: where the room was (a brand-new guest knows nothing yet).
+        let room = l.state.clone().zip(l.roster.as_ref()).map(|(mut state, r)| {
+            if l.position > 0.0 {
+                state.position = l.position;
+            }
+            state.held = false;
+            state.by = String::new();
+            RoomSoFar { state, started: r.started, name: r.name.clone() }
+        });
+        Msg::Hello { name: shared.my_name(), code: shared.my_code(), ready: l.ready, check: l.check.clone(), room }
     };
     if write_msg(&mut send, &hello).await.is_err() {
         return Outcome::Dropped;
     }
+    shared.linked.store(true, Ordering::SeqCst);
     // Reading in its own task: a read cut off halfway (by select) would lose the stream's place.
     let (in_tx, mut incoming) = mpsc::unbounded_channel();
     let reader = tokio::spawn(async move {
@@ -1145,6 +1369,7 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
             },
         }
     };
+    shared.linked.store(false, Ordering::SeqCst);
     reader.abort();
     conn.close(0u32.into(), b"bye");
     outcome
@@ -1152,7 +1377,17 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
 
 /// Gets back into the room after losing the host. The old host gets [`HOST_GRACE`] (none when it
 /// handed the room over), then each guest in the order they joined: everyone works the line out
-/// from the same roster, so they meet at the same new host. Reaching our own turn means hosting.
+/// from the same roster, so they meet at the same new host.
+///
+/// Reaching its own turn, a guest asks the others before taking over (taking over on its own
+/// word split rooms: a guest whose network dropped became the host of a room of its own):
+/// - someone hosts already: it joins them;
+/// - someone is still with the host (and the host didn't say it was leaving): this device was
+///   the one cut off, and goes back to trying the host;
+/// - someone before it in line answers: hosting is theirs, so it goes back to their turn (two
+///   guests never both take over);
+/// - someone confirms the host is gone for them too, or the host handed the room over: it hosts;
+/// - nobody answers: it's offline (or alone), and keeps trying the host.
 /// `Some(Some(..))`: connected to a host; `Some(None)`: hosting now; `None`: gave up.
 async fn rejoin(shared: &Arc<Shared>, old_host: &EndpointAddr, handed_over: bool) -> Option<Option<(EndpointAddr, Connection)>> {
     let line: Vec<(String, String)> = shared
@@ -1164,30 +1399,114 @@ async fn rejoin(shared: &Arc<Shared>, old_host: &EndpointAddr, handed_over: bool
         .unwrap_or_default();
     let me = shared.me.to_string();
     let began = Instant::now();
+    // Whose turn: `first_turn` at `turns_from`, the next one every HOST_GRACE (0 is the old host).
+    let mut turns_from = Instant::now();
+    let mut first_turn = usize::from(handed_over);
     loop {
         if shared.closing() || began.elapsed() > REJOIN_FOR {
             return None;
         }
-        let turn = (began.elapsed().as_secs() / HOST_GRACE.as_secs()) as usize + usize::from(handed_over);
-        let target = if turn == 0 {
-            Some(vec![old_host.clone()])
+        let turn = first_turn + (turns_from.elapsed().as_secs() / HOST_GRACE.as_secs()) as usize;
+        if turn == 0 {
+            if let Reply::Hosting(addr, c) = ask(&shared.endpoint, vec![old_host.clone()], ATTEMPT).await {
+                return Some(Some((addr, c)));
+            }
         } else {
             match line.get(turn - 1) {
-                Some((id, _)) if *id == me => {
-                    shared.become_host();
-                    return Some(None);
+                // The end of the line (or no line: the roster never arrived): the old host again.
+                None => {
+                    (first_turn, turns_from) = (0, Instant::now());
+                    continue;
                 }
-                Some((_, code)) => parse_code(code).ok(),
-                None => return None,
-            }
-        };
-        if let Some(addrs) = target {
-            match connect_any(&shared.endpoint, addrs, ATTEMPT).await {
-                Some((addr, c)) => return Some(Some((addr, c))),
-                None => tracing::debug!(turn, "watch: rejoin attempt failed"),
+                Some((id, _)) if *id == me => {
+                    let mine = turn - 1;
+                    let others = line
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (id, _))| *id != me)
+                        .filter_map(|(n, (_, code))| parse_code(code).ok().map(|a| (n, a)))
+                        .collect();
+                    let (mut with_host, mut lost_host, mut before_me) = (false, false, None::<usize>);
+                    for (n, reply) in ask_all(&shared.endpoint, others, ATTEMPT).await {
+                        match reply {
+                            Reply::Hosting(addr, c) => return Some(Some((addr, c))),
+                            Reply::HasHost => with_host = true,
+                            Reply::LostHost => lost_host = true,
+                            Reply::Unreachable => continue,
+                        }
+                        if n < mine {
+                            before_me = Some(before_me.map_or(n, |b| b.min(n)));
+                        }
+                    }
+                    if with_host && !handed_over {
+                        tracing::info!("watch: the others still have the host; this device was cut off, so it keeps trying the host");
+                        first_turn = 0;
+                    } else if let Some(n) = before_me {
+                        tracing::info!("watch: a guest before this one in line is there; hosting is theirs");
+                        first_turn = n + 1;
+                    } else if lost_host || handed_over {
+                        shared.become_host(false);
+                        return Some(None);
+                    } else {
+                        tracing::info!("watch: nobody in the room answers (this device may be offline); not taking over");
+                        first_turn = 0;
+                    }
+                    turns_from = Instant::now();
+                    continue;
+                }
+                Some((_, code)) => {
+                    if let Ok(addrs) = parse_code(code) {
+                        if let Reply::Hosting(addr, c) = ask(&shared.endpoint, addrs, ATTEMPT).await {
+                            return Some(Some((addr, c)));
+                        }
+                    }
+                }
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// A host whose guests all went quiet together may be the one that lost its connection: they
+/// carry on meanwhile, with one of them hosting (which takes two of them: one alone never takes
+/// over). While it has nobody connected, it looks for them hosting every few seconds, for
+/// [`LOOK_FOR_ROOM`], and joins that room as a guest when it finds it.
+async fn look_for_moved_room(shared: Arc<Shared>, host: Weak<Mutex<HostState>>) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        if shared.closing() {
+            return;
+        }
+        let Some(host) = host.upgrade() else { return };
+        // Still hosting this room?
+        if !shared.host_state().is_some_and(|h| Arc::ptr_eq(&h, &host)) {
+            return;
+        }
+        let together: Vec<(String, String)> = match host.lock() {
+            Ok(mut h) if h.guests.is_empty() => {
+                h.lost.retain(|l| l.2.elapsed() < LOOK_FOR_ROOM);
+                // The ones that went with the last one to go.
+                let last = h.lost.iter().map(|l| l.2).max();
+                h.lost
+                    .iter()
+                    .filter(|l| last.is_some_and(|last| last.duration_since(l.2) <= LOST_TOGETHER))
+                    .map(|l| (l.0.to_string(), l.1.clone()))
+                    .collect()
+            }
+            _ => continue,
+        };
+        drop(host);
+        if together.len() < 2 {
+            continue;
+        }
+        let members = together.iter().enumerate().filter_map(|(n, (_, code))| parse_code(code).ok().map(|a| (n, a))).collect();
+        for (n, reply) in ask_all(&shared.endpoint, members, ATTEMPT).await {
+            if let Reply::Hosting(addr, conn) = reply {
+                tracing::info!(host = %addr.id.fmt_short(), "watch: the room went on without this device; joining it");
+                shared.become_guest(addr, conn, together[n].1.clone());
+                return;
+            }
+        }
     }
 }
 
@@ -1201,7 +1520,8 @@ async fn accept_loop(shared: Arc<Shared>) {
             };
             // Only a host serves guests (a guest's endpoint accepts so it can take over).
             let Some(host) = shared.host_state() else {
-                connection.close(0u32.into(), b"not hosting");
+                let with_host = shared.linked.load(Ordering::SeqCst);
+                connection.close(0u32.into(), if with_host { NOT_HOSTING_WITH_HOST } else { NOT_HOSTING_LOST_HOST });
                 return;
             };
             tracing::info!(guest = %connection.remote_id().fmt_short(), "watch: guest connected");
@@ -1215,7 +1535,7 @@ async fn accept_loop(shared: Arc<Shared>) {
 async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Result<()> {
     let id = connection.remote_id();
     let (mut send, mut recv) = connection.accept_bi().await.map_err(net)?;
-    let Msg::Hello { name, code, ready, check } = read_msg(&mut recv).await? else {
+    let Msg::Hello { name, code, ready, check, room: so_far } = read_msg(&mut recv).await? else {
         return Err(Error::Network("a guest didn't say hello".into()));
     };
     let name: String = name.trim().chars().take(32).collect();
@@ -1225,8 +1545,25 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
         let mut h = host.lock().map_err(|_| Error::Network("room state poisoned".into()))?;
         // Rejoining: the old entry goes (its place in line too: it joins the end).
         h.guests.retain(|g| g.id != id);
+        h.dropped.retain(|d| d.id != id);
+        h.lost.retain(|l| l.0 != id);
         let room = h.guests.len() < MAX_GUESTS;
+        // This room only just opened (its host came back and opened it again) and a guest comes
+        // back from it: it carries on from where everyone was, not from the host's own player.
+        if room && h.fresh {
+            if let Some(so_far) = so_far.filter(|r| r.started) {
+                tracing::info!(guest = %id.fmt_short(), "watch: a returning guest brought the room's place; carrying on from it");
+                h.started = true;
+                if !so_far.name.is_empty() {
+                    h.room_name = so_far.name;
+                }
+                h.position = so_far.state.position;
+                h.state = Some(so_far.state.clone());
+                let _ = h.events.send(RoomEvent::State(so_far.state));
+            }
+        }
         if room {
+            h.fresh = false;
             // A newcomer starts where the room is.
             if let Some(state) = &h.state {
                 let _ = tx.send(Msg::State(state.clone()));
@@ -1261,6 +1598,8 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
             }
         }
     });
+    // Said goodbye (left on purpose), rather than the connection being lost.
+    let mut left = false;
     loop {
         let next = match tokio::time::timeout(GONE_AFTER, read_msg(&mut recv)).await {
             Ok(next) => next,
@@ -1357,18 +1696,48 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                     h.announce();
                 }
             }
+            Ok(Msg::Bye) => {
+                left = true;
+                break;
+            }
             Ok(_) => {}
             Err(_) => break,
         }
     }
     writer.abort();
+    let mut lost = None;
     if let Ok(mut h) = host.lock() {
         // Only this connection's entry: a rejoin may already have replaced it.
-        let before = h.guests.len();
-        h.guests.retain(|g| !(g.id == id && g.conn.stable_id() == connection.stable_id()));
-        if h.guests.len() != before {
+        let gone = h.guests.iter().position(|g| g.id == id && g.conn.stable_id() == connection.stable_id());
+        if let Some(i) = gone {
+            let g = h.guests.remove(i);
+            if !left {
+                h.lost.retain(|l| l.0 != id && l.2.elapsed() < LOOK_FOR_ROOM);
+                h.lost.push((id, g.code.clone(), Instant::now()));
+            }
+            // Lost, not left, mid-episode: the room waits for them (the host's player pauses).
+            if !left && h.started {
+                let since = Instant::now();
+                h.dropped.retain(|d| d.id != id);
+                h.dropped.push(DroppedGuest { id, name: g.name, code: g.code, position: g.position, on: g.on, since });
+                lost = Some(since);
+                tracing::info!(guest = %id.fmt_short(), "watch: lost a guest's connection; waiting for it");
+            }
             h.announce();
         }
+    }
+    // Not back in time: gone for good.
+    if let Some(since) = lost {
+        tokio::spawn(async move {
+            tokio::time::sleep(REJOIN_FOR).await;
+            if let Ok(mut h) = host.lock() {
+                let before = h.dropped.len();
+                h.dropped.retain(|d| !(d.id == id && d.since == since));
+                if h.dropped.len() != before {
+                    h.announce();
+                }
+            }
+        });
     }
     Ok(())
 }
@@ -1411,6 +1780,7 @@ mod tests {
             code: "c".into(),
             media_id: Some(21),
             episode: Some(5.0),
+            connected: true,
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains(r#""playable":true"#) && json.contains(r#""rttMs":30"#), "{json}");
@@ -1460,7 +1830,7 @@ mod tests {
     #[ignore]
     async fn live_room_syncs_state_between_two_endpoints() {
         let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
-        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into()).await.unwrap();
+        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into(), None).await.unwrap();
         until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
 
         host.send_state(play(30.0, true));
@@ -1492,12 +1862,36 @@ mod tests {
         host.leave(true).await;
     }
 
+    /// Real network: a room its host has just opened again carries on from where a returning
+    /// guest says everyone was, not from the host's own player.
+    #[tokio::test]
+    #[ignore]
+    async fn live_room_reopened_carries_on_from_a_returning_guest() {
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
+        let so_far = RoomSoFar { state: play(120.0, true), started: true, name: "Movie night".into() };
+        let (guest, _guest_events) =
+            Room::rejoin(&[host.info().code], "Guest".into(), None, Some(so_far), false).await.unwrap();
+        let s = until(&mut host_events, |e| match e {
+            RoomEvent::State(s) => Some(s),
+            _ => None,
+        })
+        .await;
+        assert_eq!((s.position, s.playing), (120.0, true));
+        until(&mut host_events, |e| match e {
+            RoomEvent::Roster(r) => (r.started && r.name == "Movie night" && r.members.len() == 2).then_some(()),
+            _ => None,
+        })
+        .await;
+        guest.leave(false).await;
+        host.leave(true).await;
+    }
+
     /// Real network: a host that closed the app finds its room again through its guests.
     #[tokio::test]
     #[ignore]
     async fn live_room_rejoin_finds_the_new_host() {
         let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
-        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into()).await.unwrap();
+        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into(), None).await.unwrap();
         let codes = until(&mut host_events, |e| match e {
             RoomEvent::Roster(r) if r.members.len() == 2 => Some(r.members.into_iter().map(|m| m.code).collect::<Vec<_>>()),
             _ => None,
@@ -1508,7 +1902,7 @@ mod tests {
         host.leave(false).await;
         until(&mut guest_events, |e| matches!(e, RoomEvent::Info(i) if i.host).then_some(())).await;
         // Back, with the codes it remembered: the old host's own no longer answers; the guest's does.
-        let (back, mut back_events) = Room::rejoin(&codes, "Host again".into()).await.unwrap();
+        let (back, mut back_events) = Room::rejoin(&codes, "Host again".into(), None, None, false).await.unwrap();
         assert!(!back.is_host());
         until(&mut back_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
         back.leave(false).await;
@@ -1521,9 +1915,9 @@ mod tests {
     async fn live_room_survives_the_host_leaving() {
         let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
         let code = host.info().code;
-        let (first, mut first_events) = Room::join(&code, "First".into()).await.unwrap();
+        let (first, mut first_events) = Room::join(&code, "First".into(), None).await.unwrap();
         until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
-        let (second, mut second_events) = Room::join(&code, "Second".into()).await.unwrap();
+        let (second, mut second_events) = Room::join(&code, "Second".into(), None).await.unwrap();
         // Both guests know the whole line before the host goes.
         until(&mut second_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 3).then_some(())).await;
         until(&mut first_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 3).then_some(())).await;
@@ -1553,5 +1947,67 @@ mod tests {
         until(&mut second_events, |e| matches!(e, RoomEvent::State(s) if s.position == 12.0).then_some(())).await;
         second.leave(false).await;
         first.leave(true).await;
+    }
+
+    /// Real network: the host vanishes without a word (its app killed, its network gone). The
+    /// guests agree it's gone for both of them; the first hosts, paused, and the second joins it.
+    #[tokio::test]
+    #[ignore]
+    async fn live_room_host_vanishes_and_the_guests_agree() {
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
+        let code = host.info().code;
+        let (first, mut first_events) = Room::join(&code, "First".into(), None).await.unwrap();
+        until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
+        let (second, mut second_events) = Room::join(&code, "Second".into(), None).await.unwrap();
+        until(&mut second_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 3).then_some(())).await;
+        until(&mut first_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 3).then_some(())).await;
+        host.send_state(play(30.0, true));
+        until(&mut second_events, |e| matches!(e, RoomEvent::State(s) if s.playing).then_some(())).await;
+
+        // Gone without a handover.
+        host.shared.closing.store(true, Ordering::SeqCst);
+        host.shared.endpoint.close().await;
+        until(&mut first_events, |e| match e {
+            RoomEvent::Info(i) => i.host.then_some(()),
+            RoomEvent::Closed(r) => panic!("{r}"),
+            _ => None,
+        })
+        .await;
+        // The second finds it, and the room is paused there until someone plays.
+        let s = until(&mut second_events, |e| match e {
+            RoomEvent::State(s) => Some(s),
+            RoomEvent::Closed(r) => panic!("{r}"),
+            _ => None,
+        })
+        .await;
+        assert!(!s.playing, "taken over paused");
+        assert!(!second.is_host());
+        second.leave(false).await;
+        first.leave(true).await;
+    }
+
+    /// Real network: a guest alone with a host that vanished can't tell whether the host left or
+    /// its own network did, so it doesn't start a room of its own (that split rooms in two).
+    #[tokio::test]
+    #[ignore]
+    async fn live_room_a_lone_guest_does_not_take_over() {
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
+        let (guest, mut guest_events) = Room::join(&host.info().code, "Guest".into(), None).await.unwrap();
+        until(&mut host_events, |e| matches!(e, RoomEvent::Roster(r) if r.members.len() == 2).then_some(())).await;
+        host.shared.closing.store(true, Ordering::SeqCst);
+        host.shared.endpoint.close().await;
+        // Its turn comes 10 s in; nobody confirms the host is gone, so it keeps looking instead.
+        let took_over = tokio::time::timeout(Duration::from_secs(25), async {
+            while let Some(e) = guest_events.recv().await {
+                if matches!(e, RoomEvent::Info(ref i) if i.host) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+        assert!(!matches!(took_over, Ok(true)), "a lone guest took over");
+        assert!(!guest.is_host());
+        guest.leave(false).await;
     }
 }

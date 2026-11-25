@@ -1933,6 +1933,18 @@ a.slot:focus-visible {
   overflow: hidden;
   color: var(--z10);
 }
+/* Playing behind the app (a room's episode while browsing): out of sight and out of the way,
+   still playing (its picture pops out on the PC). Not display: none, which would stop it. */
+.player.is-behind {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
 .player.is-fullscreen {
   position: fixed;
   inset: 0;
@@ -2136,8 +2148,13 @@ a.slot:focus-visible {
   padding: calc(var(--u) * 2) calc(var(--u) * 3) calc(var(--u) * 6);
   background: linear-gradient(to bottom, rgb(0 0 0 / 0.7), transparent);
 }
+/* The show and episode take what's left, one line each; the buttons keep their size. */
 .player-title {
+  flex: 1;
   min-width: 0;
+}
+.player-top > button {
+  flex-shrink: 0;
 }
 .player-show {
   font: 700 16px/20px var(--font-head);
@@ -2150,6 +2167,24 @@ a.slot:focus-visible {
   font-size: 13px;
   line-height: 18px;
   color: var(--z8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Phones: the header's buttons are icons only (their names stay for screen readers and in
+   their tooltips), so the title keeps room. */
+@media (max-width: 560px) {
+  .player-top {
+    gap: var(--u);
+    padding-left: calc(var(--u) * 2);
+    padding-right: calc(var(--u) * 2);
+  }
+  .player-top .player-btn-label {
+    display: none;
+  }
+  .player-back {
+    padding: 0 8px;
+  }
 }
 
 /* Episodes (top right of the player): labelled, so it reads as "pick another episode". */
@@ -2255,9 +2290,10 @@ a.slot:focus-visible {
   padding: 0;
   list-style: none;
 }
+/* Everything in a person's row sits on the name's text line. */
 .watch-member {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--u);
   padding: 8px 0;
   border-bottom: 1px solid var(--z2);
@@ -2480,6 +2516,25 @@ a.slot:focus-visible {
   border-left-color: var(--red);
   color: var(--z10);
 }
+/* Playing from: its own width on wide screens, the full line on a phone. */
+.together-from {
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: var(--u);
+}
+.together-from select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  .together-from {
+    width: 100%;
+  }
+  .together-from select {
+    flex: 1;
+  }
+}
 .together-check-fix {
   margin-top: var(--u);
   display: flex;
@@ -2491,6 +2546,7 @@ a.slot:focus-visible {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 4px 10px;
   font-size: 12px;
   color: var(--z8);
@@ -2522,7 +2578,9 @@ a.slot:focus-visible {
   color: var(--z6);
 }
 .together-rename {
+  margin-top: 0;
   font-size: 12px;
+  line-height: inherit;
 }
 .together-name-input {
   height: 32px;
@@ -2559,6 +2617,7 @@ a.slot:focus-visible {
 }
 /* Don't wait: with the connection details, as quiet as they are. */
 .watch-wait {
+  margin-top: 0;
   flex-shrink: 0;
   font: inherit;
   font-size: 12px;
@@ -3968,10 +4027,10 @@ a.slot:focus-visible {
     display: none;
   }
   /* The player and the reader take the whole screen. */
-  .shell:has(.player, .reader) .rail {
+  .shell:has(.player:not(.is-behind), .reader) .rail {
     display: none;
   }
-  .shell:has(.player, .reader) .main {
+  .shell:has(.player:not(.is-behind), .reader) .main {
     padding: 0;
   }
 

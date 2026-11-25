@@ -21,7 +21,7 @@ const Show = lazy(() => import("./routes/Show"));
 const Schedule = lazy(() => import("./routes/Schedule"));
 const Discover = lazy(() => import("./routes/Discover"));
 const Extensions = lazy(() => import("./routes/Extensions"));
-const Player = lazy(() => import("./routes/Player"));
+const WatchPage = lazy(() => import("./routes/WatchPage"));
 const Reader = lazy(() => import("./routes/Reader"));
 const Settings = lazy(() => import("./routes/Settings"));
 const Together = lazy(() => import("./routes/Together"));
@@ -33,7 +33,7 @@ render(
       <Route path="/library" component={() => <Library kind="ANIME" />} />
       <Route path="/manga" component={() => <Library kind="MANGA" />} />
       <Route path="/show/:id" component={Show} />
-      <Route path="/watch/:id/:ep" component={Player} />
+      <Route path="/watch/:id/:ep" component={WatchPage} />
       <Route path="/read/:id/:ch" component={Reader} />
       <Route path="/schedule" component={Schedule} />
       <Route path="/discover" component={Discover} />

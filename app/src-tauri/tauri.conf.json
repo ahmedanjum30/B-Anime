@@ -20,7 +20,7 @@
         "minHeight": 600,
         "backgroundColor": "#191B22",
         "maximized": true,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-blink-features=AudioVideoTracks"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization --enable-blink-features=AudioVideoTracks --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-media-suspend"
       }
     ],
     "security": {

@@ -23,8 +23,13 @@ one line each, written for users (see CLAUDE.md).
 - A notice says who paused, resumed or jumped.
 - Your room code and invite link stay the same every time; New link replaces them.
 - Your name and your room's name are remembered for next time.
+- Pick where you play the room's episode from: your library or any of your sources.
+- A room keeps playing, sound and picture, with the app in the background on PC and phone.
+- Leaving the player during a room keeps the episode going: on PC it pops out into a small window, on phone you keep hearing it.
+- The room bar can pop the episode out into its small window when it didn't pop out by itself.
 
 ### Changed
+- When someone loses connection mid-episode, the room pauses until they're back (up to a minute), unless the host chose not to wait for them.
 - In the player, the room opens over the episode, which keeps playing.
 - In a room, episodes start where the room is, not from your own saved spot.
 - Start waits until everyone's player has loaded the episode, so everyone begins together; only the host can start without waiting.
@@ -32,6 +37,7 @@ one line each, written for users (see CLAUDE.md).
 - Leaving the player no longer pauses the room, and a bar takes you back to the episode.
 - Your last room stays listed on the Together page while you're in a room.
 - Settings → About (desktop) can record detailed network logs, for troubleshooting connections.
+- You can say you're ready only once your episode has loaded, so a room never starts on one that won't play.
 
 ### Fixed
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
@@ -39,6 +45,19 @@ one line each, written for users (see CLAUDE.md).
 - Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.
 - Someone who closes the app is noticed as gone in 10 seconds instead of 30.
 - A guest's pause no longer gets lost, or undone a moment later, when it lands just after a room update.
+- Coming back to the app as host no longer takes everyone back to where you left.
+- A host who reopens their room carries on from where everyone else is.
+- When the host leaves, the room stays paused with its new host until someone presses play.
+- Someone whose connection drops gets back into the room instead of ending up alone in a room of their own.
+- A host whose connection dropped while a guest took over gets back into the room as a guest.
+- Closing the app no longer tells the room you paused.
+- Leaving a room, or the room ending, pauses your player instead of letting it play on out of step.
+- Closing the pop-out window no longer pauses the room for everyone.
+- When the room moves to another episode while the player is popped out, it switches there and you stay on your page.
+- Rejoining a room you hosted opens it again where it was, when nobody else is hosting it.
+- Coming back to a room makes you the same person in it, so it stops waiting for you at once.
+- An episode in your library plays from it in a room, instead of from a source.
+- The player's header keeps its layout with long episode titles and on phones.
 
 ## [0.4.5] - 2026-11-24
 

@@ -1,7 +1,10 @@
 package app.banime.desktop
 
+import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +19,8 @@ import androidx.lifecycle.Lifecycle
 
 class MainActivity : TauriActivity() {
   private var webView: WebView? = null
+  /** In a Watch together room: the page keeps running when the app leaves the screen. */
+  @Volatile private var keepAlive = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
@@ -32,6 +37,36 @@ class MainActivity : TauriActivity() {
   }
 
   inner class Player {
+    /** The app is closing (swiped away): its video's pause isn't one to tell the room about. */
+    @JavascriptInterface
+    fun isClosing(): Boolean = this@MainActivity.isFinishing || this@MainActivity.isDestroyed
+
+    /**
+     * In a room (or not): while in one, the app keeps playing and stays connected in the
+     * background, with a notification (RoomService).
+     */
+    @JavascriptInterface
+    fun setKeepAlive(on: Boolean) {
+      runOnUiThread {
+        if (keepAlive == on) return@runOnUiThread
+        keepAlive = on
+        val service = Intent(this@MainActivity, RoomService::class.java)
+        if (on) {
+          // Android 13 and later show the notification only once allowed (asked once).
+          if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+          ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
+          }
+          runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service) else startService(service)
+          }
+        } else {
+          stopService(service)
+        }
+      }
+    }
+
     /** Full screen: hides the status and navigation bars and turns the screen to landscape. */
     @JavascriptInterface
     fun setImmersive(on: Boolean) {
@@ -70,11 +105,17 @@ class MainActivity : TauriActivity() {
     }
   }
 
-  // In picture in picture the activity is paused but still on screen. The generated activity
-  // pauses the WebView then, which would stop the video, so it's resumed straight away.
+  // In picture in picture the activity is paused but still on screen, and in a room it keeps
+  // playing in the background. The generated activity pauses the WebView then, which would stop
+  // the video, so it's resumed straight away.
   override fun onPause() {
     super.onPause()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) webView?.onResume()
+    if (keepAlive || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode)) webView?.onResume()
+  }
+
+  override fun onDestroy() {
+    if (keepAlive) stopService(Intent(this, RoomService::class.java))
+    super.onDestroy()
   }
 
   // Tells the page: "on" (shrunk), "off" (back to full size) or "closed" (the small window was

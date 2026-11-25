@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
-import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
+import { playerSlot, targetFromPath, type PlayerTarget } from "../lib/playerSlot";
 import type Hls from "hls.js";
 
 import {
@@ -68,25 +69,53 @@ const store = (key: string, v: number) => {
   }
 };
 
-export default function Player() {
-  const params = useParams();
-  const [search] = useSearchParams();
+export default function Player(props: { behind: boolean }) {
   const navigate = useNavigate();
   const { notify } = homeStore;
 
-  const mediaId = () => Number(params.id);
-  const episode = () => Number(params.ep);
-  const extParam = () => (typeof search.ext === "string" ? search.ext : undefined);
+  // What to play: the /watch page's episode (kept while the player closes).
+  const target = createMemo<PlayerTarget>((prev) => playerSlot.target() ?? prev, playerSlot.target()!);
+  const mediaId = () => target().id;
+  const episode = () => target().ep;
+  const extParam = () => target().ext;
 
   /** Playing a file from the library instead of an extension's stream. */
-  const local = () => search.local === "1";
+  const local = () => target().local;
   /** The English-dub version of the source. */
-  const dubParam = () => search.dub === "1";
+  const dubParam = () => target().dub;
+  /** Another episode or source: on the player's page its address changes; behind the app only
+   *  what it plays. */
+  const go = (path: string) => {
+    if (playerSlot.onPage()) return navigate(path, { replace: true });
+    const t = targetFromPath(path);
+    if (t) playerSlot.setTarget(t);
+  };
 
   const [page] = createResource(mediaId, getMedia);
   const media = () => page()?.media;
   const [prefs] = createResource(getPlayerPrefs);
-  const source = createSource(() => (local() ? undefined : media()), extParam, dubParam);
+  // In a room, this device plays the episode from where it picked on the Together page: its
+  // library, or a source. Not picked: the library when it has the episode. The room's links
+  // don't say (each device has its own files), so the source waits for the library's answer.
+  const roomChoice = () => {
+    const c = watchStore.playFrom();
+    return c && c.mediaId === mediaId() ? c.library : null;
+  };
+  const [libraryEps] = createResource(
+    () => (!local() && watchStore.room() && roomChoice() !== false ? mediaId() : null),
+    (id) => localEpisodes(id).catch(() => [] as number[]),
+  );
+  const fromLibrary = () =>
+    !local() && !!watchStore.room() && roomChoice() !== false && !!libraryEps()?.includes(episode());
+  const checkingLibrary = () => !local() && !!watchStore.room() && roomChoice() !== false && libraryEps.loading;
+  createEffect(() => {
+    if (fromLibrary()) go(`/watch/${mediaId()}/${episode()}?local=1`);
+  });
+  const source = createSource(
+    () => (local() || checkingLibrary() || fromLibrary() ? undefined : media()),
+    extParam,
+    dubParam,
+  );
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
   type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
@@ -125,11 +154,10 @@ export default function Player() {
   const goTo = (ep: number) => {
     if (ep === episode()) return;
     stopForSwitch();
-    navigate(
+    go(
       local()
         ? `/watch/${mediaId()}/${ep}?local=1`
         : `/watch/${mediaId()}/${ep}?ext=${encodeURIComponent(source.ext() ?? "")}${nextDub() ? "&dub=1" : ""}`,
-      { replace: true },
     );
   };
   /**
@@ -942,6 +970,72 @@ export default function Player() {
     if (document.pictureInPictureElement) void document.exitPictureInPicture();
     else void video.requestPictureInPicture?.().catch(() => {});
   };
+  // Behind the app (a room's episode while browsing): the PC pops it out into a small window
+  // that stays on top; back on its page, it comes back in. The phone keeps playing it unseen
+  // (its picture in picture would shrink the whole app), with its sound.
+  let poppedOut = false;
+  createEffect(
+    on(
+      () => props.behind,
+      (behind) => {
+        if (behind) {
+          if (fullscreen()) void toggleFullscreen();
+          setMenu(null);
+          if (!onAndroid && !document.pictureInPictureElement && video.readyState >= 1) {
+            void video.requestPictureInPicture?.().then(() => (poppedOut = true)).catch(() => {});
+          }
+        } else if (poppedOut) {
+          poppedOut = false;
+          if (document.pictureInPictureElement === video) void document.exitPictureInPicture().catch(() => {});
+        }
+      },
+      { defer: true },
+    ),
+  );
+  onCleanup(() => {
+    if (document.pictureInPictureElement === video) void document.exitPictureInPicture().catch(() => {});
+  });
+  // The small window's "back to tab" (or closing it) while the player is out of sight: the
+  // player comes back to its page and the app to the front, still playing where the room is.
+  let disposed = false;
+  onCleanup(() => (disposed = true));
+  const onLeavePip = () => {
+    playerSlot.setInPip(false);
+    // Out of sight (popped out by leaving the page, or by hand before leaving it).
+    if (!props.behind || disposed) return;
+    poppedOut = false;
+    // The room's state, not the video's: the close button has paused it already (or will).
+    const p = watchStore.nowPlaying();
+    const roomPlaying =
+      !!watchStore.room() && watchStore.started() && !!p?.playing && p.mediaId === mediaId() && p.episode === episode();
+    navigate(target().path);
+    if (inTauri && !onAndroid) {
+      void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
+        const w = getCurrentWindow();
+        await w.unminimize().catch(() => {});
+        await w.show().catch(() => {});
+        await w.setFocus().catch(() => {});
+      });
+    }
+    // Closing the small window pauses its video; that wasn't meant for the room.
+    if (roomPlaying) window.setTimeout(() => video.paused && void video.play().catch(() => {}), 100);
+  };
+  const onEnterPip = () => playerSlot.setInPip(true);
+  onMount(() => {
+    video.addEventListener("leavepictureinpicture", onLeavePip);
+    video.addEventListener("enterpictureinpicture", onEnterPip);
+    // The room bar's "Pop out", for when leaving the player couldn't (no click to allow it).
+    playerSlot.setPopOut(() => {
+      if (document.pictureInPictureElement || video.readyState < 1) return;
+      void video.requestPictureInPicture?.().then(() => (poppedOut = true)).catch(() => {});
+    });
+    onCleanup(() => {
+      video.removeEventListener("leavepictureinpicture", onLeavePip);
+      video.removeEventListener("enterpictureinpicture", onEnterPip);
+      playerSlot.setPopOut(null);
+      playerSlot.setInPip(false);
+    });
+  });
   const openExternal = async (player: string) => {
     const s = stream();
     if (!s) return;
@@ -994,6 +1088,8 @@ export default function Player() {
 
 
   const onKey = (e: KeyboardEvent) => {
+    // Behind the app, the keys belong to the page that's open.
+    if (props.behind) return;
     // Text fields and dropdowns keep their keys. Sliders don't: after clicking the timeline it
     // keeps focus, and its own arrow-key step (0.1 s) made arrows seem to do nothing.
     if ((e.target as HTMLElement)?.closest("input:not([type=range]), select, textarea")) return;
@@ -1049,7 +1145,8 @@ export default function Player() {
     <div
       ref={shell}
       class="player"
-      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu(), "is-pip": pip() }}
+      classList={{ "is-fullscreen": fullscreen(), "is-idle": idle() && playing() && !menu(), "is-pip": pip(), "is-behind": props.behind }}
+      aria-hidden={props.behind ? "true" : undefined}
       data-subsize={subSize()}
       data-subpos={subPos()}
       onPointerMove={onPointerMove}
@@ -1229,8 +1326,9 @@ export default function Player() {
       </Show>
 
       <header class="player-top">
-        <button type="button" class="back-link" onClick={back}>
-          <ArrowLeft size={16} stroke-width={2} aria-hidden="true" /> Back
+        <button type="button" class="back-link player-back" onClick={back} aria-label="Back">
+          <ArrowLeft size={16} stroke-width={2} aria-hidden="true" />
+          <span class="player-btn-label">Back</span>
         </button>
         <div class="player-title">
           <p class="player-show">{title()}</p>
@@ -1245,10 +1343,12 @@ export default function Player() {
           classList={{ "is-on": menu() === "episodes" }}
           aria-haspopup="dialog"
           aria-expanded={menu() === "episodes"}
+          aria-label="Episodes"
           title="Choose another episode (E)"
           onClick={() => setMenu(menu() === "episodes" ? null : "episodes")}
         >
-          <ListVideo size={16} stroke-width={1.75} aria-hidden="true" /> Episodes
+          <ListVideo size={16} stroke-width={1.75} aria-hidden="true" />
+          <span class="player-btn-label">Episodes</span>
         </button>
         {/* In a room: a chip to the Together page (the room, the people, Ready and Start). */}
         <Show when={watchStore.room()}>
@@ -1270,8 +1370,11 @@ export default function Player() {
           >
             <Users size={16} stroke-width={1.75} aria-hidden="true" />
             <span class="num">{watchStore.members().length}</span>
-            <Show when={watchStore.reconnecting()} fallback={<Show when={!watchStore.started()}><span>· Lobby</span></Show>}>
-              <span>· Reconnecting…</span>
+            <Show
+              when={watchStore.reconnecting()}
+              fallback={<Show when={!watchStore.started()}><span class="player-btn-label">· Lobby</span></Show>}
+            >
+              <span class="player-btn-label">· Reconnecting…</span>
             </Show>
           </button>
         </Show>

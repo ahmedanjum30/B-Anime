@@ -1,8 +1,4 @@
-import type {
-  Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension,
-  LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, Repo,
-  ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus, RoomInfo, PlayState,
-} from "./types";
+import type { Account, BrowseFilter, BrowsePage, EntryChange, ExtCallOutput, ExtManifest, HomeData, InstalledExtension, LibraryEntry, LibraryKind, LibraryStatus, ListEntry, MatchState, MediaPage, PlayerChoice, PlayerPrefs, PlayState, Repo, RoomInfo, RoomSoFar, ScheduleItem, ScheduleScope, SkipTime, SourceItem, SourceResult, Stream, UnmatchedGroup, UpdateStatus } from "./types";
 
 // ── Streaming & reading (desktop only) ──
 export const findSource = (mediaId: number, ext: string, titles: string[], year: number | null, dub = false) =>
@@ -91,7 +87,8 @@ export const watchHost = (name: string, roomName: string | null) => call<RoomInf
 export const watchMyCode = () => (inTauri ? call<string>("watch_my_code") : Promise.resolve(""));
 export const watchNewLink = () => call<string>("watch_new_link");
 export const watchJoin = (code: string, name: string) => call<RoomInfo>("watch_join", { code, name });
-export const watchRejoin = (codes: string[], name: string) => call<RoomInfo>("watch_rejoin", { codes, name });
+export const watchRejoin = (codes: string[], name: string, soFar: RoomSoFar | null, hosted: boolean) =>
+  call<RoomInfo>("watch_rejoin", { codes, name, soFar, hosted });
 export const watchLeave = (end = false) => call<void>("watch_leave", { end });
 export const watchRoom = () => (inTauri ? call<RoomInfo | null>("watch_room") : Promise.resolve(null));
 export const watchSendState = (play: PlayState) => call<void>("watch_send_state", { play });
