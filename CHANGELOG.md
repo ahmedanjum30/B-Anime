@@ -26,7 +26,7 @@ one line each, written for users (see CLAUDE.md).
 - Your name and your room's name are remembered for next time.
 - Pick where you play the room's episode from: your library or any of your sources.
 - Guests play from the host's source by default, so everyone has the same copy of the episode.
-- The room says when someone's copy of the episode is longer or shorter than the host's, since it won't stay in step.
+- An episode starts once everyone has the same copy as the host (the same length), since a different cut won't stay in step.
 - A room keeps playing, sound and picture, with the app in the background on PC and phone.
 - Leaving the player during a room keeps the episode going: on PC it pops out into a small window, on phone you keep hearing it.
 - The room bar can pop the episode out into its small window when it didn't pop out by itself.

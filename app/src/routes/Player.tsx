@@ -117,12 +117,39 @@ export default function Player(props: { behind: boolean }) {
   const checkingLibrary = () => !local() && !!watchStore.room() && roomChoice() !== false && libraryEps.loading;
   createEffect(() => {
     if (fromLibrary()) go(`/watch/${mediaId()}/${episode()}?local=1`);
+    // Picked a source (or the host's by default) while the library copy plays: over to it.
+    else if (local() && watchStore.room() && roomChoice() === false) {
+      go(`/watch/${mediaId()}/${episode()}${dubParam() ? "?dub=1" : ""}`);
+    }
   });
   const source = createSource(
     () => (local() || checkingLibrary() || fromLibrary() ? undefined : media()),
     () => extParam() ?? hostPick() ?? undefined,
     dubParam,
   );
+  // A held start waits for everyone to have the host's copy of the episode (the same length):
+  // a different cut doesn't line up. Said on the held screen, with the way to the same copy.
+  const hostSrc = () => watchStore.nowPlaying()?.source ?? null;
+  const me = () => watchStore.members().find((m) => m.id === watchStore.room()?.me);
+  const myGap = () => {
+    const m = me();
+    return m ? watchStore.lengthGap(m) : null;
+  };
+  const heldMismatch = () => {
+    const gap = myGap();
+    if (gap !== null) {
+      const h = hostSrc();
+      return `Your copy of this episode is ${watchStore.gapText(gap)} than the host's, so it wouldn't stay in step.${h ? "" : " Play it from the same source as the host."}`;
+    }
+    const others = watchStore.members().filter((m) => watchStore.lengthGap(m) !== null);
+    if (!others.length) return null;
+    return `Waiting for ${others.map((m) => m.name).join(", ")} to play the same copy as the host (theirs is ${watchStore.gapText(watchStore.lengthGap(others[0])!)})…`;
+  };
+  /** Over to the host's source (the same copy as the host's), from the held screen. */
+  const toHostSource = (id: string) => {
+    watchStore.setPlayFrom({ mediaId: mediaId(), library: false });
+    if (source.usable().some((e) => e.id === id)) source.setExt(id);
+  };
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
   type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
@@ -1316,11 +1343,28 @@ export default function Player(props: { behind: boolean }) {
         }
       >
         <p class="player-spinner-label player-held">
-          Waiting for everyone to load…{" "}
-          <span class="num">
-            {watchStore.members().filter((m) => m.mediaId === mediaId() && m.episode === episode() && !m.buffering).length}/
-            {watchStore.members().length} ready
-          </span>
+          <Show
+            when={heldMismatch()}
+            fallback={
+              <>
+                Waiting for everyone to load…{" "}
+                <span class="num">
+                  {watchStore.members().filter((m) => m.mediaId === mediaId() && m.episode === episode() && !m.buffering && watchStore.lengthGap(m) === null).length}/
+                  {watchStore.members().length} ready
+                </span>
+              </>
+            }
+          >
+            {(text) => <>{text()}</>}
+          </Show>
+          {/* This device has another copy: one tap to the host's source. */}
+          <Show when={myGap() !== null && hostSrc()}>
+            {(h) => (
+              <button type="button" class="btn btn-sm btn-primary player-held-start" onClick={() => toHostSource(h().id)}>
+                Play from {h().name}
+              </button>
+            )}
+          </Show>
           {/* Only the host starts it without everyone: never by itself. */}
           <Show when={watchStore.room()?.host}>
             <button type="button" class="btn btn-sm player-held-start" onClick={() => together.startNow()}>

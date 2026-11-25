@@ -684,17 +684,15 @@ function RoomCheck(props: { mediaId: number }) {
     const c = w.playFrom();
     return !(c && c.mediaId === props.mediaId) && !!w.hostSourceFor(props.mediaId) && hasHostSource();
   };
+  // Shown as picked: the host's source (by default), else whichever this source list has.
+  const shownExt = () => (hostDefault() ? hostSource()!.id : source.ext());
   /** Playing from the library: picked, or (not picked) by default (above). */
   const useLibrary = () => {
     const c = w.playFrom();
     if (c && c.mediaId === props.mediaId) return hasLocal() && c.library;
     return hasLocal() && !hostDefault();
   };
-  // The host's source as the default: it's the one this device's check and player use.
-  createEffect(() => {
-    const h = hostSource();
-    if (hostDefault() && h && source.ext() !== h.id) source.setExt(h.id);
-  });
+
   const pickFrom = (value: string) => {
     if (value === "library") return w.setPlayFrom({ mediaId: props.mediaId, library: true });
     w.setPlayFrom({ mediaId: props.mediaId, library: false });
@@ -782,7 +780,7 @@ function RoomCheck(props: { mediaId: number }) {
       <Show when={options().length > 1}>
         <label class="select select-sm together-from">
           <span class="select-label">Playing from</span>
-          <select value={useLibrary() ? "library" : (source.ext() ?? "")} onChange={(e) => pickFrom(e.currentTarget.value)}>
+          <select value={useLibrary() ? "library" : (shownExt() ?? "")} onChange={(e) => pickFrom(e.currentTarget.value)}>
             <For each={options()}>{(o) => <option value={o.id}>{o.name}</option>}</For>
           </select>
         </label>

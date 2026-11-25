@@ -371,33 +371,6 @@ export const watchStore = createRoot(() => {
     const s = Math.abs(gap);
     return `${s >= 90 ? `${Math.round(s / 60)} min` : `${s} s`} ${gap < 0 ? "shorter" : "longer"}`;
   };
-  // Said once per episode: to whoever has the different copy, and to the host.
-  const lengthSaid = new Set<string>();
-  createEffect(
-    on(members, (list) => {
-      const r = room();
-      const p = nowPlaying();
-      if (!r || !p) return;
-      for (const m of list) {
-        const gap = lengthGap(m);
-        const key = `${m.id}:${p.mediaId}:${p.episode}`;
-        if (gap === null || lengthSaid.has(key)) continue;
-        if (m.id === r.me) {
-          lengthSaid.add(key);
-          const src = p.source?.name;
-          homeStore.notify(
-            `Your copy of this episode is ${gapText(gap)} than the host's, so it will drift out of step. ` +
-              (src ? `Play it from ${src} like the host.` : "Play it from the same source as the host."),
-          );
-        } else if (r.host) {
-          lengthSaid.add(key);
-          homeStore.notify(`${m.name}'s copy of this episode is ${gapText(gap)} than yours, so it will drift out of step.`);
-        }
-      }
-    }),
-  );
-  createEffect(on(room, () => lengthSaid.clear()));
-
   /** The source the host plays the room's show from, when this device is a guest: its default. */
   const hostSourceFor = (mediaId: number) => {
     const p = nowPlaying();
@@ -442,8 +415,9 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
-/** Copies of an episode this many seconds apart in length are different cuts (said in the room). */
-const LENGTH_SLACK = 5;
+/** Copies of an episode this many seconds apart in length are different cuts: they don't line up,
+ *  so a held start waits for everyone to have the host's copy. */
+const LENGTH_SLACK = 2;
 /** Paused by someone this far ahead (at most): this device watches up to there instead of skipping to it. */
 const CATCH_UP_MAX = 10;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
@@ -766,8 +740,10 @@ export function syncPlayer(opts: {
   // Held at Start or after a switch (the host's player): once everyone's player is on the
   // episode and has loaded it, play it for everyone. Never by itself otherwise: the host decides
   // (Start without waiting, or Don't wait for someone).
-  const ready = (m: { mediaId: number | null; episode: number | null; buffering: boolean }) =>
-    m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering;
+  // Ready: on the episode, loaded, and the same copy as the host's (a different cut, a Blu-ray
+  // file against a TV stream, would drift out of step: it waits for them to switch).
+  const ready = (m: RoomMember) =>
+    m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering && w.lengthGap(m) === null;
   const release = (late: string[]) => {
     const v = opts.video();
     const p = w.nowPlaying();
