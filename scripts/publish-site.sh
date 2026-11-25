@@ -6,7 +6,7 @@
 #   scripts/publish-site.sh <version> <files-dir>  # also this release's downloads
 #
 # With a version, the newest downloads sit at fixed links (the website's buttons):
-#   download/B-Anime-Setup.exe  and  download/B-Anime-arm64.apk
+#   download/B-Anime-Setup.exe, download/B-Anime-arm64.apk and download/B-Anime-macos.zip
 # Only the latest downloads are kept, and gh-pages is a single fresh commit each time, so the
 # branch doesn't grow by ~30 MB with every release.
 #
@@ -35,6 +35,9 @@ if [ -n "$version" ]; then
   cp "$files/B-Anime-Setup-$version.exe" "$work/out/download/B-Anime-Setup.exe"
   if [ -f "$files/B-Anime-$version-arm64.apk" ]; then
     cp "$files/B-Anime-$version-arm64.apk" "$work/out/download/B-Anime-arm64.apk"
+  fi
+  if [ -f "$files/B-Anime-$version-macos.zip" ]; then
+    cp "$files/B-Anime-$version-macos.zip" "$work/out/download/B-Anime-macos.zip"
   fi
   echo "$version" > "$work/out/download/VERSION"
 fi

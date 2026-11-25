@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>B-Anime: your anime and manga library, synced with AniList</title>
-<meta name="description" content="B-Anime finds the anime and manga on your PC, matches them to AniList, plays them and keeps your list in sync. A fast, light app for Windows and Android. Free, no ads.">
+<meta name="description" content="B-Anime finds the anime and manga on your PC, matches them to AniList, plays them and keeps your list in sync. A fast, light app for Windows, Mac and Android. Free, no ads.">
 <link rel="canonical" href="https://ahmedanjum30.github.io/B-Anime/">
 <link rel="icon" type="image/png" href="images/icon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="B-Anime: your anime library, synced with AniList">
-<meta property="og:description" content="Pick a show and it plays. Episodes matched, progress synced, this week's releases at a glance. Windows and Android.">
+<meta property="og:description" content="Pick a show and it plays. Episodes matched, progress synced, this week's releases at a glance. Windows, Mac and Android.">
 <meta property="og:url" content="https://ahmedanjum30.github.io/B-Anime/">
 <meta property="og:image" content="https://ahmedanjum30.github.io/B-Anime/images/social.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -23,7 +23,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "B-Anime",
-  "operatingSystem": "Windows 10, Windows 11, Android 7.0 or later (64-bit ARM)",
+  "operatingSystem": "Windows 10, Windows 11, macOS 11 or later (Apple Silicon), Android 7.0 or later (64-bit ARM)",
   "applicationCategory": "MultimediaApplication",
   "description": "An anime and manga library app: finds your episodes and chapters, matches them to AniList, plays them and syncs your progress. Online sources and manga through extensions.",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -55,6 +55,7 @@
   a { color: var(--z10); text-decoration-color: var(--z5); text-underline-offset: 3px; }
   a:hover { text-decoration-color: var(--red); }
   img { max-width: 100%; height: auto; display: block; }
+  .command { display: block; width: fit-content; max-width: 100%; margin: 12px 0; padding: 10px 14px; overflow-x: auto; white-space: nowrap; user-select: all; }
   code { font: 0.9em/1 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--z2); border: 1px solid var(--z3); border-radius: 4px; padding: 2px 6px; }
   .num { font-variant-numeric: tabular-nums; }
   .wrap { max-width: 1160px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)); }
@@ -178,9 +179,13 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg>
             Android (APK)
           </a>
+          <a class="button secondary" href="#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
+            Mac (Homebrew)
+          </a>
           <a class="button secondary" href="https://github.com/ahmedanjum30/B-Anime">View on GitHub</a>
         </div>
-        <p class="meta">Windows 10 and 11 · Android 7.0+ on 64-bit phones · Free, no ads · Updates itself</p>
+        <p class="meta">Windows 10 and 11 · Macs with Apple Silicon · Android 7.0+ on 64-bit phones · Free, no ads · Updates itself</p>
       </div>
       <div class="shot"><img src="images/home.png" width="1440" height="900" alt="B-Anime's Home screen: Up next with four shows and their next episodes, and This week's airing times set as a listings grid"></div>
     </div>
@@ -281,6 +286,12 @@
         <summary>How do I install the Android app?</summary>
         <p>Download the APK on your phone and open it. Android asks once to allow installs from your browser; allow it, then tap <b>Install</b>. After that, B-Anime finds new versions itself and asks Android to update.</p>
       </details>
+      <details id="mac">
+        <summary>How do I install it on a Mac?</summary>
+        <p>With <a href="https://brew.sh">Homebrew</a>, in Terminal:</p>
+        <code class="command">brew install --cask ahmedanjum30/tap/b-anime</code>
+        <p>Or download <a href="download/B-Anime-macos.zip">the app</a>, unzip it and drag B-Anime to Applications. It isn't signed with an Apple developer ID yet, so the first time macOS won't open it: right-click it and choose <b>Open</b>, or allow it in System Settings → Privacy &amp; Security. Homebrew takes care of that for you. B-Anime for Mac needs a Mac with Apple Silicon (M1 or later) and updates itself.</p>
+      </details>
       <details>
         <summary>Does it send my data anywhere?</summary>
         <p>Only where it has to: AniList (your lists and progress, when you sign in), GitHub (to check for updates) and the extension sources you install. There are no ads, analytics or tracking.</p>
@@ -295,6 +306,7 @@
       <div class="cta">
         <a class="button primary" href="download/B-Anime-Setup.exe">Download for Windows</a>
         <a class="button secondary" href="download/B-Anime-arm64.apk">Android (APK)</a>
+        <a class="button secondary" href="#mac">Mac (Homebrew)</a>
         <a class="button secondary" href="https://www.patreon.com/cw/ahmedanjum30">Support on Patreon</a>
       </div>
     </div>
@@ -307,5 +319,14 @@
     <span><a href="https://github.com/ahmedanjum30/B-Anime">GitHub</a> · <a href="https://github.com/ahmedanjum30/B-Anime/releases">Releases</a> · <a href="https://github.com/ahmedanjum30/B-Anime/issues">Issues</a> · <a href="https://www.patreon.com/cw/ahmedanjum30">Patreon</a></span>
   </div>
 </footer>
+<script>
+  // "Mac (Homebrew)" links to its answer: open it on the way there.
+  const openLinked = () => {
+    const el = location.hash && document.getElementById(location.hash.slice(1));
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  };
+  addEventListener("hashchange", openLinked);
+  openLinked();
+</script>
 </body>
 </html>

@@ -1,9 +1,10 @@
 # B-Anime
 
-> B-Anime is a free anime and manga library app for Windows 10 and 11 and Android (7.0+, 64-bit ARM), written in Rust. It finds the episodes and chapters on your PC, matches them to AniList without strict file naming, plays them in a built-in player (or MPV or VLC), and syncs your AniList lists and progress automatically. Online sources and manga come from extensions that users install themselves.
+> B-Anime is a free anime and manga library app for Windows 10 and 11, Macs with Apple Silicon (macOS 11+) and Android (7.0+, 64-bit ARM), written in Rust. It finds the episodes and chapters on your PC, matches them to AniList without strict file naming, plays them in a built-in player (or MPV or VLC), and syncs your AniList lists and progress automatically. Online sources and manga come from extensions that users install themselves.
 
 - Download for Windows: https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe
 - Download for Android (APK, arm64-v8a): https://ahmedanjum30.github.io/B-Anime/download/B-Anime-arm64.apk
+- Mac (Apple Silicon): `brew install --cask ahmedanjum30/tap/b-anime`, or the zipped app: https://ahmedanjum30.github.io/B-Anime/download/B-Anime-macos.zip
 - Every release, with SHA256SUMS.txt: https://github.com/ahmedanjum30/B-Anime/releases/latest
 - Source code and documentation: https://github.com/ahmedanjum30/B-Anime
 - Author: Ahmad Anjum (https://github.com/ahmedanjum30)
@@ -15,7 +16,7 @@
 - Home: Up next (the next unwatched episode of each show, with resume points) and This week (airing times in local time, set as a listings grid).
 - Watch: built-in player with subtitles, skip intro/outro, resume and auto-next; or MPV (progress tracked) or VLC.
 - Read: manga through extensions, single page, two pages or long strip.
-- Updates: installed copies update themselves from GitHub Releases, with checksum-verified downloads (Windows and Android).
+- Updates: installed copies update themselves from GitHub Releases, with checksum-verified downloads (Windows, Mac and Android).
 
 ## Not included
 
