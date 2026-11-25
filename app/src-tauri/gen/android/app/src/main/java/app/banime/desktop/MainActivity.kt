@@ -37,6 +37,15 @@ class MainActivity : TauriActivity() {
   }
 
   inner class Player {
+    /** The screen stays on while the episode plays (the WebView doesn't keep it on for video). */
+    @JavascriptInterface
+    fun setKeepScreenOn(on: Boolean) {
+      runOnUiThread {
+        if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      }
+    }
+
     /** The app is closing (swiped away): its video's pause isn't one to tell the room about. */
     @JavascriptInterface
     fun isClosing(): Boolean = this@MainActivity.isFinishing || this@MainActivity.isDestroyed

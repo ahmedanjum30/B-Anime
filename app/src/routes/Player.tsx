@@ -1011,8 +1011,12 @@ export default function Player(props: { behind: boolean }) {
   };
   /** Android: what the app's activity does for the player (MainActivity.kt). */
   const androidBars = () =>
-    (window as unknown as { BAnimeAndroid?: { setImmersive(on: boolean): void; enterPip(w: number, h: number): boolean } })
-      .BAnimeAndroid;
+    (window as unknown as {
+      BAnimeAndroid?: { setImmersive(on: boolean): void; enterPip(w: number, h: number): boolean; setKeepScreenOn?(on: boolean): void };
+    }).BAnimeAndroid;
+  /** The phone's screen stays on while the episode plays (Android's WebView doesn't do it). */
+  const keepScreenOn = (on: boolean) => androidBars()?.setKeepScreenOn?.(on);
+  onCleanup(() => keepScreenOn(false));
   /** Android picture in picture: the whole app is the small window, so only the video shows. */
   const [pip, setPip] = createSignal(false);
   if (onAndroid) {
@@ -1244,9 +1248,12 @@ export default function Player(props: { behind: boolean }) {
         }}
         onTimeUpdate={onTime}
         onDurationChange={() => setDuration(video.duration || 0)}
-        onPlay={() => { setPlaying(true); wake(); }}
-        onPause={() => { setPlaying(false); setIdle(false); persist(); }}
+        onPlay={() => { setPlaying(true); wake(); keepScreenOn(true); }}
+        onPause={() => { setPlaying(false); setIdle(false); persist(); keepScreenOn(false); }}
         onWaiting={() => setWaiting(true)}
+        // A jump while paused: Android may not say "can play" again until playing, so the spinner
+        // (and the room's "loading") stayed. Ready once the picture there is.
+        onSeeked={() => video.readyState >= 2 && video.paused && setWaiting(false)}
         onPlaying={() => { setWaiting(false); clearTimeout(stallTimer); }}
         onCanPlay={() => { setWaiting(false); clearTimeout(stallTimer); }}
         onEnded={onEnded}

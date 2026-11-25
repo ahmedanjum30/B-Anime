@@ -770,7 +770,10 @@ export function syncPlayer(opts: {
     const v = opts.video();
     if (v && w.room()) {
       const length = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : null;
-      w.status(v.currentTime, opts.waiting() || v.readyState < 3, opts.mediaId(), opts.episode(), length);
+      // Paused, it's loaded once it has the picture where it is: a paused phone doesn't buffer
+      // ahead, and counted as loading (Start and switches kept waiting for it).
+      const loading = opts.waiting() || v.readyState < (v.paused ? 2 : 3);
+      w.status(v.currentTime, loading, opts.mediaId(), opts.episode(), length);
     }
   };
   // Loading starts and ends reach the room at once (not just with the 2 s report), so waits
