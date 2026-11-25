@@ -105,12 +105,15 @@
   .listing { padding: 26px 26px 30px 0; border-bottom: 1px solid var(--z3); }
   .listing + .listing { padding-left: 26px; border-left: 1px solid var(--z3); }
   .listing:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+  /* The newest one, alone in the middle of its row, framed by the grid's lines. */
+  .listings .listing.centre { grid-column: 2; padding: 26px 26px 30px; border-left: 1px solid var(--z3); border-right: 1px solid var(--z3); }
+  .listing .slot .mark { margin-left: 4px; }
   .listing .slot { display: flex; align-items: center; gap: 8px; font: 700 12px/1 var(--head); letter-spacing: 0.12em; text-transform: uppercase; color: var(--z6); margin-bottom: 14px; }
   .listing .slot i { width: 8px; height: 8px; border-radius: 1px; }
   .listing p { margin: 0; color: var(--z8); font-size: 16px; }
   @media (max-width: 900px) {
     .listings { grid-template-columns: 1fr; }
-    .listing, .listing + .listing { padding: 22px 0; border-left: 0; }
+    .listing, .listing + .listing, .listings .listing.centre { grid-column: auto; padding: 22px 0; border-left: 0; border-right: 0; }
   }
 
   /* Split rows */
@@ -167,7 +170,7 @@
   <div class="hero">
     <div class="wrap">
       <div class="hero-text">
-        <p class="dateline"><span class="mark new">NEW</span> Now on Android too</p>
+        <p class="dateline"><span class="mark new">NEW</span> Watch together with friends</p>
         <h1>Pick a show. It plays. <em>AniList</em> keeps up.</h1>
         <p class="lead">B-Anime finds the anime and manga on your PC, matches them to AniList without you renaming a thing, plays the next episode in one click and records your progress. It shows what's up next and what airs this week, like an evening's TV listings.</p>
         <div class="cta">
@@ -224,6 +227,11 @@
           <div class="slot"><i style="background: var(--teal)"></i>Rust</div>
           <h3>Small, fast, quiet</h3>
           <p>Written in Rust: a 7 MB installer, instant start and smooth scrolling through thousands of shows. No ads, and no analytics.</p>
+        </div>
+        <div class="listing centre">
+          <div class="slot"><i style="background: var(--amber)"></i>Together <span class="mark new">NEW</span></div>
+          <h3>Watch with friends</h3>
+          <p>Send an invite link and watch an episode in step, each from your own library or source. Everyone loads before it starts, pauses and jumps reach the whole room, and it carries on if the host leaves.</p>
         </div>
       </div>
     </div>
