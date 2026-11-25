@@ -419,6 +419,8 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** At a hold, everyone's own position is within this many seconds of the hold's to count as there. */
+const HOLD_SLACK = 2;
 /** After a jump to catch up, no other jump for this long (ms): it loads there first. */
 const JUMP_AGAIN_AFTER = 8000;
 /** A counted start plays this long after the host sends it: time for it to reach everyone. */
@@ -608,6 +610,18 @@ export function syncPlayer(opts: {
     // window's buttons) isn't the room's: the room's next update (every 2 s) puts it back if it's
     // off. Nor is a player that's still (re)loading and hasn't taken the room's place yet.
     if (guest() || (!joined && w.room())) return;
+    // The host jumped while the room plays: like a start, the room holds there, everyone jumps
+    // there and loads, and it plays for all at once when they're all there (see release). Playing
+    // on, the others jumped as best they could and a slow phone kept lagging behind.
+    if (w.room()?.host && w.started() && !v.paused) {
+      const s = current();
+      if (s && !s.held) {
+        uiLog(`sync: the host jumped to ${v.currentTime.toFixed(1)}; holding for everyone`);
+        selfPause(v);
+        w.send({ ...s, playing: false, held: true, position: v.currentTime });
+        return;
+      }
+    }
     sendNow();
   };
 
@@ -790,8 +804,14 @@ export function syncPlayer(opts: {
   // (Start without waiting, or Don't wait for someone).
   // Ready: on the episode, loaded, and the same copy as the host's (a different cut, a Blu-ray
   // file against a TV stream, would drift out of step: it waits for them to switch).
-  const ready = (m: RoomMember) =>
-    m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering && w.lengthGap(m) === null;
+  // Ready: on the episode, loaded, at the hold's position (their own report of where they are),
+  // and the same copy as the host's (a different cut, a Blu-ray file against a TV stream, would
+  // drift out of step: it waits for them to switch).
+  const ready = (m: RoomMember) => {
+    const p = w.nowPlaying();
+    const there = !p || Math.abs(m.position - p.position) <= HOLD_SLACK;
+    return m.mediaId === opts.mediaId() && m.episode === opts.episode() && !m.buffering && there && w.lengthGap(m) === null;
+  };
   const release = (late: string[]) => {
     const v = opts.video();
     const p = w.nowPlaying();
