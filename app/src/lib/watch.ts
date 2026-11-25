@@ -1,7 +1,7 @@
 import { createEffect, createRoot, createSignal, on, onCleanup } from "solid-js";
 
 import {
-  errorText, inTauri, onEvent, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRejoin, watchRename,
+  errorText, inTauri, onEvent, uiLog, watchCheck, watchHost, watchJoin, watchLeave, watchReady, watchRejoin, watchRename,
   watchRoom, watchSendState, watchSendStatus, watchSetRoomName, watchStart,
 } from "./api";
 import { homeStore } from "./store";
@@ -419,6 +419,8 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** After a jump to catch up, no other jump for this long (ms): it loads there first. */
+const JUMP_AGAIN_AFTER = 8000;
 /** A counted start plays this long after the host sends it: time for it to reach everyone. */
 const START_IN = 800;
 /** Copies of an episode this many seconds apart in length are different cuts: they don't line up,
@@ -624,6 +626,8 @@ export function syncPlayer(opts: {
   };
   onCleanup(() => clearTimeout(catchUp));
 
+  /** When this player last jumped to catch up with the room (see apply). */
+  let jumpedAt = -1e9;
   /** A counted start (see release): when it plays, and its timer. */
   let startsAt = 0;
   let startTimer: number | undefined;
@@ -686,9 +690,15 @@ export function syncPlayer(opts: {
       // again brings everyone back in step.
       return selfPause(v);
     }
-    if (Math.abs(gap) > JUMP) {
+    if (Math.abs(gap) > JUMP && performance.now() - jumpedAt < JUMP_AGAIN_AFTER) {
+      // Jumped a moment ago and still behind (it's loading there): no chasing the room with jump
+      // after jump (each one loads again, and the room moves on meanwhile). Plays on from here.
+      v.playbackRate = 1;
+    } else if (Math.abs(gap) > JUMP) {
       // Not loaded there yet: land a little ahead, where the room will be once it has loaded.
       const lead = !isLoaded(v, expected) ? JUMP_LEAD : 0;
+      uiLog(`sync: jump ${gap.toFixed(1)} s to ${(expected + lead).toFixed(1)} (lead ${lead}, at ${v.currentTime.toFixed(1)})`);
+      jumpedAt = performance.now();
       selfSeek(v, Math.max(0, expected + lead));
       v.playbackRate = 1;
     } else if (Math.abs(gap) > CLOSE_ENOUGH && !(gap > 0 && slow())) {
@@ -747,6 +757,7 @@ export function syncPlayer(opts: {
           const still = loadingOthers();
           if (!still.length || v.paused) return;
           waitingFor = still.map((m) => m.name).join(", ");
+          uiLog(`sync: the room waits for ${waitingFor} (loading or lost)`);
           v.pause(); // the pause goes to the room like any other
           homeStore.notify(waitText(still), {
             label: "Don't wait",
