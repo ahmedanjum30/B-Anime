@@ -33,8 +33,11 @@ export function sameEpisode(current: PlayerTarget | null, t: PlayerTarget): bool
   if (!current || current.id !== t.id || current.ep !== t.ep || current.dub !== t.dub || t.ext || t.local) return false;
   // In a room, the copy must also be the one picked under Playing from (the library, or a
   // source): a library copy left open doesn't stand in for a source, nor the other way round.
-  const choice = watchStore.room() ? watchStore.playFrom() : null;
-  return !choice || choice.mediaId !== current.id || choice.library === current.local;
+  if (!watchStore.room()) return true;
+  const choice = watchStore.playFrom();
+  // Not picked: a guest plays the host's source when the host plays from one.
+  const library = choice && choice.mediaId === current.id ? choice.library : watchStore.hostSourceFor(current.id) ? false : null;
+  return library === null || library === current.local;
 }
 
 /**

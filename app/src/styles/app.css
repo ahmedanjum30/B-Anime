@@ -2554,7 +2554,8 @@ a.slot:focus-visible {
 .watch-member-check[data-bad] {
   color: var(--red);
 }
-.watch-member-link[data-slow] {
+.watch-member-link[data-slow],
+.watch-member-length {
   color: var(--amber, #d9a441);
 }
 /* The room's name, where it's at, and Rename (host). */

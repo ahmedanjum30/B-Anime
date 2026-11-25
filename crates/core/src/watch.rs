@@ -293,6 +293,10 @@ pub struct Member {
     /// The episode their player is on (with `buffering`: whether it has loaded it).
     pub media_id: Option<i64>,
     pub episode: Option<f64>,
+    /// How long their copy of that episode is (s). A different cut (a Blu-ray file against a TV
+    /// stream) doesn't line up with the others, so the room points it out.
+    #[serde(default)]
+    pub length: Option<f64>,
     /// False while their connection is lost (they didn't leave): the room waits for them to
     /// come back, for up to [`REJOIN_FOR`].
     #[serde(default = "connected_default")]
@@ -372,6 +376,8 @@ enum Msg {
         media_id: Option<i64>,
         #[serde(default)]
         episode: Option<f64>,
+        #[serde(default)]
+        length: Option<f64>,
     },
     /// Guest → host: ready to start, or not any more.
     Ready { ready: bool },
@@ -527,6 +533,7 @@ struct HostState {
     position: f64,
     buffering: bool,
     on: Option<(i64, f64)>,
+    length: Option<f64>,
     ready: bool,
     check: Check,
     /// The host has started the room (the lobby is over).
@@ -564,6 +571,7 @@ struct Guest {
     position: f64,
     buffering: bool,
     on: Option<(i64, f64)>,
+    length: Option<f64>,
     ready: bool,
     check: Check,
     tx: mpsc::UnboundedSender<Msg>,
@@ -628,6 +636,7 @@ impl HostState {
             code: self.code.clone(),
             media_id: self.on.map(|o| o.0),
             episode: self.on.map(|o| o.1),
+            length: self.length,
             connected: true,
         }];
         list.extend(self.guests.iter().map(|g| {
@@ -647,6 +656,7 @@ impl HostState {
                 code: g.code.clone(),
                 media_id: g.on.map(|o| o.0),
                 episode: g.on.map(|o| o.1),
+                length: g.length,
                 connected: true,
             }
         }));
@@ -664,6 +674,7 @@ impl HostState {
             code: d.code.clone(),
             media_id: d.on.map(|o| o.0),
             episode: d.on.map(|o| o.1),
+            length: None,
             connected: false,
         }));
         list
@@ -827,6 +838,7 @@ impl Shared {
                 position: l.position,
                 buffering: l.buffering,
                 on: None,
+                length: None,
                 ready: l.ready,
                 check: l.check.clone(),
                 started: l.roster.as_ref().is_some_and(|r| r.started),
@@ -1155,7 +1167,7 @@ impl Room {
     }
 
     /// Where this device is, for the member list.
-    pub fn send_status(&self, position: f64, buffering: bool, on: Option<(i64, f64)>) {
+    pub fn send_status(&self, position: f64, buffering: bool, on: Option<(i64, f64)>, length: Option<f64>) {
         if let Ok(mut l) = self.shared.local.lock() {
             l.position = position;
             l.buffering = buffering;
@@ -1163,10 +1175,11 @@ impl Room {
         match self.shared.host_state() {
             Some(host) => {
                 if let Ok(mut h) = host.lock() {
-                    let changed = h.buffering != buffering || h.on != on;
+                    let changed = h.buffering != buffering || h.on != on || h.length != length;
                     h.position = position;
                     h.buffering = buffering;
                     h.on = on;
+                    h.length = length;
                     if changed {
                         h.announce();
                     } else if !h.guests.is_empty() {
@@ -1174,7 +1187,7 @@ impl Room {
                     }
                 }
             }
-            None => self.to_host(Msg::Status { position, buffering, media_id: on.map(|o| o.0), episode: on.map(|o| o.1) }),
+            None => self.to_host(Msg::Status { position, buffering, media_id: on.map(|o| o.0), episode: on.map(|o| o.1), length }),
         }
     }
 
@@ -1579,6 +1592,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                 position: 0.0,
                 buffering: true,
                 on: None,
+                length: None,
                 ready,
                 check,
                 tx,
@@ -1639,15 +1653,16 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
                     }
                 }
             }
-            Ok(Msg::Status { position, buffering, media_id, episode }) => {
+            Ok(Msg::Status { position, buffering, media_id, episode, length }) => {
                 if let Ok(mut h) = host.lock() {
                     let mut changed = false;
                     let on = media_id.zip(episode);
                     if let Some(g) = h.guest_mut(&id) {
-                        changed = g.buffering != buffering || g.on != on;
+                        changed = g.buffering != buffering || g.on != on || g.length != length;
                         g.position = position;
                         g.buffering = buffering;
                         g.on = on;
+                        g.length = length;
                     }
                     // Loading starts and ends at once (waits depend on them); positions batch.
                     if changed {
@@ -1784,6 +1799,7 @@ mod tests {
             code: "c".into(),
             media_id: Some(21),
             episode: Some(5.0),
+            length: Some(1420.0),
             connected: true,
         };
         let json = serde_json::to_string(&m).unwrap();

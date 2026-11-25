@@ -8,7 +8,7 @@ import {
   SkipBack, SkipForward, Users, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
-  errorText, externalPlayers, getMedia, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
+  errorText, externalPlayers, getMedia, listExtensions, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
   localStream, onAndroid, onWebKit, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { PictureTrack, Stream } from "../lib/types";
@@ -97,9 +97,16 @@ export default function Player(props: { behind: boolean }) {
   // In a room, this device plays the episode from where it picked on the Together page: its
   // library, or a source. Not picked: the library when it has the episode. The room's links
   // don't say (each device has its own files), so the source waits for the library's answer.
+  const [installed] = createResource(() => (watchStore.room() ? true : null), () => listExtensions().catch(() => []));
+  /** Not picked: the host's source when this device has it (the same copy as the host's). */
+  const hostPick = () => {
+    const h = watchStore.hostSourceFor(mediaId());
+    return h && installed()?.some((e) => e.id === h.id && e.enabled) ? h.id : null;
+  };
   const roomChoice = () => {
     const c = watchStore.playFrom();
-    return c && c.mediaId === mediaId() ? c.library : null;
+    if (c && c.mediaId === mediaId()) return c.library;
+    return hostPick() ? false : null;
   };
   const [libraryEps] = createResource(
     () => (!local() && watchStore.room() && roomChoice() !== false ? mediaId() : null),
@@ -113,7 +120,7 @@ export default function Player(props: { behind: boolean }) {
   });
   const source = createSource(
     () => (local() || checkingLibrary() || fromLibrary() ? undefined : media()),
-    extParam,
+    () => extParam() ?? hostPick() ?? undefined,
     dubParam,
   );
   const item = () => source.byNumber().get(episode());

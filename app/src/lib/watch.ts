@@ -349,8 +349,59 @@ export const watchStore = createRoot(() => {
     setNowAt(performance.now());
     void watchSendState({ ...s, by: "" }).catch(() => {});
   };
-  const status = (position: number, buffering: boolean, mediaId: number, episode: number) => {
-    if (room()) void watchSendStatus(position, buffering, mediaId, episode).catch(() => {});
+  const status = (position: number, buffering: boolean, mediaId: number, episode: number, length: number | null) => {
+    if (room()) void watchSendStatus(position, buffering, mediaId, episode, length).catch(() => {});
+  };
+
+  /**
+   * How much longer (+) or shorter (−) someone's copy of the room's episode is than the host's,
+   * in whole seconds, when it's enough to matter (a different cut: a Blu-ray file against a TV
+   * stream). Such copies don't line up: the same time shows a different moment after the cut.
+   */
+  const lengthGap = (m: RoomMember): number | null => {
+    const p = nowPlaying();
+    const host = members().find((x) => x.host);
+    const on = (x: RoomMember) => !!p && x.mediaId === p.mediaId && x.episode === p.episode && !!x.length;
+    if (!host || m.host || !on(m) || !on(host)) return null;
+    const gap = Math.round(m.length! - host.length!);
+    return Math.abs(gap) > LENGTH_SLACK ? gap : null;
+  };
+  /** "40 s shorter" / "2 min longer". */
+  const gapText = (gap: number) => {
+    const s = Math.abs(gap);
+    return `${s >= 90 ? `${Math.round(s / 60)} min` : `${s} s`} ${gap < 0 ? "shorter" : "longer"}`;
+  };
+  // Said once per episode: to whoever has the different copy, and to the host.
+  const lengthSaid = new Set<string>();
+  createEffect(
+    on(members, (list) => {
+      const r = room();
+      const p = nowPlaying();
+      if (!r || !p) return;
+      for (const m of list) {
+        const gap = lengthGap(m);
+        const key = `${m.id}:${p.mediaId}:${p.episode}`;
+        if (gap === null || lengthSaid.has(key)) continue;
+        if (m.id === r.me) {
+          lengthSaid.add(key);
+          const src = p.source?.name;
+          homeStore.notify(
+            `Your copy of this episode is ${gapText(gap)} than the host's, so it will drift out of step. ` +
+              (src ? `Play it from ${src} like the host.` : "Play it from the same source as the host."),
+          );
+        } else if (r.host) {
+          lengthSaid.add(key);
+          homeStore.notify(`${m.name}'s copy of this episode is ${gapText(gap)} than yours, so it will drift out of step.`);
+        }
+      }
+    }),
+  );
+  createEffect(on(room, () => lengthSaid.clear()));
+
+  /** The source the host plays the room's show from, when this device is a guest: its default. */
+  const hostSourceFor = (mediaId: number) => {
+    const p = nowPlaying();
+    return room() && !room()!.host && p?.mediaId === mediaId ? (p.source ?? null) : null;
   };
   const markOwnSwitch = (mediaId: number, episode: number) => {
     ownSwitch = { mediaId, episode, at: performance.now() };
@@ -382,7 +433,7 @@ export const watchStore = createRoot(() => {
   return {
     room, members, remote, started, nowPlaying, busy, me, defaultName, reconnecting, invite, setInvite,
     recent, rejoin, forget, pendingRejoin, setPendingRejoin, roomPosition, roomPath, pick, nowAt, roomName, rename, nameRoom,
-    playFrom, setPlayFrom,
+    playFrom, setPlayFrom, lengthGap, gapText, hostSourceFor,
     host, join, leave, setReady, start, check, send, status, markOwnSwitch, staleForSwitch, notWaiting, waitFor,
   };
 });
@@ -391,6 +442,8 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** Copies of an episode this many seconds apart in length are different cuts (said in the room). */
+const LENGTH_SLACK = 5;
 /** Paused by someone this far ahead (at most): this device watches up to there instead of skipping to it. */
 const CATCH_UP_MAX = 10;
 /** Someone loading this long pauses the room (the host's player does it) until they catch up. */
@@ -735,7 +788,10 @@ export function syncPlayer(opts: {
 
   const reportStatus = () => {
     const v = opts.video();
-    if (v && w.room()) w.status(v.currentTime, opts.waiting() || v.readyState < 3, opts.mediaId(), opts.episode());
+    if (v && w.room()) {
+      const length = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : null;
+      w.status(v.currentTime, opts.waiting() || v.readyState < 3, opts.mediaId(), opts.episode(), length);
+    }
   };
   // Loading starts and ends reach the room at once (not just with the 2 s report), so waits
   // for someone start and end promptly. After the Player has updated `waiting`.

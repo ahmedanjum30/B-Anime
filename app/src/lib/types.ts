@@ -405,6 +405,8 @@ export interface RoomMember {
   episode: number | null;
   /** False while their connection is lost (they didn't leave); the room waits for them. */
   connected?: boolean;
+  /** How long their copy of the episode is (s): a different cut doesn't line up with the others. */
+  length?: number | null;
 }
 
 /** Who's in the room, and whether the host has started it (false: the lobby). */

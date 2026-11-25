@@ -136,9 +136,10 @@ pub async fn watch_send_status(
     buffering: bool,
     media_id: Option<i64>,
     episode: Option<f64>,
+    length: Option<f64>,
 ) -> Result<(), String> {
     if let Some(room) = state.watch.room.lock().await.as_ref() {
-        room.send_status(position, buffering, media_id.zip(episode));
+        room.send_status(position, buffering, media_id.zip(episode), length.filter(|l| l.is_finite() && *l > 0.0));
     }
     Ok(())
 }

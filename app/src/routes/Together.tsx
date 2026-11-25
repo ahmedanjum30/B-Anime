@@ -524,6 +524,17 @@ export default function Together(props: {
                           </span>
                         </Show>
                         {/* Their ping to the host (measured, the median of the last few). */}
+                        {/* A different cut of the episode (a Blu-ray file against a TV stream). */}
+                        <Show when={w.lengthGap(m)}>
+                          {(gap) => (
+                            <span
+                              class="watch-member-length num"
+                              title="A different cut of this episode: it drifts out of step with the host's"
+                            >
+                              {w.gapText(gap())}
+                            </span>
+                          )}
+                        </Show>
                         <Show when={m.rttMs !== null}>
                           <span
                             class="watch-member-link num"
@@ -667,11 +678,23 @@ function RoomCheck(props: { mediaId: number }) {
 
   /** The library has the room's episode. */
   const hasLocal = () => !!localEps()?.includes(episode());
-  /** Playing from the library: picked, or (not picked) whenever it has the episode. */
+  /** Not picked: the host's source, when the host plays from one and this device has it (the same
+   *  copy as the host's, so it lines up); else the library when it has the episode. */
+  const hostDefault = () => {
+    const c = w.playFrom();
+    return !(c && c.mediaId === props.mediaId) && !!w.hostSourceFor(props.mediaId) && hasHostSource();
+  };
+  /** Playing from the library: picked, or (not picked) by default (above). */
   const useLibrary = () => {
     const c = w.playFrom();
-    return hasLocal() && (c && c.mediaId === props.mediaId ? c.library : true);
+    if (c && c.mediaId === props.mediaId) return hasLocal() && c.library;
+    return hasLocal() && !hostDefault();
   };
+  // The host's source as the default: it's the one this device's check and player use.
+  createEffect(() => {
+    const h = hostSource();
+    if (hostDefault() && h && source.ext() !== h.id) source.setExt(h.id);
+  });
   const pickFrom = (value: string) => {
     if (value === "library") return w.setPlayFrom({ mediaId: props.mediaId, library: true });
     w.setPlayFrom({ mediaId: props.mediaId, library: false });
