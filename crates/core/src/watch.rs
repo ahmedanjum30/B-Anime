@@ -760,8 +760,16 @@ impl HostState {
     /// (and to check it again). Returns the state as the room keeps it.
     fn adopt(&mut self, mut state: PlayState, from_guest: bool) -> PlayState {
         // The host's source and the room's subtitles stay when a change doesn't name them.
-        if state.source.is_none() {
-            state.source = self.state.as_ref().and_then(|s| s.source.clone());
+        let before = self.state.as_ref().and_then(|s| s.source.clone());
+        match (&mut state.source, before) {
+            (None, before) => state.source = before,
+            // The same source, without its show: the show stays (guests play the one the host
+            // matched there; losing it left them on their own match, another season).
+            (Some(now), Some(before)) if now.id == before.id && now.show_id.is_none() => {
+                now.show_id = before.show_id;
+                now.show_title = before.show_title;
+            }
+            _ => {}
         }
         if state.subs.is_none() {
             state.subs = self.state.as_ref().and_then(|s| s.subs.clone());

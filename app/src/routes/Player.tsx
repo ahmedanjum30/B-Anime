@@ -299,7 +299,10 @@ export default function Player(props: { behind: boolean }) {
     source: () => {
       if (local()) return null;
       const e = source.usable().find((x) => x.id === source.ext());
-      return e && /^https:\/\//.test(e.sourceUrl) ? { id: e.id, name: e.name, url: e.sourceUrl } : null;
+      // With the show it's matched to there: guests on the same source play that one too.
+      const m = source.match();
+      const show = m?.status === "matched" ? { showId: m.sourceId, showTitle: m.title } : {};
+      return e && /^https:\/\//.test(e.sourceUrl) ? { id: e.id, name: e.name, url: e.sourceUrl, ...show } : null;
     },
   });
   /** Started per stream; cleared once the video has data (see the stream effect). */

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 
-import { findSource, inTauri, listExtensions, sourceItems } from "./api";
+import { findSource, inTauri, listExtensions, setSourceMatch, sourceItems } from "./api";
 import type { ExtKind, InstalledExtension, Media, SourceItem } from "./types";
 import { watchStore } from "./watch";
 
@@ -109,7 +109,12 @@ export function useRoomMatch(source: SourceState, mediaId: () => number) {
     if (source.match.loading) return;
     const m = source.match();
     if (m?.status === "matched" && m.sourceId === h.showId) return;
-    source.setMatch({ status: "matched", sourceId: h.showId, title: h.showTitle ?? "", auto: false });
+    const showId = h.showId;
+    const title = h.showTitle ?? "";
+    source.setMatch({ status: "matched", sourceId: showId, title, auto: false });
+    // Kept on this device too, as if picked by hand: the show is right here outside the room
+    // as well (its own lookup had found another season, say).
+    void setSourceMatch(mediaId(), h.id, showId, title, !!p.dub).catch(() => {});
   });
 }
 // ── Session cache ───────────────────────────────────────────────────────────────
