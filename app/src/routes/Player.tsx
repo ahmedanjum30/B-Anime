@@ -402,8 +402,27 @@ export default function Player(props: { behind: boolean }) {
 
   /** The stream last loaded, so a server switch (same stream, new index) is told from a new episode. */
   let loadedStream: ReturnType<typeof stream>;
+  /** Bumped to load the same stream again from here (the Mac, back from a long while hidden). */
+  const [reattach, setReattach] = createSignal(0);
+  /** Whether the video was paused when it was reloaded, so it stays paused. */
+  let reattachPaused = false;
+  // Mac: after a long while behind other windows, WebKit can drop the video's picture (black,
+  // sound and controls fine). Reload only the video, at the same second, when B-Anime is back.
+  if (onWebKit) {
+    let hiddenSince = 0;
+    const onVisibility = () => {
+      if (document.hidden) return void (hiddenSince = Date.now());
+      const away = hiddenSince ? Date.now() - hiddenSince : 0;
+      hiddenSince = 0;
+      if (away < 60_000 || !video || !stream() || videoError() || video.currentTime <= 1) return;
+      reattachPaused = video.paused;
+      setReattach((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    onCleanup(() => document.removeEventListener("visibilitychange", onVisibility));
+  }
   createEffect(
-    on([stream, sourceIndex], async ([s, idx]) => {
+    on([stream, sourceIndex, reattach], async ([s, idx]) => {
       // Switching servers mid-episode continues from here, not from the saved position.
       const carry = s && s === loadedStream && video && video.currentTime > 1 ? video.currentTime : null;
       loadedStream = s;
@@ -841,7 +860,8 @@ export default function Player(props: { behind: boolean }) {
     }
     // Play first: the skip times come from AniSkip, and waiting for them left an episode paused
     // at the start (the next one after auto-next) whenever AniSkip was slow.
-    void video.play().catch(() => {});
+    if (reattachPaused) reattachPaused = false;
+    else void video.play().catch(() => {});
     const mal = media()?.idMal;
     if (!mal || !inTauri) return;
     const ep = episode();

@@ -625,6 +625,13 @@ pub fn run() {
             let _ = window.set_focus();
         }
     }));
+    // Mac: macOS may end the page's WebKit process while B-Anime sits in the background, and
+    // the window then stayed black until relaunch. Load the page again instead.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        tracing::warn!("WebKit page process ended; reloading the page");
+        let _ = webview.reload();
+    });
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())

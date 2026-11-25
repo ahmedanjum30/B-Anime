@@ -15,6 +15,14 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-26
+
+### Changed
+- B-Anime looks for updates when it starts (or when you check in Settings), no longer every 6 hours.
+
+### Fixed
+- On the Mac, videos keep their picture when you come back to B-Anime after a while in another app.
+
 ## [0.4.6] - 2026-11-25
 
 ### Added

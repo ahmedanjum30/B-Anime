@@ -1,5 +1,6 @@
-//! Automatic updates: checks GitHub Releases at launch and every 6 hours, downloads and verifies
-//! the new setup in the background, and offers "Restart to update".
+//! Automatic updates: checks GitHub Releases once at launch (and when asked, in Settings), downloads
+//! and verifies the new setup in the background, and offers "Restart to update". No repeating
+//! check: GitHub allows 60 unsigned requests an hour per connection, shared by every device on it.
 
 use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
@@ -17,7 +18,6 @@ const UPDATE_READY: &str = "update-ready";
 const UPDATE_FAILED: &str = "update-failed";
 /// Soon after launch (once startup work has settled), so a new version is announced right away.
 const FIRST_CHECK: Duration = Duration::from_secs(3);
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// "1" when the user takes beta versions (GitHub pre-releases) as well as stable ones.
 const BETA_PREF: &str = "updates.beta";
 
@@ -61,10 +61,7 @@ pub fn start(app: &AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
-        loop {
-            check_and_download(&handle).await;
-            tokio::time::sleep(CHECK_EVERY).await;
-        }
+        check_and_download(&handle).await;
     });
 }
 
