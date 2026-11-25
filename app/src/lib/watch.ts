@@ -518,7 +518,9 @@ export function syncPlayer(opts: {
       dub: w.nowPlaying()?.dub ?? opts.dub(),
       position: v.currentTime,
       playing: !v.paused,
-      source: w.room()?.host ? opts.source() : null,
+      // The source isn't part of the regular report: it's sent as its own update when it changes
+      // (below). Riding on every report, one without its show replaced the one with it.
+      source: null,
       // A hold after a switch stays until the host releases it (everyone has loaded).
       held: !!w.nowPlaying()?.held && w.nowPlaying()?.mediaId === opts.mediaId() && w.nowPlaying()?.episode === opts.episode(),
     };
@@ -938,6 +940,25 @@ export function syncPlayer(opts: {
     apply({ ...p, by: "", position: at, at: performance.now() });
     return true;
   };
+
+  // The host's source (and the show it's matched to there), as its own update when it changes
+  // during play: the regular report doesn't carry it.
+  createEffect(
+    on(
+      () => {
+        const s = opts.source();
+        return s ? `${s.id}|${s.showId ?? ""}` : "";
+      },
+      (key) => {
+        const src = opts.source();
+        const known = w.nowPlaying()?.source;
+        if (!key || !src || !w.room()?.host || !w.started()) return;
+        if (known?.id === src.id && known?.showId === src.showId) return;
+        const s = current();
+        if (s) w.send({ ...s, source: src });
+      },
+    ),
+  );
 
   // The host's regular position (guests correct drift from it) and everyone's status.
   const tick = window.setInterval(() => {

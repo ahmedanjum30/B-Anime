@@ -784,13 +784,13 @@ function RoomCheck(props: { mediaId: number }) {
     const me = w.me();
     return me ? w.lengthGap(me) : null;
   };
-  // The host's working source goes with the room's pick (in the lobby), so guests who can't
-  // play it can install the same one.
+  // The host's source goes with the room's pick (in the lobby): sent once, as its own update,
+  // when it's known or changes (not with the regular position report). Even when the host plays
+  // from its library: guests on that source then play the show it's matched to there.
   createEffect(() => {
-    const r = result();
     const p = w.nowPlaying();
     const e = source.usable().find((x) => x.id === source.ext());
-    if (!w.room()?.host || w.started() || !p || r.playable !== true || r.via === "Library" || !e) return;
+    if (!w.room()?.host || w.started() || !p || !e || source.match.loading) return;
     // With the show it's matched to there: a guest on the same source plays that show too
     // (their own lookup may have found another season).
     const m = source.match();
