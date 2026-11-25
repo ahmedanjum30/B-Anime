@@ -178,8 +178,18 @@ async fn get_pages(state: tauri::State<'_, AppState>, ext: String, chapter_id: S
 
 #[tauri::command]
 async fn get_skip_times(mal_id: i64, episode: i64, length: f64) -> Result<Vec<streaming::SkipTime>, String> {
-    // Best effort: no skip buttons is fine, an error dialog is not.
-    Ok(streaming::skip_times(mal_id, episode, length).await.unwrap_or_default())
+    // Best effort: no skip buttons is fine, an error dialog is not. Logged, so a missing skip
+    // bar can be told apart from "nobody submitted times for this episode".
+    match streaming::skip_times(mal_id, episode, length).await {
+        Ok(times) => {
+            tracing::info!(mal_id, episode, length, found = times.len(), "skip times");
+            Ok(times)
+        }
+        Err(e) => {
+            tracing::warn!(mal_id, episode, length, error = %e, "skip times lookup failed");
+            Ok(Vec::new())
+        }
+    }
 }
 
 #[tauri::command]
