@@ -386,6 +386,9 @@ export interface PlayState {
   held?: boolean;
   /** A counted start: play this many ms after the host sent it (everyone starts together). */
   startIn?: number | null;
+  /** The start's moment on the host's clock (ms since 1970). On a guest it arrives already read
+   *  on the guest's own clock, as `startIn` from when it arrived. */
+  startAt?: number | null;
 }
 
 export interface RoomMember {

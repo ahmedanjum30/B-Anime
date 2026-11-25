@@ -267,6 +267,10 @@ pub struct PlayState {
     /// every device starts together (each takes off the time the message took to reach it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_in: Option<u32>,
+    /// The counted start's moment on the host's clock (ms since 1970). Each guest reads it on its
+    /// own clock (it knows how far that is from the host's, from its pings) and plays then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_at: Option<u64>,
 }
 
 /// Whether someone can play the room's episode, and with what.
@@ -412,7 +416,12 @@ enum Msg {
     /// Guest → host every 2 s, and the host's immediate answer: the guest measures its ping (its
     /// radio is awake, having just sent, so a phone's Wi-Fi power saving doesn't skew it).
     Ping { n: u32 },
-    Pong { n: u32 },
+    Pong {
+        n: u32,
+        /// The host's clock when it answered (ms since 1970): guests learn how far theirs is.
+        #[serde(default)]
+        at: Option<u64>,
+    },
     /// Guest → host: its ping, the median of the last few.
     Latency { ms: u32 },
     /// A message from a newer B-Anime: ignored, rather than ending the connection.
@@ -602,26 +611,38 @@ const PING_EVERY: Duration = Duration::from_secs(2);
 #[derive(Default)]
 struct Pinger {
     n: u32,
-    sent: Option<(u32, Instant)>,
+    /// The ping in flight: its number, when (monotonic), and this device's clock then.
+    sent: Option<(u32, Instant, u64)>,
     rtts: Vec<Duration>,
     reported: Option<u32>,
+    /// How far the host's clock is ahead of this device's (ms), from the last few answers.
+    offsets: Vec<i64>,
 }
 
 impl Pinger {
     fn next(&mut self) -> Option<Msg> {
         // One at a time; an unanswered one is given up after 10 s.
-        if self.sent.is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(10)) {
+        if self.sent.is_some_and(|(_, at, _)| at.elapsed() < Duration::from_secs(10)) {
             return None;
         }
         self.n = self.n.wrapping_add(1);
-        self.sent = Some((self.n, Instant::now()));
+        self.sent = Some((self.n, Instant::now(), now_ms()));
         Some(Msg::Ping { n: self.n })
     }
 
-    /// The answer to ping `n`: the new median, when it changed (to report).
-    fn answered(&mut self, n: u32) -> Option<u32> {
-        let (_, at) = self.sent.take().filter(|(sent, _)| *sent == n)?;
-        self.rtts.push(at.elapsed());
+    /// The answer to ping `n` (with the host's clock then): the new median, when it changed (to
+    /// report). Also how far the host's clock is: it answered about halfway through the round trip.
+    fn answered(&mut self, n: u32, host_at: Option<u64>) -> Option<u32> {
+        let (_, at, local_at) = self.sent.take().filter(|(sent, _, _)| *sent == n)?;
+        let rtt = at.elapsed();
+        if let Some(host_at) = host_at {
+            let offset = host_at as i64 - (local_at as i64 + rtt.as_millis() as i64 / 2);
+            self.offsets.push(offset);
+            if self.offsets.len() > PINGS_KEPT {
+                self.offsets.remove(0);
+            }
+        }
+        self.rtts.push(rtt);
         if self.rtts.len() > PINGS_KEPT {
             self.rtts.remove(0);
         }
@@ -633,6 +654,21 @@ impl Pinger {
             ms
         })
     }
+}
+
+impl Pinger {
+    /// How far the host's clock is ahead of this device's (ms), once known: the median of the
+    /// last few measurements.
+    fn offset(&self) -> Option<i64> {
+        let mut o = self.offsets.clone();
+        o.sort();
+        o.get(o.len() / 2).copied()
+    }
+}
+
+/// This device's clock (ms since 1970).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 impl HostState {
@@ -1373,9 +1409,20 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
                 None => break Outcome::Closing,
             },
             inc = incoming.recv() => match inc.inspect(|_| heard = Instant::now()) {
-                Some(Msg::State(s)) => {
+                Some(Msg::State(mut s)) => {
                     if let Ok(mut l) = shared.local.lock() {
                         l.state = Some(s.clone());
+                    }
+                    // A counted start at the host's moment: how long until then on this device's
+                    // clock. Unknown how far the clocks are yet: the host's own count, as sent.
+                    if let Some(start_at) = s.start_at {
+                        match pinger.offset() {
+                            Some(offset) => {
+                                let local = start_at as i64 - offset;
+                                s.start_in = Some((local - now_ms() as i64).clamp(0, 10_000) as u32);
+                            }
+                            None => s.start_at = None,
+                        }
                     }
                     shared.emit(RoomEvent::State(s));
                 }
@@ -1388,8 +1435,8 @@ async fn session(shared: &Arc<Shared>, conn: Connection, outgoing: &mut mpsc::Un
                 Some(Msg::Refused { reason }) => break Outcome::Ended(reason),
                 Some(Msg::Ended) => break Outcome::Ended("The host ended the room.".into()),
                 Some(Msg::HandOver) => break Outcome::HandedOver,
-                Some(Msg::Pong { n }) => {
-                    if let Some(ms) = pinger.answered(n) {
+                Some(Msg::Pong { n, at }) => {
+                    if let Some(ms) = pinger.answered(n, at) {
                         if write_msg(&mut send, &Msg::Latency { ms }).await.is_err() {
                             break Outcome::Dropped;
                         }
@@ -1597,7 +1644,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
             h.fresh = false;
             // A newcomer starts where the room is (not counting down from an earlier start).
             if let Some(state) = &h.state {
-                let _ = tx.send(Msg::State(PlayState { start_in: None, ..state.clone() }));
+                let _ = tx.send(Msg::State(PlayState { start_in: None, start_at: None, ..state.clone() }));
             }
             h.guests.push(Guest {
                 id,
@@ -1708,7 +1755,7 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
             Ok(Msg::Ping { n }) => {
                 if let Ok(h) = host.lock() {
                     if let Some(g) = h.guests.iter().find(|g| g.id == id) {
-                        let _ = g.tx.send(Msg::Pong { n });
+                        let _ = g.tx.send(Msg::Pong { n, at: Some(now_ms()) });
                     }
                 }
             }
@@ -1800,6 +1847,7 @@ mod tests {
             subs: Some("en".into()),
             held: false,
             start_in: None,
+            start_at: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""t":"state""#), "{json}");
@@ -1875,6 +1923,7 @@ mod tests {
             subs: None,
             held: false,
             start_in: None,
+            start_at: None,
         }
     }
 

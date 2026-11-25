@@ -424,7 +424,7 @@ const HOLD_SLACK = 2;
 /** After a jump to catch up, no other jump for this long (ms): it loads there first. */
 const JUMP_AGAIN_AFTER = 8000;
 /** A counted start plays this long after the host sends it: time for it to reach everyone. */
-const START_IN = 800;
+const START_IN = 1000;
 /** Copies of an episode this many seconds apart in length are different cuts: they don't line up,
  *  so a held start waits for everyone to have the host's copy. */
 const LENGTH_SLACK = 2;
@@ -656,8 +656,10 @@ export function syncPlayer(opts: {
     // A counted start: at its position, paused, then playing at the moment everyone does (the
     // message took about half this device's ping to arrive).
     if (s.startIn && s.playing && !s.held && v.readyState >= 1) {
-      const ping = w.me()?.rttMs ?? 0;
-      const wait = Math.max(0, s.startIn - ping / 2 - (performance.now() - s.at));
+      // The host's moment, read on this device's clock (startAt kept: startIn is exact). An older
+      // host (no moment): its count, less the message's trip.
+      const trip = s.startAt ? 0 : (w.me()?.rttMs ?? 0) / 2;
+      const wait = Math.max(0, s.startIn - trip - (performance.now() - s.at));
       pending = null;
       joined = true;
       appliedAt = performance.now() + wait;
@@ -818,7 +820,8 @@ export function syncPlayer(opts: {
     if (!v || !p?.held) return;
     // A counted start: everyone plays at the same moment (each guest takes off the time the
     // message took to reach it), instead of the host first and the others a little behind.
-    w.send({ ...p, held: false, playing: true, position: v.currentTime, startIn: START_IN });
+    // The host's moment, a second ahead: each guest plays at it (read on its own clock).
+    w.send({ ...p, held: false, playing: true, position: v.currentTime, startIn: START_IN, startAt: Date.now() + START_IN });
     startsAt = performance.now() + START_IN;
     appliedAt = startsAt;
     clearTimeout(startTimer);
