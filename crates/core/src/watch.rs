@@ -263,6 +263,10 @@ pub struct PlayState {
     /// plays it once they all have. Nobody else's play starts it meanwhile.
     #[serde(default)]
     pub held: bool,
+    /// A counted start (the release after a hold): play this many ms after the host sent it, so
+    /// every device starts together (each takes off the time the message took to reach it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_in: Option<u32>,
 }
 
 /// Whether someone can play the room's episode, and with what.
@@ -1591,9 +1595,9 @@ async fn serve_guest(connection: Connection, host: Arc<Mutex<HostState>>) -> Res
         }
         if room {
             h.fresh = false;
-            // A newcomer starts where the room is.
+            // A newcomer starts where the room is (not counting down from an earlier start).
             if let Some(state) = &h.state {
-                let _ = tx.send(Msg::State(state.clone()));
+                let _ = tx.send(Msg::State(PlayState { start_in: None, ..state.clone() }));
             }
             h.guests.push(Guest {
                 id,
@@ -1795,6 +1799,7 @@ mod tests {
             }),
             subs: Some("en".into()),
             held: false,
+            start_in: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""t":"state""#), "{json}");
@@ -1858,7 +1863,19 @@ mod tests {
     }
 
     fn play(position: f64, playing: bool) -> PlayState {
-        PlayState { media_id: 1, episode: 2.0, title: String::new(), dub: false, position, playing, by: String::new(), source: None, subs: None, held: false }
+        PlayState {
+            media_id: 1,
+            episode: 2.0,
+            title: String::new(),
+            dub: false,
+            position,
+            playing,
+            by: String::new(),
+            source: None,
+            subs: None,
+            held: false,
+            start_in: None,
+        }
     }
 
     /// Real network (iroh's relays): `cargo test -p banime-core -- --ignored live_room`.

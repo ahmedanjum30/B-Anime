@@ -384,6 +384,8 @@ export interface PlayState {
   subs?: string | null;
   /** Held at the start after a switch, until everyone has loaded it (the host then plays it). */
   held?: boolean;
+  /** A counted start: play this many ms after the host sent it (everyone starts together). */
+  startIn?: number | null;
 }
 
 export interface RoomMember {

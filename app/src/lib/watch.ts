@@ -419,6 +419,8 @@ export const watchStore = createRoot(() => {
 const JUMP = 3;
 /** Smaller differences than this are left alone. */
 const CLOSE_ENOUGH = 0.3;
+/** A counted start plays this long after the host sends it: time for it to reach everyone. */
+const START_IN = 800;
 /** Copies of an episode this many seconds apart in length are different cuts: they don't line up,
  *  so a held start waits for everyone to have the host's copy. */
 const LENGTH_SLACK = 2;
@@ -611,12 +613,32 @@ export function syncPlayer(opts: {
   };
   onCleanup(() => clearTimeout(catchUp));
 
+  /** A counted start (see release): when it plays, and its timer. */
+  let startsAt = 0;
+  let startTimer: number | undefined;
+  onCleanup(() => clearTimeout(startTimer));
   const apply = (s: RemoteState) => {
     const v = opts.video();
     if (!v) return;
     // Each word from the room replaces the last one's catching up.
     clearTimeout(catchUp);
     catchUp = undefined;
+    clearTimeout(startTimer);
+    // A counted start: at its position, paused, then playing at the moment everyone does (the
+    // message took about half this device's ping to arrive).
+    if (s.startIn && s.playing && !s.held && v.readyState >= 1) {
+      const ping = w.me()?.rttMs ?? 0;
+      const wait = Math.max(0, s.startIn - ping / 2 - (performance.now() - s.at));
+      pending = null;
+      joined = true;
+      appliedAt = performance.now() + wait;
+      startsAt = appliedAt;
+      v.playbackRate = 1;
+      if (Math.abs(v.currentTime - s.position) > CLOSE_ENOUGH) selfSeek(v, Math.max(0, s.position));
+      selfPause(v);
+      startTimer = window.setTimeout(() => selfPlay(v), wait);
+      return;
+    }
     if (s.held) s = { ...s, playing: false };
     if (v.readyState < 1) {
       pending = s;
@@ -752,8 +774,13 @@ export function syncPlayer(opts: {
     const v = opts.video();
     const p = w.nowPlaying();
     if (!v || !p?.held) return;
-    w.send({ ...p, held: false, playing: true, position: v.currentTime });
-    selfPlay(v);
+    // A counted start: everyone plays at the same moment (each guest takes off the time the
+    // message took to reach it), instead of the host first and the others a little behind.
+    w.send({ ...p, held: false, playing: true, position: v.currentTime, startIn: START_IN });
+    startsAt = performance.now() + START_IN;
+    appliedAt = startsAt;
+    clearTimeout(startTimer);
+    startTimer = window.setTimeout(() => selfPlay(v), START_IN);
     if (late.length) homeStore.notify(`Started without waiting for ${late.join(", ")}.`);
   };
   createEffect(
@@ -850,7 +877,7 @@ export function syncPlayer(opts: {
     const v = opts.video();
     const s = current();
     const p = w.nowPlaying();
-    if (!v || !s || !p || !w.room()?.host || !w.started() || p.held) return false;
+    if (!v || !s || !p || !w.room()?.host || !w.started() || p.held || performance.now() < startsAt + 500) return false;
     if (p.mediaId !== opts.mediaId() || p.episode !== opts.episode()) return false;
     // This viewer's own play or pause is on its way to the room: it's the room's new state.
     if (own && performance.now() - own.at < 1500) return false;

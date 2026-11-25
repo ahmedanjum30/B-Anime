@@ -38,6 +38,7 @@ one line each, written for users (see CLAUDE.md).
 - In the player, the room opens over the episode, which keeps playing.
 - In a room, episodes start where the room is, not from your own saved spot.
 - Start waits until everyone's player has loaded the episode, so everyone begins together; only the host can start without waiting.
+- Everyone's episode starts at the same moment, instead of the others a little behind the host.
 - The host switches the room to another show or episode in one click; it plays once everyone has loaded it.
 - Leaving the player no longer pauses the room, and a bar takes you back to the episode.
 - Your last room stays listed on the Together page while you're in a room.
