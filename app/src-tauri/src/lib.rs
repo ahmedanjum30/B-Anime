@@ -631,6 +631,10 @@ pub fn run() {
             auth::use_token_file(paths.root.join("anilist-token"));
             #[cfg(desktop)]
             let paths = AppPaths::resolve(None)?;
+            // Nor the Mac's Keychain: the app is signed ad hoc, so each update is a new signature
+            // to macOS, which then asked for the user's password before B-Anime could read it.
+            #[cfg(target_os = "macos")]
+            auth::use_token_file(paths.root.join("anilist-token"));
             paths.ensure()?;
             tracing::info!(data_dir = %paths.root.display(), version = %app.package_info().version, "starting B-Anime");
             let db = tauri::async_runtime::block_on(db::open(&paths.db))?;

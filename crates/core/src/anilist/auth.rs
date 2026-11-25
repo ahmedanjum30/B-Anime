@@ -3,12 +3,13 @@
 //! Flow: we listen on a fixed loopback port, open the browser at AniList's authorize page, and
 //! AniList redirects to `http://127.0.0.1:<port>/callback#access_token=...`. The fragment never
 //! reaches a server, so the callback page posts it back to us from the browser. The token (valid
-//! for a year) goes to the OS credential store (Windows Credential Manager, macOS Keychain,
-//! Secret Service on Linux), never to disk in plain text.
+//! for a year) goes to the OS credential store (Windows Credential Manager, Secret Service on
+//! Linux), never to disk in plain text.
 //!
 //! Android has no credential store the `keyring` crate can use, so there the app names a token
 //! file in its private storage ([`use_token_file`]), which the Android sandbox keeps from other
-//! apps.
+//! apps. The Mac does the same (an owner-only file in B-Anime's data folder): its app is signed ad
+//! hoc, so the Keychain took each update for a different app and asked for the user's password.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -51,7 +52,7 @@ pub fn authorize_url(client_id: &str) -> String {
     format!("https://anilist.co/api/v2/oauth/authorize?client_id={client_id}&response_type=token")
 }
 
-/// Set on platforms without a usable credential store (Android): the token lives in this file.
+/// Set where the credential store isn't used (Android, the Mac): the token lives in this file.
 static TOKEN_FILE: OnceLock<PathBuf> = OnceLock::new();
 
 /// Keep the token in `path` (inside the app's private storage) instead of the OS credential

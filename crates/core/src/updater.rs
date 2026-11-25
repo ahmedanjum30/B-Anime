@@ -472,8 +472,15 @@ mod tests {
     }
 
     #[test]
-    fn desktop_installs_the_setup() {
-        assert_eq!(asset_name("0.3.0"), "B-Anime-Setup-0.3.0.exe");
+    fn each_platform_installs_its_file() {
+        let want = if cfg!(target_os = "android") {
+            "B-Anime-0.3.0-arm64.apk"
+        } else if cfg!(target_os = "macos") {
+            "B-Anime-0.3.0-macos.zip"
+        } else {
+            "B-Anime-Setup-0.3.0.exe"
+        };
+        assert_eq!(asset_name("0.3.0"), want);
     }
 
     #[test]

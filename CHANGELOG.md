@@ -43,6 +43,7 @@ one line each, written for users (see CLAUDE.md).
 
 ### Fixed
 - On the Mac, videos show their picture instead of a black screen.
+- On the Mac, B-Anime no longer asks for your password to reach the Keychain (sign in to AniList once more).
 - Watch together on a show's page no longer stops what the room is watching; it takes you back to the episode.
 - The People list shows each person's real ping.
 - Someone left alone hosting a room after everyone else left now ends it, and rejoining finds a room's host in seconds.
