@@ -177,17 +177,20 @@ export default function Player(props: { behind: boolean }) {
   };
   const item = () => source.byNumber().get(episode());
   const [localEps] = createResource(() => (local() ? mediaId() : null), localEpisodes);
-  type Key = { local: true; id: number; ep: number } | { local: false; ext: string; id: string };
-  const [stream] = createResource<Stream, Key>(
-    (): Key | null => {
-      if (local()) return { local: true, id: mediaId(), ep: episode() };
-      // In a room, not before the show is the one the host matched on this source: loading this
-      // device's own match first (another season, say) and then the host's started it twice.
-      if (roomMatchPending()) return null;
-      return item() && source.ext() ? { local: false, ext: source.ext()!, id: item()!.id } : null;
-    },
-    (k) => (k.local ? localStream(k.id, k.ep) : getStream(k.ext, k.id)),
-  );
+  // Which stream to load, as a string: it changes only when the stream should (the copy, the
+  // source, the episode). An object made afresh on every update of what it reads (the room's
+  // state, every 2 s) counted as a new stream each time: it reloaded from 0:00 every 2 s.
+  const streamKey = createMemo<string | null>(() => {
+    if (local()) return `L\u0000${mediaId()}\u0000${episode()}`;
+    // In a room, not before the show is the one the host matched on this source: loading this
+    // device's own match first (another season, say) and then the host's started it twice.
+    if (roomMatchPending()) return null;
+    return item() && source.ext() ? `S\u0000${source.ext()}\u0000${item()!.id}` : null;
+  });
+  const [stream] = createResource<Stream, string>(streamKey, (k) => {
+    const [kind, a, b] = k.split("\u0000");
+    return kind === "L" ? localStream(Number(a), Number(b)) : getStream(a, b);
+  });
   const [players] = createResource(externalPlayers);
 
   /** Episodes to switch to from the player: the library's files, or what the source lists. */
