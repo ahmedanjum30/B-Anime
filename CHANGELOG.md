@@ -65,7 +65,6 @@ one line each, written for users (see CLAUDE.md).
 - An episode in your library plays from it in a room, instead of from a source.
 - The player's header keeps its layout with long episode titles and on phones.
 - On Android, online episodes show their skip intro and ending markers and buttons again.
-- Episodes from a different release (a Blu-ray file a little longer or shorter than the TV version) get skip markers too.
 
 ## [0.4.5] - 2026-11-24
 
