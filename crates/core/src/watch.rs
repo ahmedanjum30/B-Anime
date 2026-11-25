@@ -539,7 +539,8 @@ struct HostState {
     roster_due: bool,
     /// Guests whose connection was lost (they didn't leave), while they may come back.
     dropped: Vec<DroppedGuest>,
-    /// Opened here as a new room and nobody has joined yet: a returning guest's room wins.
+    /// Reopened here by its host (Rejoin, nobody else hosting) and nobody has joined yet: a
+    /// returning guest's place wins. Never for a new room (Start a room), which keeps its lobby.
     fresh: bool,
     /// Guests whose connection was lost lately (id, code, when), in the lobby too: where this
     /// host looks for the room, should it turn out to be the one that was cut off.
@@ -907,12 +908,15 @@ impl Room {
         let (to_host, _) = mpsc::unbounded_channel();
         let shared = Shared::new(endpoint, seed, name, events, Role::Guest { to_host, code: String::new() });
         shared.become_host(true);
-        if let Some(room_name) = room_name.filter(|n| !clean_name(n).is_empty()) {
-            if let Some(host) = shared.host_state() {
-                if let Ok(mut h) = host.lock() {
+        if let Some(host) = shared.host_state() {
+            if let Ok(mut h) = host.lock() {
+                // A new room starts in its lobby: a guest coming back from an earlier room (same
+                // code: it's this device's) joins it as it is, rather than carrying that room on.
+                h.fresh = false;
+                if let Some(room_name) = room_name.filter(|n| !clean_name(n).is_empty()) {
                     h.room_name = clean_name(&room_name);
-                    h.announce();
                 }
+                h.announce();
             }
         }
         tracing::info!(addrs = ?shared.endpoint.addr().addrs, "watch: room open");
@@ -1867,7 +1871,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_room_reopened_carries_on_from_a_returning_guest() {
-        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
+        // Rejoin on a room it hosted, with nobody else to find: the host reopens it.
+        let (host, mut host_events) = Room::rejoin(&[], "Host".into(), None, None, true).await.unwrap();
+        assert!(host.is_host());
         let so_far = RoomSoFar { state: play(120.0, true), started: true, name: "Movie night".into() };
         let (guest, _guest_events) =
             Room::rejoin(&[host.info().code], "Guest".into(), None, Some(so_far), false).await.unwrap();
@@ -1882,6 +1888,27 @@ mod tests {
             _ => None,
         })
         .await;
+        guest.leave(false).await;
+        host.leave(true).await;
+    }
+
+    /// Real network: a new room (Start a room) keeps its lobby when a guest comes back from an
+    /// earlier room under the same code: it doesn't start playing that room's episode.
+    #[tokio::test]
+    #[ignore]
+    async fn live_room_new_room_ignores_an_old_rooms_place() {
+        let (host, mut host_events) = Room::host("Host".into(), None, None).await.unwrap();
+        let so_far = RoomSoFar { state: play(120.0, true), started: true, name: "Old room".into() };
+        let (guest, _guest_events) =
+            Room::rejoin(&[host.info().code], "Guest".into(), None, Some(so_far), false).await.unwrap();
+        let roster = until(&mut host_events, |e| match e {
+            RoomEvent::Roster(r) if r.members.len() == 2 => Some(r),
+            RoomEvent::State(s) => panic!("the new room took the old room's state: {s:?}"),
+            _ => None,
+        })
+        .await;
+        assert!(!roster.started, "still in the lobby");
+        assert_ne!(roster.name, "Old room");
         guest.leave(false).await;
         host.leave(true).await;
     }

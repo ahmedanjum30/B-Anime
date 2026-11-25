@@ -49,6 +49,7 @@ one line each, written for users (see CLAUDE.md).
 - A guest's pause no longer gets lost, or undone a moment later, when it lands just after a room update.
 - Coming back to the app as host no longer takes everyone back to where you left.
 - A host who reopens their room carries on from where everyone else is.
+- A new room starts in its lobby even when someone comes back to it from an earlier room.
 - When the host leaves, the room stays paused with its new host until someone presses play.
 - Someone whose connection drops gets back into the room instead of ending up alone in a room of their own.
 - A host whose connection dropped while a guest took over gets back into the room as a guest.
