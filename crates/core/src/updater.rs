@@ -1,10 +1,12 @@
 //! Self-update from GitHub Releases.
 //!
 //! A release carries the B-Installer setup (`B-Anime-Setup-<version>.exe`), the Android APK
-//! (`B-Anime-<version>-arm64.apk`) and `SHA256SUMS.txt` covering both. Each platform picks its own
-//! file. It's downloaded only from GitHub's own hosts and its SHA-256 must match the checksum file.
-//! Windows then runs the setup silently with `/UPDATE=1` (the installer closes B-Anime, replaces
-//! it, and starts it again); Android hands the APK to the system installer (the app does that).
+//! (`B-Anime-<version>-arm64.apk`), the Mac app (`B-Anime-<version>-macos.zip`) and
+//! `SHA256SUMS.txt` covering them. Each platform picks its own file. It's downloaded only from
+//! GitHub's own hosts and its SHA-256 must match the checksum file. Windows then runs the setup
+//! silently with `/UPDATE=1` (the installer closes B-Anime, replaces it, and starts it again);
+//! Android hands the APK to the system installer (the app does that); the Mac swaps its app for
+//! the zip's once it has quit, and opens it again.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -115,6 +117,8 @@ fn trusted(url: &reqwest::Url) -> bool {
 pub fn asset_name(version: &str) -> String {
     if cfg!(target_os = "android") {
         format!("B-Anime-{version}-arm64.apk")
+    } else if cfg!(target_os = "macos") {
+        format!("B-Anime-{version}-macos.zip")
     } else {
         format!("B-Anime-Setup-{version}.exe")
     }
@@ -255,11 +259,12 @@ pub async fn download(update: &Update, dir: &Path) -> Result<PathBuf> {
     Ok(target)
 }
 
-/// The version in an update file's name (the setup or the APK), if it's one of ours.
+/// The version in an update file's name (the setup, the APK or the Mac app), if it's one of ours.
 fn version_in(name: &str) -> Option<&str> {
     name.strip_prefix("B-Anime-Setup-")
         .and_then(|r| r.strip_suffix(".exe"))
         .or_else(|| name.strip_prefix("B-Anime-").and_then(|r| r.strip_suffix("-arm64.apk")))
+        .or_else(|| name.strip_prefix("B-Anime-").and_then(|r| r.strip_suffix("-macos.zip")))
 }
 
 /// Deletes downloaded updates that are already installed (not newer than `current`), unfinished
@@ -303,12 +308,64 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Starts the verified setup silently in update mode. The caller should exit right after.
+#[cfg(windows)]
 pub fn launch_installer(setup: &Path) -> Result<()> {
     std::process::Command::new(setup)
         .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"])
         .spawn()
         .map(|_| ())
         .map_err(|e| Error::Config(format!("couldn't start the installer: {e}")))
+}
+
+/// What replaces the Mac app: waits for B-Anime ($1, its process) to quit, unpacks the verified
+/// zip ($2) and puts its B-Anime.app where the running one ($3) is, then opens it. The old app
+/// stays aside until the new one is in place, and goes back if it can't be (a folder this user
+/// can't write to, say): either way B-Anime opens again.
+#[cfg(target_os = "macos")]
+const SWAP_APP: &str = r#"
+pid=$1; zip=$2; app=$3
+n=0
+while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 150 ]; do sleep 0.2; n=$((n + 1)); done
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/banime-update.XXXXXX") || { open "$app"; exit 1; }
+if /usr/bin/ditto -x -k "$zip" "$tmp" && [ -d "$tmp/B-Anime.app" ]; then
+  /usr/bin/xattr -dr com.apple.quarantine "$tmp/B-Anime.app" 2>/dev/null
+  old="$app.replaced"
+  rm -rf "$old"
+  if mv "$app" "$old"; then
+    if mv "$tmp/B-Anime.app" "$app"; then rm -rf "$old"; else mv "$old" "$app"; fi
+  fi
+fi
+rm -rf "$tmp"
+open "$app"
+"#;
+
+/// Swaps the running app for the verified zip's once this copy has quit, and opens it again.
+/// The caller should exit right after.
+#[cfg(target_os = "macos")]
+pub fn launch_installer(zip: &Path) -> Result<()> {
+    let exe = std::env::current_exe().and_then(|p| p.canonicalize())?;
+    let app = exe
+        .ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+        .ok_or_else(|| Error::Config("B-Anime isn't running from its app, so it can't replace it".into()))?;
+    use std::process::Stdio;
+    std::process::Command::new("/bin/sh")
+        .args(["-c", SWAP_APP, "banime-update"])
+        .arg(std::process::id().to_string())
+        .arg(zip)
+        .arg(app)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| Error::Config(format!("couldn't start the update: {e}")))
+}
+
+/// Android installs through the system installer (the app does that); nothing else is shipped.
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn launch_installer(_setup: &Path) -> Result<()> {
+    Err(Error::Config("this platform has no installer to run".into()))
 }
 
 #[cfg(test)]

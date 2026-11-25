@@ -29,7 +29,8 @@ pub struct Updates {
     checking: tokio::sync::Mutex<()>,
 }
 
-/// Development builds never update themselves. Windows installs the setup; Android the APK.
+/// Development builds never update themselves. Windows installs the setup, Android the APK,
+/// and the Mac swaps in the new app.
 fn enabled() -> bool {
     !cfg!(debug_assertions)
 }
@@ -179,9 +180,10 @@ pub async fn set_update_channel(app: AppHandle, state: tauri::State<'_, AppState
     Ok(status(&app, &state).await)
 }
 
-/// Desktop: runs the verified installer in update mode and quits; the installer relaunches
-/// B-Anime. Android: opens the system installer on the verified APK; Android replaces the app
-/// once the user confirms, so B-Anime keeps running until then.
+/// Windows: runs the verified installer in update mode and quits; the installer relaunches
+/// B-Anime. Mac: quits, and the verified app takes this one's place and opens. Android: opens the
+/// system installer on the verified APK; Android replaces the app once the user confirms, so
+/// B-Anime keeps running until then.
 #[tauri::command]
 pub fn install_update(app: AppHandle) -> Result<(), String> {
     install_now(&app)

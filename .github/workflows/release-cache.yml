@@ -1,5 +1,5 @@
-# Pre-compiles the release builds' dependencies on main (Windows and Android), so release tags
-# don't start from zero.
+# Pre-compiles the release builds' dependencies on main (Windows, Android and the Mac), so
+# release tags don't start from zero.
 #
 # GitHub keeps caches per branch/tag: a run for a new tag can only read caches saved on its own
 # tag or on main. Releases used to find none and compiled every crate from scratch. This saves
@@ -71,6 +71,37 @@ jobs:
       - name: Release build
         working-directory: app
         run: npx tauri build --no-bundle
+
+  # The same for the Mac app (shared key "macos"). Mirrors release.yml's macos job; nothing is
+  # uploaded.
+  warm-macos:
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'Version ') }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust (from rust-toolchain.toml)
+        run: rustup show
+
+      # Must match release.yml's macos rust-cache settings so the key lines up.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build the app
+        run: sh scripts/macos-app.sh
 
   # The same for the Android APK (shared key "android"). Mirrors release.yml's android job up to
   # the build; no signing key needed (an unsigned build compiles the same Rust), nothing uploaded.

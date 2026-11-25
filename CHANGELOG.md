@@ -18,6 +18,7 @@ one line each, written for users (see CLAUDE.md).
 ## [0.4.6]
 
 ### Added
+- B-Anime for Mac (Apple Silicon): install it with Homebrew, and it updates itself.
 - Rejoin your last room, even if someone else took over hosting; closing the app mid-session offers it at the next launch.
 - Rooms have a name (the host's name by default), which the host can change; anyone can rename themselves.
 - A notice says who paused, resumed or jumped.

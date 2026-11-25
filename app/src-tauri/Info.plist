@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The player's video comes through B-Anime's own proxy on this Mac (http://127.0.0.1). -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <!-- Watch together connects straight to people on the same network when it can. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>B-Anime connects directly to the people in your Watch together room when they're on your network.</string>
+</dict>
+</plist>

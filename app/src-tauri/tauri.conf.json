@@ -20,7 +20,8 @@
         "minHeight": 600,
         "backgroundColor": "#191B22",
         "maximized": true,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization --enable-blink-features=AudioVideoTracks --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-media-suspend"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,BackgroundVideoTrackOptimization,BackgroundVideoPauseOptimization --enable-blink-features=AudioVideoTracks --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-media-suspend",
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {
@@ -36,7 +37,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Entertainment",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
   },
   "plugins": {
     "deep-link": {

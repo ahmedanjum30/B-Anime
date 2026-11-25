@@ -38,6 +38,17 @@ pub fn find_player(name: &str) -> Option<PathBuf> {
         }
         _ => return None,
     }
+    // The Mac: Homebrew's folders (an app opened from the Finder doesn't have them on its PATH)
+    // and the apps themselves.
+    if cfg!(target_os = "macos") {
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            candidates.push(PathBuf::from(dir).join(&exe));
+        }
+        candidates.push(PathBuf::from(match name {
+            "mpv" => "/Applications/mpv.app/Contents/MacOS/mpv",
+            _ => "/Applications/VLC.app/Contents/MacOS/VLC",
+        }));
+    }
     candidates.into_iter().find(|p| p.is_file())
 }
 

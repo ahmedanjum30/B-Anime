@@ -1,11 +1,17 @@
-# Builds the Windows installer and the Android APK and publishes a GitHub release when a version
-# tag is pushed (scripts/release.ps1 picks the next version, tags main and pushes the tag).
+# Builds the Windows installer, the Android APK and the Mac app and publishes a GitHub release
+# when a version tag is pushed (scripts/release.ps1 picks the next version, tags main and pushes
+# the tag).
 #
 # The tag is the version: each build writes it into the version files (scripts/set-version.mjs)
 # before building, so releases need no version-bump commits.
 #
 # Installed copies of B-Anime find the release, download their file (the setup on Windows, the
-# APK on Android), check it against SHA256SUMS.txt, and offer to update.
+# APK on Android, the zipped app on a Mac), check it against SHA256SUMS.txt, and offer to update.
+#
+# The Mac app is for Apple Silicon, signed ad hoc (no Apple Developer ID). A stable release also
+# updates its Homebrew cask in ahmedanjum30/homebrew-tap (brew install --cask
+# ahmedanjum30/tap/b-anime), which needs the secret HOMEBREW_TAP_TOKEN (a token that can push to
+# the tap); without it the cask is left as it is.
 #
 # Betas are tags vX.Y.Z-beta.N (scripts/release.ps1 -Beta, from the beta branch). They're
 # published on the beta repository's Releases page (ahmedanjum30/B-Anime-Beta), so this page
@@ -23,13 +29,14 @@
 name: Release
 # "v0.4.5-beta.2" or "v0.4.5".
 run-name: >-
-  ${{ github.event_name != 'push' && 'Android test build' || github.ref_name }}
+  ${{ github.event_name != 'push' && 'Test build (Android and Mac)' || github.ref_name }}
 
 on:
   push:
     tags: ["v*"]
-  # Run by hand on a branch to try the Android build without publishing anything (only the
-  # android job runs; Windows, publish and pages need a version tag).
+  # Run by hand on a branch to try the Android and Mac builds without publishing anything: the
+  # run's artifacts have the APK and the zipped Mac app (Windows, publish and pages need a
+  # version tag).
   workflow_dispatch:
 
 permissions:
@@ -248,9 +255,61 @@ jobs:
           path: dist/B-Anime-${{ env.VERSION }}-arm64.apk
           if-no-files-found: error
 
-  # One release with every platform's file. Windows is required; Android joins when it built.
+  # The Mac app for Apple Silicon (M1 and later), zipped: what Homebrew installs and B-Anime on a
+  # Mac updates from.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag is the version; a manual run on a branch keeps the version in the files.
+      - name: Version from the tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || { echo "Tag $GITHUB_REF_NAME isn't a version like v0.3.1 or v0.3.1-beta.2"; exit 1; }
+          else
+            version=$(jq -r .version app/src-tauri/tauri.conf.json)
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust (from rust-toolchain.toml)
+        run: rustup show
+
+      # Restores the Mac dependencies pre-compiled on main (release-cache.yml's warm-macos). A
+      # tag's own cache could never be reused by the next tag, so it isn't saved.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos
+          save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      # After the Rust cache is restored, so its key doesn't change with every version.
+      - name: Stamp the version
+        run: node scripts/set-version.mjs "$VERSION"
+
+      - name: Build the app
+        run: sh scripts/macos-app.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/B-Anime-${{ env.VERSION }}-macos.zip
+          if-no-files-found: error
+
+  # One release with every platform's file. Windows is required; Android and the Mac join when
+  # they built.
   publish:
-    needs: [windows, android]
+    needs: [windows, android, macos]
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     outputs:
@@ -316,7 +375,15 @@ jobs:
           > **Windows says "Windows protected your PC"?** Click **More info**, then **Run anyway**. B-Anime isn't code-signed yet, so Windows doesn't know the publisher. The installer is the one built by this repository's release workflow; you can check it against `SHA256SUMS.txt`.
 
           **Android:** download **B-Anime-__VERSION__-arm64.apk** below (arm64, for most phones). The first time, your phone asks you to allow installing from this source. Installed copies update themselves.
+
+          **Mac (Apple Silicon):** __MAC__
           EOF
+          # Homebrew has stable versions only; a beta is the zip.
+          zipped="download **B-Anime-$version-macos.zip** below, unzip it and drag the app to Applications; the first time, right-click it and choose **Open**. Installed copies update themselves."
+          if [ "$BETA" = "true" ]; then mac="$zipped"; else mac="\`brew install --cask ahmedanjum30/tap/b-anime\`. Or $zipped"; fi
+          MAC="$mac" perl -pi -e 's/__MAC__/$ENV{MAC}/' notes.md
+          # No Mac app in this release (its build failed): no instructions for it.
+          [ -f "dist/B-Anime-$version-macos.zip" ] || sed -i '/^\*\*Mac (Apple Silicon):/d' notes.md
           sed -i "s/__VERSION__/$version/g" notes.md
           cat notes.md
 
@@ -330,6 +397,14 @@ jobs:
             files+=("$apk")
           else
             echo "::warning::No Android APK in this release."
+          fi
+          mac="B-Anime-$version-macos.zip"
+          if [ -f "$mac" ]; then
+            [ -z "$(tail -c1 SHA256SUMS.txt)" ] || echo >> SHA256SUMS.txt
+            sha256sum "$mac" >> SHA256SUMS.txt
+            files+=("$mac")
+          else
+            echo "::warning::No Mac app in this release."
           fi
           files+=(SHA256SUMS.txt)
           cat SHA256SUMS.txt
@@ -349,6 +424,38 @@ jobs:
             gh release create "$GITHUB_REF_NAME" "${files[@]}" -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
               --title "$title" --notes-file "$GITHUB_WORKSPACE/notes.md" --generate-notes
           fi
+
+  # The new version's cask goes to the Homebrew tap (ahmedanjum30/homebrew-tap), so
+  # `brew install --cask ahmedanjum30/tap/b-anime` gets it. Stable versions only. Skipped without
+  # the HOMEBREW_TAP_TOKEN secret (a token that can push to the tap), or when the Mac app didn't
+  # build.
+  homebrew:
+    needs: [publish, macos]
+    if: ${{ !contains(github.ref_name, '-beta.') }}
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        if: env.HOMEBREW_TAP_TOKEN != ''
+      - uses: actions/download-artifact@v8
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        with:
+          name: macos
+          path: dist
+      - name: Update the cask
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/ahmedanjum30/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          sh scripts/homebrew-cask.sh "$version" "dist/B-Anime-$version-macos.zip" > tap/Casks/b-anime.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/b-anime.rb
+          git commit -m "b-anime $version"
+          git push
 
   # The website (site/) on GitHub Pages, with this release's downloads at fixed links:
   # https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe and .../B-Anime-arm64.apk
