@@ -16,7 +16,7 @@ export interface PreviewFrame {
 /** How long the pointer rests on a spot before its frame is fetched: a library file reads its
  *  disk at once; a stream loads a piece of video, so a sweep across the bar loads nothing. */
 const REST_FILE = 120;
-const REST_STREAM = 450;
+const REST_STREAM = 300;
 /** Frames within this many seconds of the pointer stand for it (a piece of a stream covers a few). */
 const NEAR = 4;
 /** The preview's video goes this long after the pointer leaves the bar: no memory held meanwhile. */
