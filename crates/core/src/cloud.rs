@@ -271,7 +271,22 @@ impl PendingSignIn {
         if let Some(s) = secret {
             form.push(("client_secret", s));
         }
-        let answer: TokenAnswer = token_call(&form).await?;
+        // The answer arrives while the browser is in front: on a phone, B-Anime is in the
+        // background then and Android may block its network ("error sending request"). Tried
+        // again for up to 2 minutes: coming back to B-Anime lets it through.
+        let began = Instant::now();
+        let answer: TokenAnswer = loop {
+            match token_call(&form).await {
+                Err(Error::Network(e)) if began.elapsed() < Duration::from_secs(120) => {
+                    tracing::debug!(error = %e, "google sign-in: token request failed; trying again");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                other => break other.map_err(|e| match e {
+                    Error::Network(m) => google(m),
+                    e => e,
+                })?,
+            }
+        };
         let refresh = answer
             .refresh_token
             .ok_or_else(|| Error::Login("Google didn't give a lasting sign-in; try again.".into()))?;
@@ -281,8 +296,14 @@ impl PendingSignIn {
     }
 }
 
+/// A network failure talking to Google, said as such (the generic network error names AniList).
+fn google(e: impl std::fmt::Display) -> Error {
+    Error::Login(format!("couldn't reach Google: {e}"))
+}
+
 async fn token_call(form: &[(&str, String)]) -> Result<TokenAnswer> {
     let pairs: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    // A network error stays Error::Network here, so the sign-in can tell it apart and try again.
     let res = post_form(&http()?, TOKEN_URL, &pairs).send().await.map_err(|e| Error::Network(e.to_string()))?;
     let status = res.status();
     if status.as_u16() == 400 || status.as_u16() == 401 {

@@ -92,7 +92,12 @@ async fn sync_now(app: &AppHandle) {
         }
         Err(e) => {
             tracing::warn!(error = %e, "place sync failed");
-            set_error(&state, Some(e.to_string()));
+            // The generic network error names AniList; this one is Google.
+            let text = match e {
+                Error::Network(m) => format!("Couldn't reach Google: {m}"),
+                e => e.to_string(),
+            };
+            set_error(&state, Some(text));
         }
     }
 }
