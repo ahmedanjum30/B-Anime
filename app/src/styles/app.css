@@ -2892,6 +2892,25 @@ a.slot:focus-visible {
   color: rgb(236 184 92);
   font-weight: 600;
 }
+/* With a frame: the picture above the time, in one card. */
+.seek-tip.has-frame {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 3px 4px;
+}
+.seek-frame {
+  display: block;
+  width: 192px;
+  height: auto;
+  border-radius: 3px;
+  background: #000;
+}
+.seek-tip-time {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
 .seek-input,
 .volume-input {
   -webkit-appearance: none;

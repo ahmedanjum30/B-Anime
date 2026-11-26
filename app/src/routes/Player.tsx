@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { playerSlot, targetFromPath, type PlayerTarget } from "../lib/playerSlot";
+import { createSeekPreview } from "../lib/seekPreview";
 import type Hls from "hls.js";
 
 import {
@@ -351,6 +352,7 @@ export default function Player(props: { behind: boolean }) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
     setHover({ x, t: x * duration() });
+    if (duration()) preview.hover(x * duration());
   };
 
   const destroy = () => {
@@ -985,6 +987,20 @@ export default function Player(props: { behind: boolean }) {
 
   // ── Auto-skip: jump over each opening / ending / recap once as playback reaches it.
   // On unless the viewer turned it off.
+  // ── Previews on the timeline: the frame where the pointer rests (PC and Mac).
+  const [previews, setPreviewsSignal] = createSignal(stored("banime.seekpreview", 1) === 1);
+  const setPreviews = (on: boolean) => {
+    setPreviewsSignal(on);
+    store("banime.seekpreview", on ? 1 : 0);
+    if (!on) preview.reset();
+  };
+  const preview = createSeekPreview(() => {
+    const s = stream()?.sources[Math.min(sourceIndex(), (stream()?.sources.length ?? 1) - 1)];
+    return s ? { url: s.url, kind: s.kind } : null;
+  }, previews);
+  // Another episode or server: the kept frames are another video's.
+  createEffect(on([stream, sourceIndex], () => preview.reset(), { defer: true }));
+
   const [autoSkip, setAutoSkipSignal] = createSignal(stored("banime.autoskip", 1) === 1);
   const setAutoSkip = (on: boolean) => {
     setAutoSkipSignal(on);
@@ -1687,7 +1703,7 @@ export default function Player(props: { behind: boolean }) {
       </Show>
 
       <div class="player-controls" onPointerDown={(e) => e.stopPropagation()}>
-        <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => setHover(null)}>
+        <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => { setHover(null); preview.leave(); }}>
           <div class="seek-track" aria-hidden="true">
             <div class="seek-buffered" style={{ width: `${pct(buffered())}%` }} />
             {/* Openings, endings and recaps: amber until played, then red like the rest. */}
@@ -1706,9 +1722,16 @@ export default function Player(props: { behind: boolean }) {
           </div>
           <Show when={hover() && duration() ? hover() : null}>
             {(h) => (
-              <span class="seek-tip num" style={{ left: `clamp(40px, ${h().x * 100}%, calc(100% - 40px))` }}>
-                <Show when={sectionAt(h().t)}>{(s) => <b>{SECTION_NAME[s().kind] ?? "Section"}</b>}</Show>
-                {fmtClock(h().t)}
+              <span
+                class="seek-tip num"
+                classList={{ "has-frame": !!preview.frame() }}
+                style={{ left: `clamp(${preview.frame() ? 104 : 40}px, ${h().x * 100}%, calc(100% - ${preview.frame() ? 104 : 40}px))` }}
+              >
+                <Show when={preview.frame()}>{(f) => <img class="seek-frame" src={f().src} alt="" />}</Show>
+                <span class="seek-tip-time">
+                  <Show when={sectionAt(h().t)}>{(s) => <b>{SECTION_NAME[s().kind] ?? "Section"}</b>}</Show>
+                  {fmtClock(h().t)}
+                </span>
               </span>
             )}
           </Show>
@@ -1904,6 +1927,21 @@ export default function Player(props: { behind: boolean }) {
                       </span>
                       <span class="menu-switch" aria-hidden="true" />
                     </button>
+                    <Show when={!onAndroid}>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        class="menu-toggle"
+                        aria-checked={previews()}
+                        onClick={() => setPreviews(!previews())}
+                      >
+                        <span>
+                          Timeline previews
+                          <span class="menu-sub">{local() ? "A frame where you point" : "Loads a small piece where you point"}</span>
+                        </span>
+                        <span class="menu-switch" aria-hidden="true" />
+                      </button>
+                    </Show>
                     {/* Phones: here rather than its own button, so the control bar fits held upright. */}
                     <Show when={onAndroid}>
                       <button type="button" role="menuitem" onClick={() => { setMenu(null); togglePip(); }}>
