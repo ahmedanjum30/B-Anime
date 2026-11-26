@@ -17,13 +17,14 @@ export default function Home() {
   const navigate = useNavigate();
   const [prefs] = createResource(() => (inTauri ? getPlayerPrefs() : Promise.resolve(null)));
 
-  // Your place on every device: offered under Up next (where it pays off) until it's on or
-  // you say "Not now", which is for good on this device. The browser preview shows it.
-  const PLACES_NUDGE = "banime.placesNudge";
+  // Your place on every device: offered under Up next (where it pays off) until it's on.
+  // "Not now" puts it away for 3 days on this device. The browser preview shows it.
+  const PLACES_NUDGE = "banime.placesNudgeUntil";
+  const PLACES_AGAIN_AFTER = 3 * 24 * 60 * 60 * 1000;
   const [placesDismissed, setPlacesDismissed] = createSignal(
     (() => {
       try {
-        return localStorage.getItem(PLACES_NUDGE) === "no";
+        return Date.now() < Number(localStorage.getItem(PLACES_NUDGE) ?? 0);
       } catch {
         return false;
       }
@@ -37,7 +38,7 @@ export default function Home() {
   const dismissPlaces = () => {
     setPlacesDismissed(true);
     try {
-      localStorage.setItem(PLACES_NUDGE, "no");
+      localStorage.setItem(PLACES_NUDGE, String(Date.now() + PLACES_AGAIN_AFTER));
     } catch {
       // Not kept: it shows again next time.
     }
