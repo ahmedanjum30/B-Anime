@@ -346,6 +346,11 @@ export default function Player(props: { behind: boolean }) {
   const [countdown, setCountdown] = createSignal<number | null>(null);
   /** Pointer over the timeline: where (0..1) and which time it points at. */
   const [hover, setHover] = createSignal<{ x: number; t: number } | null>(null);
+  /** Dragging the timeline: where it's held (s). The video moves there only on release, so
+   *  dragging across it doesn't load every spot on the way. */
+  const [scrub, setScrub] = createSignal<number | null>(null);
+  /** The time the bar and the clock show: where it's dragged to, else where it plays. */
+  const shownTime = () => scrub() ?? time();
   const pct = (t: number) => (duration() ? Math.min(100, Math.max(0, (t / duration()) * 100)) : 0);
   const sectionAt = (t: number) => skips().find((s) => t >= s.start && t < s.end);
   const onSeekHover = (e: PointerEvent) => {
@@ -1722,7 +1727,7 @@ export default function Player(props: { behind: boolean }) {
             <For each={skips()}>
               {(s) => <div class="seek-chapter" style={{ left: `${pct(s.start)}%`, width: `${pct(s.end) - pct(s.start)}%` }} />}
             </For>
-            <div class="seek-played" style={{ width: `${pct(time())}%` }} />
+            <div class="seek-played" style={{ width: `${pct(shownTime())}%` }} />
             <For each={skips()}>
               {(s) => (
                 <>
@@ -1765,12 +1770,29 @@ export default function Player(props: { behind: boolean }) {
             min="0"
             max={duration() || 0}
             step="0.1"
-            value={time()}
+            value={shownTime()}
             aria-label="Seek"
-            aria-valuetext={`${fmtClock(time())} of ${fmtClock(duration())}`}
+            aria-valuetext={`${fmtClock(shownTime())} of ${fmtClock(duration())}`}
+            // While held: only the bar, the time and the preview follow. On release the video goes
+            // there (change fires once, on release; and per press with the arrow keys).
             onInput={(e) => {
-              if (together.mayMoveTimeline()) video.currentTime = Number(e.currentTarget.value);
-              else e.currentTarget.value = String(video.currentTime);
+              if (!together.mayMoveTimeline()) {
+                e.currentTarget.value = String(video.currentTime);
+                return;
+              }
+              const t = Number(e.currentTarget.value);
+              setScrub(t);
+              if (duration()) {
+                setHover({ x: t / duration(), t });
+                preview.hover(t);
+              }
+            }}
+            onChange={(e) => {
+              const t = scrub() ?? Number(e.currentTarget.value);
+              setScrub(null);
+              // A finger lifted: its time tip goes (a mouse keeps it while it's over the bar).
+              if (!matchMedia("(hover: hover)").matches) setHover(null);
+              if (together.mayMoveTimeline()) video.currentTime = t;
             }}
           />
         </div>
@@ -1806,7 +1828,7 @@ export default function Player(props: { behind: boolean }) {
               />
             </div>
             <span class="player-time num">
-              {fmtClock(time())} / {fmtClock(duration())}
+              {fmtClock(shownTime())} / {fmtClock(duration())}
             </span>
           </div>
 

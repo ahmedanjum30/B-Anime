@@ -22,6 +22,7 @@ one line each, written for users (see CLAUDE.md).
 
 ### Fixed
 - The player's controls stay up while the mouse is on them.
+- Dragging the timeline moves the video only when you let go, instead of loading every spot on the way.
 
 ## [0.4.7] - 2026-11-26
 
