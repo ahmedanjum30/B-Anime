@@ -2906,6 +2906,11 @@ a.slot:focus-visible {
   border-radius: 3px;
   background: #000;
 }
+.seek-frame-wait {
+  display: grid;
+  place-items: center;
+  background: rgb(255 255 255 / 0.06);
+}
 .seek-tip-time {
   display: inline-flex;
   gap: 6px;

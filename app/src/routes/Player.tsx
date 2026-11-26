@@ -1736,10 +1736,22 @@ export default function Player(props: { behind: boolean }) {
             {(h) => (
               <span
                 class="seek-tip num"
-                classList={{ "has-frame": !!preview.frame() }}
-                style={{ left: `clamp(${preview.frame() ? 104 : 40}px, ${h().x * 100}%, calc(100% - ${preview.frame() ? 104 : 40}px))` }}
+                classList={{ "has-frame": preview.active() }}
+                style={{ left: `clamp(${preview.active() ? 104 : 40}px, ${h().x * 100}%, calc(100% - ${preview.active() ? 104 : 40}px))` }}
               >
-                <Show when={preview.frame()}>{(f) => <img class="seek-frame" src={f().src} alt="" />}</Show>
+                {/* The box shows at once; the frame fills it when it's in (loading meanwhile). */}
+                <Show when={preview.active()}>
+                  <Show
+                    when={preview.frame()}
+                    fallback={
+                      <span class="seek-frame seek-frame-wait" style={{ "aspect-ratio": String(preview.aspect()) }} role="status" aria-label="Loading the preview">
+                        <i class="spin-dot" aria-hidden="true" />
+                      </span>
+                    }
+                  >
+                    {(f) => <img class="seek-frame" src={f().src} alt="" style={{ "aspect-ratio": String(preview.aspect()) }} />}
+                  </Show>
+                </Show>
                 <span class="seek-tip-time">
                   <Show when={sectionAt(h().t)}>{(s) => <b>{SECTION_NAME[s().kind] ?? "Section"}</b>}</Show>
                   {fmtClock(h().t)}

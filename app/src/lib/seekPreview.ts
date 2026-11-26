@@ -16,7 +16,7 @@ export interface PreviewFrame {
 /** How long the pointer rests on a spot before its frame is fetched: a library file reads its
  *  disk at once; a stream loads a piece of video, so a sweep across the bar loads nothing. */
 const REST_FILE = 120;
-const REST_STREAM = 300;
+const REST_STREAM = 200;
 /** Frames within this many seconds of the pointer stand for it (a piece of a stream covers a few). */
 const NEAR = 4;
 /** The preview's video goes this long after the pointer leaves the bar: no memory held meanwhile. */
@@ -33,12 +33,18 @@ const WIDTH = 192;
  */
 export function createSeekPreview(source: () => PreviewSource | null, enabled: () => boolean) {
   const [frame, setFrame] = createSignal<PreviewFrame | null>(null);
+  /** The pointer is on the bar with previews on: the box shows at once (loading until a frame). */
+  const [active, setActive] = createSignal(false);
+  /** The last frame's shape (width / height), so the box keeps it while the next one loads. */
+  const [aspect, setAspect] = createSignal(16 / 9);
   const kept = new Map<number, PreviewFrame>();
   let video: HTMLVideoElement | null = null;
   let hls: Hls | null = null;
   let loadedUrl = "";
   let want: number | null = null;
   let restTimer: number | undefined;
+  /** This video can't give frames (see grab): the box stays away until another one plays. */
+  let failed = false;
   let releaseTimer: number | undefined;
   const canvas = document.createElement("canvas");
 
@@ -79,10 +85,13 @@ export function createSeekPreview(source: () => PreviewSource | null, enabled: (
     try {
       g.drawImage(v, 0, 0, canvas.width, canvas.height);
       const f = { t: v.currentTime, src: canvas.toDataURL("image/jpeg", 0.72) };
+      setAspect(canvas.width / canvas.height);
       keep(f);
       if (want !== null && Math.abs(want - f.t) <= NEAR) setFrame(f);
     } catch {
-      /* a video the page can't read back: no preview */
+      // A video the page can't read back: no preview for it (no box loading forever).
+      failed = true;
+      setActive(false);
     }
     // A stream stops loading once it has the frame (no buffering ahead in the background).
     hls?.stopLoad();
@@ -136,11 +145,15 @@ export function createSeekPreview(source: () => PreviewSource | null, enabled: (
   };
 
   return {
-    /** The frame to show for the pointer's spot (or none yet). */
+    /** The frame to show for the pointer's spot (or none yet: loading). */
     frame,
+    /** Whether the preview box shows (the pointer on the bar, previews on). */
+    active,
+    aspect,
     /** The pointer is over `t` on the timeline. */
     hover(t: number) {
-      if (!enabled() || !matchMedia("(hover: hover)").matches) return;
+      if (failed || !enabled() || !matchMedia("(hover: hover)").matches) return setActive(false);
+      setActive(true);
       clearTimeout(releaseTimer);
       want = t;
       const near = nearest(t);
@@ -155,13 +168,16 @@ export function createSeekPreview(source: () => PreviewSource | null, enabled: (
       want = null;
       clearTimeout(restTimer);
       setFrame(null);
+      setActive(false);
       clearTimeout(releaseTimer);
       releaseTimer = window.setTimeout(release, RELEASE_AFTER);
     },
     /** Another episode or source: what's kept is another video's. */
     reset() {
+      failed = false;
       kept.clear();
       setFrame(null);
+      setActive(false);
       release();
     },
   };
