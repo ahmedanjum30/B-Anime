@@ -477,7 +477,7 @@ function PlaybackPrefs() {
   const note = () =>
     ({
       builtin: "Plays inside B-Anime. Some MKV files need MPV.",
-      mpv: "Plays every format. Progress syncs to AniList when you're 80% through.",
+      mpv: "Plays every format. Progress syncs to AniList when you're 85% through.",
       vlc: "Plays every format. Progress isn't tracked; mark episodes watched yourself.",
     })[prefs()?.player ?? "builtin"];
 

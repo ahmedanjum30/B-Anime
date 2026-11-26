@@ -21,6 +21,9 @@ one line each, written for users (see CLAUDE.md).
 - Hover over the timeline to see the frame at that spot (PC and Mac; online episodes load just that bit).
 - Sign in with Google to pick up each show where you left it on any of your devices.
 
+### Changed
+- An episode counts as watched at 85% (was 80%), and only once you've actually watched at least half of it, not jumped to the end.
+
 ### Fixed
 - The player's controls stay up while the mouse is on them.
 - Dragging the timeline moves the video only when you let go, instead of loading every spot on the way.

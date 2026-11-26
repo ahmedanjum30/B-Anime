@@ -25,7 +25,9 @@ import Together from "./Together";
 import type { SkipTime } from "../lib/types";
 
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
-const WATCHED_AT = 0.8;
+const WATCHED_AT = 0.85;
+/** And at least this share of it actually played (not jumped or dragged over). */
+const PLAYED_AT = 0.5;
 const AUTO_NEXT_SECONDS = 8;
 /** A stream that hasn't delivered any video by then gets an error instead of an endless spinner. */
 const STALL_SECONDS = 30;
@@ -854,7 +856,7 @@ export default function Player(props: { behind: boolean }) {
   const currentAudio = () => stream()?.sources[sourceIndex()]?.audio ?? null;
   const audioName = (code: string | null) => (code === "ja" ? "Japanese" : code === "en" ? "English" : code ?? "Unknown");
 
-  // ── Resume, position saving, watched-at-80%, skip times
+  // ── Resume, position saving, watched-at-85%, skip times
   let resumed = false;
   /** The saved position this episode resumed from (also keeps auto-skip off sections before it). */
   let resumeAt: number | null = null;
@@ -863,6 +865,10 @@ export default function Player(props: { behind: boolean }) {
   /** Where a server switch left off; the new server's video starts there. */
   let switchedAt: number | null = null;
   let marked = false;
+  /** Seconds of this episode actually played (normal playback; jumps and drags add nothing).
+   *  A resumed episode starts with what was played before the saved spot. */
+  let played = 0;
+  let lastTick: number | null = null;
   let lastSave = 0;
   /** The saved position to start this episode at, looked up once per episode. */
   const resumePoint = async () => {
@@ -888,6 +894,8 @@ export default function Player(props: { behind: boolean }) {
     resumeAt = null;
     resumePending = false;
     marked = false;
+    played = 0;
+    lastTick = null;
     setSkips([]);
     skipsFor = "";
     setCountdown(null);
@@ -962,7 +970,7 @@ export default function Player(props: { behind: boolean }) {
     });
 
   /**
-   * When the episode counts as watched (seconds): 80% of the way through, and when the episode's
+   * When the episode counts as watched (seconds): 85% of the way through, and when the episode's
    * ending is known, not before the ending starts either (both must be reached), so stopping
    * just short of the credits doesn't count. Auto-skipping the ending passes its start too.
    */
@@ -975,13 +983,20 @@ export default function Player(props: { behind: boolean }) {
   const onTime = () => {
     const t = video.currentTime;
     setTime(t);
+    // Playback moves a fraction of a second per update; a jump moves more, and isn't watching.
+    if (lastTick !== null && !video.paused) {
+      const step = t - lastTick;
+      if (step > 0 && step < 2) played += step;
+    }
+    lastTick = t;
     const b = video.buffered;
     for (let i = 0; i < b.length; i++) if (b.start(i) <= t && t <= b.end(i)) setBuffered(b.end(i));
     if (performance.now() - lastSave > 10_000) {
       lastSave = performance.now();
       persist();
     }
-    if (!marked && duration() > 0 && t >= watchedAt()) {
+    // Reached the end region, and watched most of it: dragging to the end doesn't count.
+    if (!marked && duration() > 0 && t >= watchedAt() && played + (resumeAt ?? 0) >= duration() * PLAYED_AT) {
       marked = true;
       void markWatched();
     }
@@ -1277,7 +1292,7 @@ export default function Player(props: { behind: boolean }) {
       });
       notify(
         player === "mpv"
-          ? "Opened in MPV. Progress syncs to AniList when you're 80% through."
+          ? "Opened in MPV. Progress syncs to AniList when you're 85% through."
           : "Opened in VLC. Progress isn't tracked there.",
       );
     } catch (e) {

@@ -19,7 +19,7 @@ export const savePosition = (mediaId: number, episode: number, position: number,
   call<void>("save_position", { mediaId, episode, position, duration });
 export const getPosition = (mediaId: number, episode: number) => call<number | null>("get_position", { mediaId, episode });
 export const externalPlayers = () => (inTauri ? call<string[]>("external_players") : Promise.resolve([]));
-/** `track` lets MPV report progress back (marks the episode watched at 80%). */
+/** `track` lets MPV report progress back (marks the episode watched at 85%). */
 export const openExternalPlayer = (
   player: string,
   url: string,

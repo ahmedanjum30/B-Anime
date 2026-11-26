@@ -13,7 +13,7 @@ export async function playLibraryEpisode(
   try {
     const { mode } = await playLocal(mediaId, episode);
     if (mode === "builtin") navigate(`/watch/${mediaId}/${episode}?local=1`);
-    else if (mode === "mpv") notify("Playing in MPV. Progress syncs to AniList when you're 80% through.");
+    else if (mode === "mpv") notify("Playing in MPV. Progress syncs to AniList when you're 85% through.");
     else notify("Playing in VLC. Progress isn't tracked there; mark it watched here when you're done.");
   } catch (e) {
     notify(errorText(e));

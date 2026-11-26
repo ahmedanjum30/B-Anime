@@ -12,7 +12,7 @@ use crate::{AppState, LIBRARY_CHANGED, msg};
 
 /// Sent when an external player session marks an episode watched.
 const PLAYER_WATCHED: &str = "player-watched";
-const WATCHED_AT: f64 = 0.8;
+const WATCHED_AT: f64 = 0.85;
 const PLAYER_PREF: &str = "playback.player";
 
 /// MPV or VLC, from PATH or their usual install folders.
@@ -357,7 +357,7 @@ struct Watched {
 }
 
 /// Follows an MPV session: saves the position every few seconds and records the episode as
-/// watched on AniList once 80% has played.
+/// watched on AniList once 85% has played.
 fn spawn_tracker(app: AppHandle, endpoint: String, media_id: i64, episode: i64) {
     tauri::async_runtime::spawn(async move {
         let (tx, mut rx) = tokio::sync::watch::channel((0.0_f64, 0.0_f64));
