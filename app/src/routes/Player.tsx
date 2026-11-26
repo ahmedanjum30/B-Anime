@@ -1258,10 +1258,22 @@ export default function Player(props: { behind: boolean }) {
   // Controls hide after a moment of stillness while playing.
   const [idle, setIdle] = createSignal(false);
   let idleTimer: number | undefined;
+  /** A mouse is over the top bar or the controls: they stay up while it's there. */
+  let overBars = false;
   const wake = () => {
     setIdle(false);
     clearTimeout(idleTimer);
-    idleTimer = window.setTimeout(() => playing() && !menu() && setIdle(true), 2600);
+    idleTimer = window.setTimeout(() => playing() && !menu() && !overBars && setIdle(true), 2600);
+  };
+  const barsEnter = (e: PointerEvent) => {
+    if (e.pointerType !== "mouse") return;
+    overBars = true;
+    wake();
+  };
+  const barsLeave = (e: PointerEvent) => {
+    if (e.pointerType !== "mouse") return;
+    overBars = false;
+    wake(); // the usual few seconds from here
   };
   onCleanup(() => clearTimeout(idleTimer));
   /**
@@ -1542,7 +1554,7 @@ export default function Player(props: { behind: boolean }) {
         </button>
       </Show>
 
-      <header class="player-top">
+      <header class="player-top" onPointerEnter={barsEnter} onPointerLeave={barsLeave}>
         <button type="button" class="back-link player-back" onClick={back} aria-label="Back">
           <ArrowLeft size={16} stroke-width={2} aria-hidden="true" />
           <span class="player-btn-label">Back</span>
@@ -1702,7 +1714,7 @@ export default function Player(props: { behind: boolean }) {
         </div>
       </Show>
 
-      <div class="player-controls" onPointerDown={(e) => e.stopPropagation()}>
+      <div class="player-controls" onPointerDown={(e) => e.stopPropagation()} onPointerEnter={barsEnter} onPointerLeave={barsLeave}>
         <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => { setHover(null); preview.leave(); }}>
           <div class="seek-track" aria-hidden="true">
             <div class="seek-buffered" style={{ width: `${pct(buffered())}%` }} />

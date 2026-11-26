@@ -20,6 +20,9 @@ one line each, written for users (see CLAUDE.md).
 ### Added
 - Hover over the timeline to see the frame at that spot (PC and Mac; online episodes load just that bit).
 
+### Fixed
+- The player's controls stay up while the mouse is on them.
+
 ## [0.4.7] - 2026-11-26
 
 ### Added
