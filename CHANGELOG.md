@@ -24,7 +24,7 @@ one line each, written for users (see CLAUDE.md).
 - Home offers to keep your place on every device under Up next; Not now puts it away for 3 days.
 
 ### Changed
-- An episode counts as watched at 85% (was 80%), and only once you've actually watched at least half of it, not jumped to the end.
+- An episode counts as watched at 85% (was 80%).
 
 ### Fixed
 - The player's controls stay up while the mouse is on them.

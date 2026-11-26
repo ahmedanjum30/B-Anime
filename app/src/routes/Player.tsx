@@ -26,8 +26,6 @@ import type { SkipTime } from "../lib/types";
 
 /** Fraction of the episode that counts as watched (and no earlier than its ending; see watchedAt). */
 const WATCHED_AT = 0.85;
-/** And at least this share of it actually played (not jumped or dragged over). */
-const PLAYED_AT = 0.5;
 const AUTO_NEXT_SECONDS = 8;
 /** A stream that hasn't delivered any video by then gets an error instead of an endless spinner. */
 const STALL_SECONDS = 30;
@@ -866,10 +864,6 @@ export default function Player(props: { behind: boolean }) {
   /** Where a server switch left off; the new server's video starts there. */
   let switchedAt: number | null = null;
   let marked = false;
-  /** Seconds of this episode actually played (normal playback; jumps and drags add nothing).
-   *  A resumed episode starts with what was played before the saved spot. */
-  let played = 0;
-  let lastTick: number | null = null;
   let lastSave = 0;
   /** The saved position to start this episode at, looked up once per episode. */
   const resumePoint = async () => {
@@ -895,8 +889,6 @@ export default function Player(props: { behind: boolean }) {
     resumeAt = null;
     resumePending = false;
     marked = false;
-    played = 0;
-    lastTick = null;
     setSkips([]);
     skipsFor = "";
     setCountdown(null);
@@ -984,20 +976,14 @@ export default function Player(props: { behind: boolean }) {
   const onTime = () => {
     const t = video.currentTime;
     setTime(t);
-    // Playback moves a fraction of a second per update; a jump moves more, and isn't watching.
-    if (lastTick !== null && !video.paused) {
-      const step = t - lastTick;
-      if (step > 0 && step < 2) played += step;
-    }
-    lastTick = t;
     const b = video.buffered;
     for (let i = 0; i < b.length; i++) if (b.start(i) <= t && t <= b.end(i)) setBuffered(b.end(i));
     if (performance.now() - lastSave > 10_000) {
       lastSave = performance.now();
       persist();
     }
-    // Reached the end region, and watched most of it: dragging to the end doesn't count.
-    if (!marked && duration() > 0 && t >= watchedAt() && played + (resumeAt ?? 0) >= duration() * PLAYED_AT) {
+    // Reached the end region (however: watched, resumed or jumped there).
+    if (!marked && duration() > 0 && t >= watchedAt()) {
       marked = true;
       void markWatched();
     }
