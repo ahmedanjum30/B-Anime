@@ -1,6 +1,6 @@
 import { For, Match, Show, Switch, createResource, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { Search } from "../lib/icons";
+import { Search, Smartphone } from "../lib/icons";
 
 import UpNextCard from "../components/UpNextCard";
 import WeekListings from "../components/WeekListings";
@@ -9,13 +9,39 @@ import { fmtDateLine } from "../lib/format";
 import type { UpNext } from "../lib/types";
 import { playLibraryEpisode } from "../lib/play";
 import { recallPlayFrom } from "../lib/source";
-import { getPlayerPrefs, inTauri } from "../lib/api";
+import { getPlayerPrefs, googleAccount, inTauri } from "../lib/api";
 import { recallDub } from "../lib/dub";
 
 export default function Home() {
   const { home, refetch, notify } = homeStore;
   const navigate = useNavigate();
   const [prefs] = createResource(() => (inTauri ? getPlayerPrefs() : Promise.resolve(null)));
+
+  // Your place on every device: offered under Up next (where it pays off) until it's on or
+  // you say "Not now", which is for good on this device. The browser preview shows it.
+  const PLACES_NUDGE = "banime.placesNudge";
+  const [placesDismissed, setPlacesDismissed] = createSignal(
+    (() => {
+      try {
+        return localStorage.getItem(PLACES_NUDGE) === "no";
+      } catch {
+        return false;
+      }
+    })(),
+  );
+  const [google] = createResource(() =>
+    inTauri ? googleAccount().catch(() => null) : Promise.resolve({ configured: true, signedIn: false }),
+  );
+  const offerPlaces = () =>
+    !placesDismissed() && (!home()?.isSample || !inTauri) && !!google()?.configured && !google()?.signedIn;
+  const dismissPlaces = () => {
+    setPlacesDismissed(true);
+    try {
+      localStorage.setItem(PLACES_NUDGE, "no");
+    } catch {
+      // Not kept: it shows again next time.
+    }
+  };
 
   // Re-render the date line and "today" column across midnight.
   const [now, setNow] = createSignal(new Date());
@@ -94,6 +120,23 @@ export default function Home() {
                 >
                   <div class="upnext-grid">
                     <For each={h().upNext}>{(item) => <UpNextCard item={item} onPlay={play} />}</For>
+                  </div>
+                </Show>
+                <Show when={offerPlaces() && h().upNext.length > 0}>
+                  <div class="places-nudge">
+                    <Smartphone size={16} stroke-width={1.75} aria-hidden="true" />
+                    <p>
+                      <strong>Keep your place on every device.</strong> Sign in with Google and each show picks up
+                      where you left it, on your phone, PC or Mac.
+                    </p>
+                    <div class="places-nudge-actions">
+                      <button type="button" class="btn btn-sm btn-primary" onClick={() => navigate("/settings#places")}>
+                        Turn it on
+                      </button>
+                      <button type="button" class="btn btn-sm btn-quiet" onClick={dismissPlaces}>
+                        Not now
+                      </button>
+                    </div>
                   </div>
                 </Show>
               </section>

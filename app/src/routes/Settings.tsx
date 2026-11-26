@@ -153,9 +153,14 @@ function PlaceSync() {
       setBusy(null);
     }
   };
+  // Opened from Home's offer (/settings#places): this section, in view.
+  const reveal = (el: HTMLElement) => {
+    if (location.hash !== "#places") return;
+    requestAnimationFrame(() => el.scrollIntoView({ block: "start", behavior: "smooth" }));
+  };
   return (
     <Show when={acct()?.configured}>
-      <section class="section" aria-labelledby="places-h">
+      <section class="section" aria-labelledby="places-h" ref={reveal}>
         <h2 id="places-h" class="section-head">
           Your place on every device
           <small>Pick up an episode where you left it, on any device signed in to the same Google account.</small>

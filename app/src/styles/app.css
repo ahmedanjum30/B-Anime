@@ -221,6 +221,48 @@
   color: var(--z10);
   font-weight: 600;
 }
+
+/* Under Up next: an offer, quieter than a notice (a hairline, no fill), gone once answered. */
+.places-nudge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: calc(var(--u) * 2);
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--z3);
+  border-radius: var(--radius);
+  color: var(--z8);
+  font-size: 14px;
+}
+.places-nudge > svg {
+  flex: none;
+  color: var(--teal);
+}
+.places-nudge p {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+.places-nudge strong {
+  color: var(--z10);
+  font-weight: 600;
+}
+.places-nudge-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+@media (max-width: 640px) {
+  .places-nudge {
+    flex-wrap: wrap;
+  }
+  .places-nudge p {
+    flex-basis: calc(100% - 28px);
+  }
+  .places-nudge-actions {
+    margin-left: 28px;
+  }
+}
 .notice.is-error strong {
   color: var(--red);
 }
