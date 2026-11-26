@@ -351,6 +351,31 @@ export default function Player(props: { behind: boolean }) {
   const [scrub, setScrub] = createSignal<number | null>(null);
   /** The time the bar and the clock show: where it's dragged to, else where it plays. */
   const shownTime = () => scrub() ?? time();
+  /** The timeline is held (pressed, maybe dragged): it stays held wherever the pointer goes,
+   *  until it's released, even outside the bar or the player. */
+  let holding = false;
+  /** The video goes where the bar was let go. */
+  const commitScrub = () => {
+    const t = scrub();
+    setScrub(null);
+    if (t !== null && together.mayMoveTimeline()) video.currentTime = t;
+    // A finger lifted: its time tip goes (a mouse keeps it while it's over the bar).
+    if (!matchMedia("(hover: hover)").matches) setHover(null);
+  };
+  onMount(() => {
+    const release = () => {
+      if (!holding) return;
+      holding = false;
+      commitScrub();
+      wake();
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    onCleanup(() => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    });
+  });
   const pct = (t: number) => (duration() ? Math.min(100, Math.max(0, (t / duration()) * 100)) : 0);
   const sectionAt = (t: number) => skips().find((s) => t >= s.start && t < s.end);
   const onSeekHover = (e: PointerEvent) => {
@@ -1268,7 +1293,7 @@ export default function Player(props: { behind: boolean }) {
   const wake = () => {
     setIdle(false);
     clearTimeout(idleTimer);
-    idleTimer = window.setTimeout(() => playing() && !menu() && !overBars && setIdle(true), 2600);
+    idleTimer = window.setTimeout(() => playing() && !menu() && !overBars && !holding && setIdle(true), 2600);
   };
   const barsEnter = (e: PointerEvent) => {
     if (e.pointerType !== "mouse") return;
@@ -1276,7 +1301,7 @@ export default function Player(props: { behind: boolean }) {
     wake();
   };
   const barsLeave = (e: PointerEvent) => {
-    if (e.pointerType !== "mouse") return;
+    if (e.pointerType !== "mouse" || holding) return;
     overBars = false;
     wake(); // the usual few seconds from here
   };
@@ -1720,7 +1745,7 @@ export default function Player(props: { behind: boolean }) {
       </Show>
 
       <div class="player-controls" onPointerDown={(e) => e.stopPropagation()} onPointerEnter={barsEnter} onPointerLeave={barsLeave}>
-        <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => { setHover(null); preview.leave(); }}>
+        <div class="seek" onPointerMove={onSeekHover} onPointerLeave={() => { if (holding) return; setHover(null); preview.leave(); }}>
           <div class="seek-track" aria-hidden="true">
             <div class="seek-buffered" style={{ width: `${pct(buffered())}%` }} />
             {/* Openings, endings and recaps: amber until played, then red like the rest. */}
@@ -1787,12 +1812,21 @@ export default function Player(props: { behind: boolean }) {
                 preview.hover(t);
               }
             }}
+            // Pressed: the bar keeps the pointer until it's released (see commitScrub).
+            onPointerDown={(e) => {
+              holding = true;
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+            }}
             onChange={(e) => {
-              const t = scrub() ?? Number(e.currentTarget.value);
-              setScrub(null);
-              // A finger lifted: its time tip goes (a mouse keeps it while it's over the bar).
-              if (!matchMedia("(hover: hover)").matches) setHover(null);
-              if (together.mayMoveTimeline()) video.currentTime = t;
+              // Released (or an arrow key): the video goes there, once (the release itself may
+              // have taken it there already).
+              if (scrub() === null) {
+                const t = Number(e.currentTarget.value);
+                if (Math.abs(t - video.currentTime) < 0.25) return;
+                setScrub(t);
+              }
+              holding = false;
+              commitScrub();
             }}
           />
         </div>
