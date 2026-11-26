@@ -168,7 +168,10 @@ function PlaceSync() {
             <div class="setting-row">
               <div class="setting-text">
                 <p class="setting-title">Waiting for Google…</p>
-                <p class="setting-desc">Sign in in the browser tab that just opened, then come back here.</p>
+                <p class="setting-desc">
+                  Sign in in the browser tab that just opened. Google leaves the Drive box unticked: tick{" "}
+                  <b>See, create, and delete its own configuration data in your Google Drive</b>, then continue.
+                </p>
               </div>
               <button type="button" class="btn" onClick={() => void googleCancelSignIn()}>Cancel</button>
             </div>
@@ -203,7 +206,7 @@ function PlaceSync() {
                 <p class="setting-title">Off</p>
                 <p class="setting-desc">
                   Sign in with Google to keep your place in step. B-Anime only gets a private folder of its own in
-                  your Drive: it can't see your files.
+                  your Drive: it can't see your files. On Google's page, tick the Drive box.
                 </p>
               </div>
               <button

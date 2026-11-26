@@ -20,6 +20,7 @@ one line each, written for users (see CLAUDE.md).
 ### Added
 - Hover over the timeline to see the frame at that spot (PC and Mac; online episodes load just that bit).
 - Sign in with Google to pick up each show where you left it on any of your devices.
+- A small note at the top shows while B-Anime syncs with AniList or Google Drive.
 
 ### Changed
 - An episode counts as watched at 85% (was 80%), and only once you've actually watched at least half of it, not jumped to the end.

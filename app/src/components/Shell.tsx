@@ -32,6 +32,19 @@ export default function Shell(props: ParentProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Where a notice sits. About what's playing: centred on the video (wherever the player is,
+  // fullscreen or beside a drawer). Anything else, or with no video in sight: the screen's
+  // centre (the stylesheet's place). Measured as it opens, kept while it fades out.
+  const [toastSpot, setToastSpot] = createSignal<{ x: number; bottom: number } | null>(null);
+  createEffect(
+    on(toast, (msg) => {
+      if (!msg) return;
+      const player = homeStore.toastOnVideo() ? document.querySelector(".player:not(.is-behind):not(.is-pip)") : null;
+      const r = player?.getBoundingClientRect();
+      setToastSpot(r && r.width > 0 ? { x: r.left + r.width / 2, bottom: window.innerHeight - r.bottom + 24 } : null);
+    }),
+  );
+
   // Watch together: when the room moves to another episode (someone picked it), this device
   // opens it too, from wherever it is in the app.
   // Only a change of episode moves it: between changes, browsing elsewhere in the app is fine.
@@ -53,7 +66,7 @@ export default function Shell(props: ParentProps) {
       followed = path;
       if (location.pathname !== path) {
         // Someone moved the room on: say where to, while the new episode loads.
-        if (!first) homeStore.notify(`Switching to ${r.title || "the next show"} · Episode ${r.episode}…`);
+        if (!first) homeStore.notifyPlayback(`Switching to ${r.title || "the next show"} · Episode ${r.episode}…`);
         openEpisode(`${path}${r.dub ? "?dub=1" : ""}`);
       }
     }),
@@ -229,10 +242,15 @@ export default function Shell(props: ParentProps) {
           </button>
         </div>
       </Show>
+      {/* Not over an episode: syncing never needs the viewer's attention. */}
+      <Show when={!location.pathname.startsWith("/watch/")}>
+        <SyncingNote />
+      </Show>
       <div
         class="toast"
         role="status"
         aria-live="polite"
+        style={toastSpot() ? { left: `${toastSpot()!.x}px`, bottom: `${toastSpot()!.bottom}px` } : undefined}
         data-open={toast() ? "" : undefined}
         data-action={homeStore.toastAction() ? "" : undefined}
         onClick={() => homeStore.toastAction()?.run()}
@@ -299,6 +317,25 @@ function UpdateNotice() {
         </Show>
       )}
     </Show>
+  );
+}
+
+const SYNC_NAME = { anilist: "AniList", google: "Google Drive" } as const;
+
+/** A sync that takes a moment (at launch, mostly), said at the top. It keeps its words while it
+ *  fades out, so they don't vanish before it does. */
+function SyncingNote() {
+  const { syncing } = homeStore;
+  const [text, setText] = createSignal("");
+  createEffect(() => {
+    const now = syncing();
+    if (now.length) setText(`Syncing with ${now.map((w) => SYNC_NAME[w]).join(" and ")}`);
+  });
+  return (
+    <div class="syncing-note" role="status" aria-live="polite" data-open={syncing().length ? "" : undefined}>
+      <i class="spin-dot" aria-hidden="true" />
+      <span>{text()}</span>
+    </div>
   );
 }
 

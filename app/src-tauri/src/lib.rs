@@ -21,6 +21,51 @@ use tokio::sync::{Mutex, Notify};
 /// Tells the UI to refetch anything built from the library or lists.
 pub(crate) const LIBRARY_CHANGED: &str = "library-changed";
 
+/// A sync with AniList or Google started or ended: `{ with: "anilist" | "google", busy }`. The
+/// UI says so at the top while one takes a moment.
+const SYNCING: &str = "syncing";
+
+#[derive(Clone, Serialize)]
+struct Syncing {
+    with: &'static str,
+    busy: bool,
+}
+
+/// While held, the UI knows a sync with `with` is running; dropping it (however the sync ends)
+/// says it's done.
+pub(crate) struct SyncingNotice {
+    app: AppHandle,
+    with: &'static str,
+}
+
+/// The syncs running now, for a page that loads after one started (the launch syncs begin
+/// before the window has drawn anything).
+static RUNNING_SYNCS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+
+pub(crate) fn syncing(app: &AppHandle, with: &'static str) -> SyncingNotice {
+    if let Ok(mut running) = RUNNING_SYNCS.lock() {
+        running.push(with);
+    }
+    let _ = app.emit(SYNCING, Syncing { with, busy: true });
+    SyncingNotice { app: app.clone(), with }
+}
+
+impl Drop for SyncingNotice {
+    fn drop(&mut self) {
+        if let Ok(mut running) = RUNNING_SYNCS.lock() {
+            if let Some(i) = running.iter().position(|w| *w == self.with) {
+                running.remove(i);
+            }
+        }
+        let _ = self.app.emit(SYNCING, Syncing { with: self.with, busy: false });
+    }
+}
+
+#[tauri::command]
+fn syncs_running() -> Vec<&'static str> {
+    RUNNING_SYNCS.lock().map(|r| r.clone()).unwrap_or_default()
+}
+
 pub(crate) struct AppState {
     db: db::Db,
     paths: AppPaths,
@@ -589,6 +634,7 @@ async fn auto_sync(app: &AppHandle, state: &AppState, min_age: Duration) -> bool
 
 async fn sync_with_stored_token(app: &AppHandle, state: &AppState) -> banime_core::Result<SyncReport> {
     let token = auth::load_token()?.ok_or(Error::Unauthorized)?;
+    let _notice = syncing(app, "anilist");
     let client = anilist::Client::new(Some(token))?;
     let viewer = match client.viewer().await {
         Err(Error::Unauthorized) => {
@@ -799,6 +845,7 @@ pub fn run() {
             cloud_sync::google_cancel_sign_in,
             cloud_sync::google_sign_out,
             cloud_sync::google_sync,
+            syncs_running,
             open_android_download,
             get_account,
             anilist_login,

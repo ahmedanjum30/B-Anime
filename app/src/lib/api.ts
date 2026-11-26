@@ -181,6 +181,9 @@ export const googleSignIn = () => call<GoogleAccount>("google_sign_in");
 export const googleCancelSignIn = () => call<void>("google_cancel_sign_in");
 export const googleSignOut = () => call<GoogleAccount>("google_sign_out");
 export const googleSync = () => call<GoogleAccount>("google_sync");
+/** The syncs (AniList, Google) running now; the "syncing" event says when they start and end. */
+export const syncsRunning = () =>
+  inTauri ? call<("anilist" | "google")[]>("syncs_running") : Promise.resolve([] as ("anilist" | "google")[]);
 /** A note in the app's log (for troubleshooting what a page did). */
 export const uiLog = (message: string) => void (inTauri ? call<void>("ui_log", { message }).catch(() => {}) : undefined);
 export const openAndroidDownload = () => call<void>("open_android_download");

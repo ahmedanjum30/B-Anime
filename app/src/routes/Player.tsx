@@ -9,7 +9,7 @@ import {
   SkipBack, SkipForward, Users, Volume2, VolumeX, X,
 } from "../lib/icons";
 import {
-  errorText, externalPlayers, getMedia, listExtensions, uiLog, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
+  errorText, externalPlayers, getMedia, googleSync, listExtensions, uiLog, getPlayerPrefs, getPosition, getSkipTimes, getStream, inTauri, localEpisodes,
   localStream, onAndroid, onWebKit, openExternalPlayer, pickSubtitleFile, saveEntry, savePosition,
 } from "../lib/api";
 import type { PictureTrack, Stream } from "../lib/types";
@@ -74,7 +74,8 @@ const store = (key: string, v: number) => {
 
 export default function Player(props: { behind: boolean }) {
   const navigate = useNavigate();
-  const { notify } = homeStore;
+  // Everything the player says is about the episode: on the video.
+  const notify = homeStore.notifyPlayback;
 
   // What to play: the /watch page's episode (kept while the player closes).
   const target = createMemo<PlayerTarget>((prev) => playerSlot.target() ?? prev, playerSlot.target()!);
@@ -903,8 +904,8 @@ export default function Player(props: { behind: boolean }) {
   }));
 
   const persist = () => {
-    if (!inTauri || !duration()) return;
-    void savePosition(mediaId(), episode(), video.currentTime, duration()).catch(() => {});
+    if (!inTauri || !duration()) return Promise.resolve();
+    return savePosition(mediaId(), episode(), video.currentTime, duration()).catch(() => {});
   };
 
   /** The episode whose skip times are in (or on their way), so a reload of the same video (a
@@ -1085,7 +1086,9 @@ export default function Player(props: { behind: boolean }) {
   };
   onCleanup(() => {
     clearInterval(tick);
-    persist();
+    // Closing the player: your place goes to your other devices now (Google, when signed in),
+    // not 20 s later, when a phone may already have put the app in the background.
+    void persist().then(() => googleSync().catch(() => {}));
   });
 
   // ── Controls

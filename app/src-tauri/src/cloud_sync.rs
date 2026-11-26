@@ -16,8 +16,9 @@ use crate::{msg, AppState};
 
 const EMAIL_KEY: &str = "google.email";
 const SYNCED_KEY: &str = "google.synced_at";
-/// Sent when places came from another device (the pages showing positions refresh).
-const PLACES_CHANGED: &str = "places-changed";
+/// Sent when places came from another device: the pages showing positions (Home's Continue
+/// watching, the library, a show's episodes) refresh as they do after an AniList sync.
+const PLACES_CHANGED: &str = crate::LIBRARY_CHANGED;
 const EVERY: Duration = Duration::from_secs(10 * 60);
 /// After the last save while watching: one sync for the burst.
 const AFTER_SAVE: Duration = Duration::from_secs(20);
@@ -77,13 +78,23 @@ async fn sync_now(app: &AppHandle) {
         return;
     }
     let _one = state.cloud.running.lock().await;
-    match cloud::sync(&state.db, &state.cloud.session).await {
+    let notice = crate::syncing(app, "google");
+    let result = cloud::sync(&state.db, &state.cloud.session).await;
+    drop(notice);
+    match result {
         Ok(came) => {
             set_error(&state, None);
             let _ = db::set_setting(&state.db, SYNCED_KEY, &chrono::Utc::now().to_rfc3339()).await;
             if came {
                 let _ = app.emit(PLACES_CHANGED, ());
             }
+        }
+        // Signed in with the Drive permission unticked: no use staying signed in. Signed out,
+        // with the reason, so signing in again (with it ticked) is the obvious next step.
+        Err(Error::Login(m)) if m == cloud::NO_DRIVE_ACCESS => {
+            let _ = cloud::sign_out(&state.cloud.session).await;
+            let _ = db::set_setting(&state.db, EMAIL_KEY, "").await;
+            set_error(&state, Some(m));
         }
         Err(Error::Unauthorized) => {
             // Signed out elsewhere, or access removed in Google's settings: signed out here too.
@@ -102,11 +113,11 @@ async fn sync_now(app: &AppHandle) {
     }
 }
 
-/// At launch (once things have settled), then every 10 minutes.
+/// At launch (right away: your place should be there when you open a show), then every 10
+/// minutes.
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
         loop {
             sync_now(&app).await;
             tokio::time::sleep(EVERY).await;

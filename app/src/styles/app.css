@@ -3882,8 +3882,9 @@ a.slot:focus-visible {
 
 .toast {
   position: fixed;
-  /* Centred on the content beside the rail (the player too), not on the whole window. */
-  left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2);
+  /* Centred on the whole window; a notice about what's playing is placed on the video instead
+     (Shell sets its left and bottom). */
+  left: 50%;
   bottom: calc(var(--u) * 3);
   max-width: 560px;
   padding: 12px calc(var(--u) * 2);
@@ -3923,6 +3924,47 @@ a.slot:focus-visible {
 .toast-action:focus-visible {
   outline: 2px solid var(--red);
   outline-offset: 2px;
+}
+
+/* A sync taking a moment: a quiet note at the top, centred on the window like the app's
+   notices. */
+.syncing-note {
+  position: fixed;
+  z-index: 40;
+  top: calc(var(--u) * 1.5);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--z3);
+  border-radius: 15px;
+  background: var(--z1);
+  color: var(--z8);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+  transform: translate(-50%, -8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-med) var(--ease-out), transform var(--t-med) var(--ease-out);
+}
+.syncing-note[data-open] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.syncing-note .spin-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .syncing-note {
+    transition: opacity var(--t-med) linear;
+    transform: translate(-50%, 0);
+  }
 }
 
 /* ───────── Narrow windows ───────── */
@@ -3994,6 +4036,11 @@ a.slot:focus-visible {
   }
   /* Notices sit above the bottom bar, full width less the gutters; the rail is the bottom bar
      here, so they centre on the screen. */
+  /* The rail is the bottom bar here: centred on the screen, below the status bar. */
+  .syncing-note {
+    left: 50%;
+    top: calc(env(safe-area-inset-top) + var(--u));
+  }
   .toast {
     left: 50%;
     bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + var(--u) * 1.5);

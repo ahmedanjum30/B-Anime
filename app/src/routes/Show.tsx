@@ -1,4 +1,4 @@
-import { For, Match, Show as When, Switch, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
+import { For, Match, Show as When, Switch, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import { A, useNavigate, useParams } from "@solidjs/router";
 
 import ListEditor from "../components/ListEditor";
@@ -10,7 +10,7 @@ import { recallDub, rememberDub } from "../lib/dub";
 import { playLibraryEpisode } from "../lib/play";
 import { FORMAT_LABEL } from "../components/CoverCard";
 import { ArrowLeft, ExternalLink, Users } from "../lib/icons";
-import { errorText, getMedia, getPlayerPrefs, inTauri, openAniList } from "../lib/api";
+import { errorText, getMedia, getPlayerPrefs, inTauri, onLibraryChanged, openAniList } from "../lib/api";
 import { fmtAgo, fmtCount } from "../lib/format";
 import { homeStore } from "../lib/store";
 import { watchStore } from "../lib/watch";
@@ -65,6 +65,10 @@ export default function Show() {
   const id = () => Number(params.id);
   const { notify, now } = homeStore;
   const [page, { refetch }] = createResource(id, getMedia);
+  // Lists synced, or your place came from another device: the episodes show it.
+  let unlisten: (() => void) | undefined;
+  void onLibraryChanged(() => void refetch()).then((u) => (unlisten = u));
+  onCleanup(() => unlisten?.());
 
   // One saver for the page, shared by the editor and the episode list.
   const total = () => {

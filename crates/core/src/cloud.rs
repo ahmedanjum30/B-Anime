@@ -35,6 +35,7 @@ const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files";
 /// The app's own hidden Drive folder, and who's signed in (to show it). Nothing more.
+const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata openid email";
 const FILE_NAME: &str = "progress.json";
 const KEYRING_SERVICE: &str = "B-Anime";
@@ -130,6 +131,20 @@ struct TokenAnswer {
     expires_in: Option<u64>,
     refresh_token: Option<String>,
     id_token: Option<String>,
+    /// What was actually allowed, space-separated: Google's consent screen lets you untick each
+    /// permission, so it can be less than what was asked.
+    scope: Option<String>,
+}
+
+/// Said when the Drive permission wasn't allowed (unticked at sign-in): without its folder
+/// B-Anime has nowhere to keep your place. The sign-in is undone; it can be tried again.
+pub const NO_DRIVE_ACCESS: &str = "The Drive box wasn't ticked. B-Anime needs its own folder in your Google Drive \
+to keep your place (it can't see your files). Sign in again and tick \"See, create, and delete its own \
+configuration data in your Google Drive\".";
+
+/// Whether an allowed-scopes list includes B-Anime's Drive folder.
+fn allows_drive(scope: &str) -> bool {
+    scope.split_whitespace().any(|s| s == DRIVE_SCOPE)
 }
 
 /// A sign-in in progress: open `url` in the browser, then `wait`.
@@ -156,6 +171,8 @@ struct Callback {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
+    /// What was allowed (Google sends it back with the code).
+    scope: Option<String>,
 }
 
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>B-Anime</title>\
@@ -164,16 +181,31 @@ const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>B-Anime</titl
 const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>B-Anime</title>\
 <body style=\"font:16px system-ui;background:#191b22;color:#eee;display:grid;place-items:center;height:90vh\">\
 <p>The sign-in didn't complete. Go back to B-Anime and try again.</p>";
+const NO_DRIVE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>B-Anime</title>\
+<body style=\"font:16px system-ui;background:#191b22;color:#eee;display:grid;place-items:center;height:90vh\">\
+<div style=\"max-width:520px;padding:0 16px\"><p><b>The Drive box wasn't ticked.</b></p>\
+<p>B-Anime needs its own folder in your Google Drive to keep your place (it can't see your files). \
+Go back to B-Anime, choose Sign in with Google again, and tick \
+&ldquo;See, create, and delete its own configuration data in your Google Drive&rdquo;.</p></div>";
 
 async fn callback(State(slot): State<Slot>, Query(q): Query<Callback>) -> Html<&'static str> {
     let Some((state, tx)) = slot.lock().await.take() else { return Html(FAILED_PAGE) };
+    let no_drive = q.scope.as_deref().is_some_and(|s| !allows_drive(s));
     let outcome = match (q.code, q.state, q.error) {
         (_, _, Some(e)) => Err(if e == "access_denied" { "You didn't allow access.".to_owned() } else { e }),
         // The state must be the one this sign-in made: anything else isn't ours.
         (Some(code), Some(s), None) if s == state => Ok(code),
         _ => Err("The sign-in answer didn't match this sign-in.".to_owned()),
     };
-    let page = if outcome.is_ok() { DONE_PAGE } else { FAILED_PAGE };
+    // Without the Drive box the app says so too (after trading the code, so Google can be told
+    // to forget it): the tab says what to do now.
+    let page = if outcome.is_ok() && no_drive {
+        NO_DRIVE_PAGE
+    } else if outcome.is_ok() {
+        DONE_PAGE
+    } else {
+        FAILED_PAGE
+    };
     let _ = tx.send(outcome);
     Html(page)
 }
@@ -287,6 +319,15 @@ impl PendingSignIn {
                 })?,
             }
         };
+        // The Drive permission unticked on Google's page: nothing to sync with. Google forgets
+        // this sign-in (nothing is kept here), and the reason is said.
+        if answer.scope.as_deref().is_some_and(|s| !allows_drive(s)) {
+            let token = answer.refresh_token.as_deref().unwrap_or(&answer.access_token);
+            if let Ok(http) = http() {
+                let _ = post_form(&http, REVOKE_URL, &[("token", token)]).send().await;
+            }
+            return Err(Error::Login(NO_DRIVE_ACCESS.into()));
+        }
         let refresh = answer
             .refresh_token
             .ok_or_else(|| Error::Login("Google didn't give a lasting sign-in; try again.".into()))?;
@@ -294,6 +335,21 @@ impl PendingSignIn {
         session.set_access(answer.access_token, answer.expires_in).await;
         Ok(answer.id_token.as_deref().and_then(email_of))
     }
+}
+
+/// A Drive answer, its failures sorted: no permission for B-Anime's folder (unticked when signing
+/// in) is said as such; anything else is a network error.
+async fn drive_answer(sent: reqwest::Result<reqwest::Response>) -> Result<reqwest::Response> {
+    let res = sent.map_err(|e| Error::Network(e.to_string()))?;
+    if res.status().as_u16() == 403 {
+        let body = res.text().await.unwrap_or_default();
+        // "Request had insufficient authentication scopes" (ACCESS_TOKEN_SCOPE_INSUFFICIENT).
+        if body.to_ascii_lowercase().contains("insufficient") {
+            return Err(Error::Login(NO_DRIVE_ACCESS.into()));
+        }
+        return Err(Error::Network("Google Drive answered HTTP 403".into()));
+    }
+    res.error_for_status().map_err(|e| Error::Network(e.to_string()))
 }
 
 /// A network failure talking to Google, said as such (the generic network error names AniList).
@@ -393,17 +449,17 @@ impl Session {
         struct File {
             id: String,
         }
-        let list: List = http
-            .get(format!(
+        let list: List = drive_answer(
+            http.get(format!(
                 "{FILES_URL}?{}",
                 encoded(&[("spaces", "appDataFolder"), ("q", &format!("name = '{FILE_NAME}'")), ("fields", "files(id)")])
             ))
             .bearer_auth(token)
             .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| Error::Network(e.to_string()))?
-            .json()
+            .await,
+        )
+        .await?
+        .json()
             .await
             .map_err(|e| Error::Network(e.to_string()))?;
         let id = list.files.into_iter().next().map(|f| f.id);
@@ -426,7 +482,7 @@ impl Session {
             *self.file_id.lock().await = None;
             return Ok(Places::default());
         }
-        let bytes = res.error_for_status().map_err(|e| Error::Network(e.to_string()))?.bytes().await.map_err(|e| Error::Network(e.to_string()))?;
+        let bytes = drive_answer(Ok(res)).await?.bytes().await.map_err(|e| Error::Network(e.to_string()))?;
         // An unreadable file (another version's, or damaged) starts over rather than failing.
         Ok(serde_json::from_slice(&bytes).unwrap_or_default())
     }
@@ -437,14 +493,15 @@ impl Session {
         let http = http()?;
         let body = serde_json::to_vec(places).map_err(|e| Error::Config(e.to_string()))?;
         if let Some(id) = self.find_file(&http, &token).await? {
-            http.patch(format!("{UPLOAD_URL}/{id}?uploadType=media"))
-                .bearer_auth(&token)
-                .header("content-type", "application/json")
-                .body(body)
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .map_err(|e| Error::Network(e.to_string()))?;
+            drive_answer(
+                http.patch(format!("{UPLOAD_URL}/{id}?uploadType=media"))
+                    .bearer_auth(&token)
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .send()
+                    .await,
+            )
+            .await?;
             return Ok(());
         }
         let boundary = format!("banime{}", URL_SAFE_NO_PAD.encode(rand::random::<[u8; 12]>()));
@@ -456,16 +513,16 @@ impl Session {
         struct Created {
             id: String,
         }
-        let created: Created = http
-            .post(format!("{UPLOAD_URL}?uploadType=multipart&fields=id"))
-            .bearer_auth(&token)
-            .header("content-type", format!("multipart/related; boundary={boundary}"))
-            .body(multipart)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| Error::Network(e.to_string()))?
-            .json()
+        let created: Created = drive_answer(
+            http.post(format!("{UPLOAD_URL}?uploadType=multipart&fields=id"))
+                .bearer_auth(&token)
+                .header("content-type", format!("multipart/related; boundary={boundary}"))
+                .body(multipart)
+                .send()
+                .await,
+        )
+        .await?
+        .json()
             .await
             .map_err(|e| Error::Network(e.to_string()))?;
         *self.file_id.lock().await = Some(created.id);
@@ -582,6 +639,13 @@ mod tests {
         assert_eq!(m.shows[&1], place(5, 300, 200), "this device's is newer");
         assert_eq!(m.shows[&2], place(3, 50, 300), "the account's is newer");
         assert_eq!(m.shows[&3], place(7, 70, 50), "only in the account");
+    }
+
+    #[test]
+    fn the_drive_permission_is_looked_for_in_what_was_allowed() {
+        assert!(allows_drive("openid https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email"));
+        assert!(!allows_drive("openid https://www.googleapis.com/auth/userinfo.email"));
+        assert!(!allows_drive("https://www.googleapis.com/auth/drive.appdata.extra"));
     }
 
     #[test]

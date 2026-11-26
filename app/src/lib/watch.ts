@@ -138,10 +138,10 @@ export const watchStore = createRoot(() => {
     setRoom(info);
     // This device was hosting and lost its connection; the room went on with a guest hosting,
     // and this device is back in it as a guest.
-    if (was?.host && !info.host) return homeStore.notify("Your connection dropped and someone else took over hosting. You're back in the room.");
+    if (was?.host && !info.host) return homeStore.notifyPlayback("Your connection dropped and someone else took over hosting. You're back in the room.");
     // Taking over, the room stays paused (everyone stopped while it changed hands).
-    if (was && info.host && !was.host) homeStore.notify(`${left}. You're hosting now; press play to carry on.`);
-    else if (was && info.code !== was.code) homeStore.notify(`${left}. The room carries on paused; press play to carry on.`);
+    if (was && info.host && !was.host) homeStore.notifyPlayback(`${left}. You're hosting now; press play to carry on.`);
+    else if (was && info.code !== was.code) homeStore.notifyPlayback(`${left}. The room carries on paused; press play to carry on.`);
   });
   void onEvent<"reconnecting" | "connected">("watch-link", (state) => setReconnecting(state === "reconnecting"));
   const reset = () => {
@@ -155,7 +155,7 @@ export const watchStore = createRoot(() => {
   };
   void onEvent<string>("watch-closed", (reason) => {
     reset();
-    homeStore.notify(reason);
+    homeStore.notifyPlayback(reason);
   });
 
   /** "Sam paused", "Sam resumed", "Sam jumped to 12:41": someone else's change, as a notice. */
@@ -192,9 +192,9 @@ export const watchStore = createRoot(() => {
       // Gone a moment later (an app closing pauses its video on the way out): not theirs.
       if (!now || !who || who.connected === false || reconnecting() || !room() || now.held) return;
       const moved = Math.abs(roomPosition() - (from.position + (from.playing ? (performance.now() - from.at) / 1000 : 0)));
-      if (from.playing && !now.playing) homeStore.notify(`${who.name} paused.`);
-      else if (!from.playing && now.playing) homeStore.notify(`${who.name} resumed.`);
-      else if (moved > 5) homeStore.notify(`${who.name} jumped to ${clock(roomPosition())}.`);
+      if (from.playing && !now.playing) homeStore.notifyPlayback(`${who.name} paused.`);
+      else if (!from.playing && now.playing) homeStore.notifyPlayback(`${who.name} resumed.`);
+      else if (moved > 5) homeStore.notifyPlayback(`${who.name} jumped to ${clock(roomPosition())}.`);
     }, 1200);
   }
   /** Where `p` would be now, from when it was last known. */
@@ -216,10 +216,10 @@ export const watchStore = createRoot(() => {
     const lost = new Set(before.filter((m) => m.connected === false).map((m) => m.id));
     for (const m of after) {
       if (m.id === me) continue;
-      if (!was.has(m.id)) homeStore.notify(`${m.name} joined the room.`);
-      else if (lost.has(m.id) && m.connected !== false) homeStore.notify(`${m.name} is back.`);
+      if (!was.has(m.id)) homeStore.notifyPlayback(`${m.name} joined the room.`);
+      else if (lost.has(m.id) && m.connected !== false) homeStore.notifyPlayback(`${m.name} is back.`);
     }
-    for (const m of before) if (!now.has(m.id) && m.id !== me && !m.host) homeStore.notify(`${m.name} left the room.`);
+    for (const m of before) if (!now.has(m.id) && m.id !== me && !m.host) homeStore.notifyPlayback(`${m.name} left the room.`);
   }
 
   // Invite links: banime://join/<code> opens (or is handed to) B-Anime.
@@ -265,7 +265,7 @@ export const watchStore = createRoot(() => {
       setRoom(info);
       return true;
     } catch (e) {
-      homeStore.notify(errorText(e));
+      homeStore.notifyPlayback(errorText(e));
       return false;
     } finally {
       setBusy(null);
@@ -303,7 +303,7 @@ export const watchStore = createRoot(() => {
     const n = name.trim();
     if (!n || !room()) return;
     rememberName(n);
-    void watchRename(n).catch((e) => homeStore.notify(errorText(e)));
+    void watchRename(n).catch((e) => homeStore.notifyPlayback(errorText(e)));
   };
   /** The host names the room; empty goes back to "<host>'s room". */
   const nameRoom = (name: string) => {
@@ -315,7 +315,7 @@ export const watchStore = createRoot(() => {
     } catch {
       /* not remembered */
     }
-    void watchSetRoomName(n).catch((e) => homeStore.notify(errorText(e)));
+    void watchSetRoomName(n).catch((e) => homeStore.notifyPlayback(errorText(e)));
   };
 
   /** Back into a room from the recent list, through whoever hosts it now. */
@@ -341,7 +341,7 @@ export const watchStore = createRoot(() => {
     void watchRoom().then((r) => {
       if (r) return;
       const who = last.names.length ? ` with ${last.names.join(", ")}` : "";
-      homeStore.notify(`You were watching ${last.title || "together"}${who}.`, {
+      homeStore.notifyPlayback(`You were watching ${last.title || "together"}${who}.`, {
         label: "Rejoin",
         run: () => setPendingRejoin(last),
       });
@@ -349,8 +349,8 @@ export const watchStore = createRoot(() => {
   });
   /** This device in the member list. */
   const me = () => members().find((m) => m.id === room()?.me);
-  const setReady = (ready: boolean) => void watchReady(ready).catch((e) => homeStore.notify(errorText(e)));
-  const start = () => void watchStart().catch((e) => homeStore.notify(errorText(e)));
+  const setReady = (ready: boolean) => void watchReady(ready).catch((e) => homeStore.notifyPlayback(errorText(e)));
+  const start = () => void watchStart().catch((e) => homeStore.notifyPlayback(errorText(e)));
   /** Whether this device can play the room's episode (null: still checking), and with what. */
   let lastCheck = "";
   const check = (playable: boolean | null, source: string | null, copyLength: number | null) => {
@@ -573,7 +573,7 @@ export function syncPlayer(opts: {
     // included) is undone, and the room hears the episode, paused.
     if (v && !v.paused && w.room() && !w.started()) {
       selfPause(v);
-      homeStore.notify(
+      homeStore.notifyPlayback(
         w.room()!.host
           ? "Press Start on the Together page once everyone's ready."
           : "The host starts the episode once everyone's ready.",
@@ -622,7 +622,7 @@ export function syncPlayer(opts: {
     if (!guest()) return true;
     if (performance.now() - seekNoticeAt > 4000) {
       seekNoticeAt = performance.now();
-      homeStore.notify("Only the host can move the timeline.");
+      homeStore.notifyPlayback("Only the host can move the timeline.");
     }
     return false;
   };
@@ -798,7 +798,7 @@ export function syncPlayer(opts: {
           waitingFor = still.map((m) => m.name).join(", ");
           uiLog(`sync: the room waits for ${waitingFor} (loading or lost)`);
           v.pause(); // the pause goes to the room like any other
-          homeStore.notify(waitText(still), {
+          homeStore.notifyPlayback(waitText(still), {
             label: "Don't wait",
             run: () => {
               for (const m of still) w.waitFor(m.id, false);
@@ -849,7 +849,7 @@ export function syncPlayer(opts: {
     appliedAt = startsAt;
     clearTimeout(startTimer);
     startTimer = window.setTimeout(() => selfPlay(v), START_IN);
-    if (late.length) homeStore.notify(`Started without waiting for ${late.join(", ")}.`);
+    if (late.length) homeStore.notifyPlayback(`Started without waiting for ${late.join(", ")}.`);
   };
   createEffect(
     on([w.members, w.nowPlaying], ([members, p]) => {
