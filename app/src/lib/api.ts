@@ -168,6 +168,19 @@ export async function getMedia(id: number): Promise<MediaPage> {
 export const openAniList = (id: number, type: LibraryKind) => call<void>("open_anilist", { id, kind: type });
 /** Opens the project's Patreon page in the browser. */
 export const openSupport = () => call<void>("open_support");
+/** Your place in each show across your devices, through your Google account. */
+export interface GoogleAccount {
+  configured: boolean;
+  signedIn: boolean;
+  email: string | null;
+  syncedAt: string | null;
+  error: string | null;
+}
+export const googleAccount = () => call<GoogleAccount>("google_account");
+export const googleSignIn = () => call<GoogleAccount>("google_sign_in");
+export const googleCancelSignIn = () => call<void>("google_cancel_sign_in");
+export const googleSignOut = () => call<GoogleAccount>("google_sign_out");
+export const googleSync = () => call<GoogleAccount>("google_sync");
 /** A note in the app's log (for troubleshooting what a page did). */
 export const uiLog = (message: string) => void (inTauri ? call<void>("ui_log", { message }).catch(() => {}) : undefined);
 export const openAndroidDownload = () => call<void>("open_android_download");

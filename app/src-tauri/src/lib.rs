@@ -1,5 +1,6 @@
 #[cfg(target_os = "android")]
 mod android_install;
+mod cloud_sync;
 mod library;
 mod logs;
 mod playback;
@@ -36,6 +37,8 @@ pub(crate) struct AppState {
     /// Loopback proxy every stream, subtitle and manga page goes through.
     proxy: streaming::Proxy,
     item_cache: std::sync::Mutex<ItemCache>,
+    /// Your place in each show across your devices (Google sign-in).
+    cloud: cloud_sync::CloudSync,
 }
 
 type ItemCache = std::collections::HashMap<(String, String), (std::time::Instant, Vec<streaming::SourceItem>)>;
@@ -195,13 +198,16 @@ async fn get_skip_times(mal_id: i64, episode: i64, length: f64) -> Result<Vec<st
 
 #[tauri::command]
 async fn save_position(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
     media_id: i64,
     episode: i64,
     position: f64,
     duration: f64,
 ) -> Result<(), String> {
-    streaming::save_position(&state.db, media_id, episode, position, duration).await.map_err(msg)
+    streaming::save_position(&state.db, media_id, episode, position, duration).await.map_err(msg)?;
+    cloud_sync::after_save(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -653,12 +659,16 @@ pub fn run() {
             // No credential store on phones: the AniList token lives in the app's private storage.
             #[cfg(mobile)]
             auth::use_token_file(paths.root.join("anilist-token"));
+            #[cfg(mobile)]
+            banime_core::cloud::use_token_file(paths.root.join("google-token"));
             #[cfg(desktop)]
             let paths = AppPaths::resolve(None)?;
             // Nor the Mac's Keychain: the app is signed ad hoc, so each update is a new signature
             // to macOS, which then asked for the user's password before B-Anime could read it.
             #[cfg(target_os = "macos")]
             auth::use_token_file(paths.root.join("anilist-token"));
+            #[cfg(target_os = "macos")]
+            banime_core::cloud::use_token_file(paths.root.join("google-token"));
             paths.ensure()?;
             logs::to_file(&paths.logs);
             tracing::info!(data_dir = %paths.root.display(), version = %app.package_info().version, "starting B-Anime");
@@ -667,6 +677,7 @@ pub fn run() {
             app.manage(AppState {
                 proxy,
                 item_cache: std::sync::Mutex::new(Default::default()),
+                cloud: Default::default(),
                 db,
                 paths,
                 sync_lock: Mutex::new(()),
@@ -677,6 +688,7 @@ pub fn run() {
                 watch: watch::Watch::default(),
             });
             updates::start(app.handle());
+            cloud_sync::start(app.handle());
             // Detailed network logs, if switched on before.
             let logs_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { logs::restore(&logs_handle.state::<AppState>()).await });
@@ -782,6 +794,11 @@ pub fn run() {
             open_anilist,
             open_support,
             ui_log,
+            cloud_sync::google_account,
+            cloud_sync::google_sign_in,
+            cloud_sync::google_cancel_sign_in,
+            cloud_sync::google_sign_out,
+            cloud_sync::google_sync,
             open_android_download,
             get_account,
             anilist_login,

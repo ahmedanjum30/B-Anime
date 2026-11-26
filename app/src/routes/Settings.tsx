@@ -1,9 +1,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, onCleanup } from "solid-js";
 
 import {
-  addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri,
-  installUpdate, setUpdateChannel, networkLogs, setNetworkLogs, revealLogs, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages,
-  setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY,
+  addLibraryRoot, assignFiles, browse, cancelLogin, checkForUpdate, errorText, getPlayerPrefs, ignoreFiles, inTauri, installUpdate, setUpdateChannel, networkLogs, setNetworkLogs, revealLogs, libraryStatus, login, logout, onAndroid, onLibraryChanged, pickFolder, removeLibraryRoot, setLanguages, setPlayerPref, unmatchedFiles, UPDATE_ACTION, UPDATE_BUSY, googleAccount, googleSignIn, googleCancelSignIn, googleSignOut, googleSync, type GoogleAccount,
 } from "../lib/api";
 import { fmtAgo, fmtCount, fmtVersion } from "../lib/format";
 import { keepSameBy } from "../lib/keep";
@@ -124,10 +122,102 @@ export default function Settings() {
         </Switch>
       </section>
 
+      <PlaceSync />
       <LibraryFolders />
       <PlaybackPrefs />
       <About />
     </div>
+  );
+}
+
+/**
+ * Your place in each show on every device: the latest episode of each show and the position in
+ * it, kept in your own Google account (an app folder only B-Anime can see; nothing else in your
+ * Drive is reachable). Hidden in builds without B-Anime's Google client.
+ */
+function PlaceSync() {
+  const { notify, now } = homeStore;
+  const [acct, { mutate }] = createResource(() => (inTauri ? googleAccount() : null));
+  const [busy, setBusy] = createSignal<"in" | "out" | "sync" | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const run = async (kind: "in" | "out" | "sync", fn: () => Promise<GoogleAccount>, done?: string) => {
+    setBusy(kind);
+    setError(null);
+    try {
+      mutate(await fn());
+      if (done) notify(done);
+    } catch (e) {
+      const text = errorText(e);
+      if (text !== "Sign-in cancelled.") setError(text);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Show when={acct()?.configured}>
+      <section class="section" aria-labelledby="places-h">
+        <h2 id="places-h" class="section-head">
+          Your place on every device
+          <small>Pick up an episode where you left it, on any device signed in to the same Google account.</small>
+        </h2>
+        <Show when={error() ?? acct()?.error}>
+          {(e) => <p class="inline-error" role="alert">{e()}</p>}
+        </Show>
+        <Switch>
+          <Match when={busy() === "in"}>
+            <div class="setting-row">
+              <div class="setting-text">
+                <p class="setting-title">Waiting for Google…</p>
+                <p class="setting-desc">Sign in in the browser tab that just opened, then come back here.</p>
+              </div>
+              <button type="button" class="btn" onClick={() => void googleCancelSignIn()}>Cancel</button>
+            </div>
+          </Match>
+          <Match when={acct()?.signedIn}>
+            <div class="setting-row">
+              <div class="setting-text">
+                <p class="setting-title">{acct()?.email || "Signed in to Google"}</p>
+                <p class="setting-desc">
+                  Your latest episode of each show and where you are in it
+                  <Show when={acct()?.syncedAt}>{(t) => <> · synced {fmtAgo(t(), now())}</>}</Show>
+                </p>
+              </div>
+              <div class="setting-actions">
+                <button type="button" class="btn" disabled={busy() !== null} onClick={() => void run("sync", googleSync)}>
+                  {busy() === "sync" ? "Syncing…" : "Sync now"}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-quiet"
+                  disabled={busy() !== null}
+                  onClick={() => void run("out", googleSignOut, "Signed out of Google. Your places on this device stay here.")}
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </Match>
+          <Match when={acct()}>
+            <div class="setting-row">
+              <div class="setting-text">
+                <p class="setting-title">Off</p>
+                <p class="setting-desc">
+                  Sign in with Google to keep your place in step. B-Anime only gets a private folder of its own in
+                  your Drive: it can't see your files.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-primary"
+                onClick={() => void run("in", googleSignIn, "Signed in. Your place in each show now follows you.")}
+              >
+                Sign in with Google
+              </button>
+            </div>
+          </Match>
+        </Switch>
+      </section>
+    </Show>
   );
 }
 

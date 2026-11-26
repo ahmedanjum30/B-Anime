@@ -19,6 +19,7 @@ one line each, written for users (see CLAUDE.md).
 
 ### Added
 - Hover over the timeline to see the frame at that spot (PC and Mac; online episodes load just that bit).
+- Sign in with Google to pick up each show where you left it on any of your devices.
 
 ### Fixed
 - The player's controls stay up while the mouse is on them.

@@ -44,6 +44,12 @@ on:
 permissions:
   contents: write
 
+# Google sign-in (your place on every device): B-Anime's Google OAuth client, built in from
+# repository secrets so it never sits in the code. Without them the feature stays hidden.
+env:
+  BANIME_GOOGLE_CLIENT_ID: ${{ secrets.BANIME_GOOGLE_CLIENT_ID }}
+  BANIME_GOOGLE_CLIENT_SECRET: ${{ secrets.BANIME_GOOGLE_CLIENT_SECRET }}
+
 jobs:
   windows:
     if: startsWith(github.ref, 'refs/tags/v')

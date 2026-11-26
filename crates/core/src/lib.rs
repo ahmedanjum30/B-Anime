@@ -2,6 +2,7 @@
 //! headless server) are thin shells over this crate.
 
 pub mod anilist;
+pub mod cloud;
 pub mod db;
 pub mod error;
 pub mod extensions;
