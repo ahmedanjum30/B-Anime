@@ -2970,6 +2970,9 @@ a.slot:focus-visible {
   position: relative;
   width: 100%;
   height: 18px;
+  /* A finger on the timeline drags it; the browser doesn't take the touch for a gesture (and
+     cancel it mid-drag). */
+  touch-action: none;
 }
 .seek-input::-webkit-slider-runnable-track,
 .volume-input::-webkit-slider-runnable-track {
@@ -3165,6 +3168,14 @@ a.slot:focus-visible {
   margin-top: 2px;
   font-size: 11px;
   color: var(--z6);
+}
+/* A subtitle track that couldn't be downloaded, with its Retry. */
+.sub-failed {
+  color: var(--red);
+}
+.sub-retry {
+  text-decoration: underline;
+  cursor: pointer;
 }
 .menu-switch {
   position: relative;

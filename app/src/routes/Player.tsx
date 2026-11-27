@@ -93,7 +93,7 @@ export default function Player(props: { behind: boolean }) {
     if (t) playerSlot.setTarget(t);
   };
 
-  const [page] = createResource(mediaId, getMedia);
+  const [page, { refetch: refetchPage }] = createResource(mediaId, getMedia);
   const media = () => page()?.media;
   const [prefs] = createResource(getPlayerPrefs);
   // In a room, this device plays the episode from where it picked on the Together page: its
@@ -198,7 +198,7 @@ export default function Player(props: { behind: boolean }) {
     }
     return next;
   }, null);
-  const [stream] = createResource<Stream, string>(streamKey, (k) => {
+  const [stream, { refetch: refetchStream }] = createResource<Stream, string>(streamKey, (k) => {
     const [kind, a, b] = k.split("\u0000");
     return kind === "L" ? localStream(Number(a), Number(b)) : getStream(a, b);
   });
@@ -270,6 +270,20 @@ export default function Player(props: { behind: boolean }) {
     if (source.items() && !item()) return `Episode ${episode()} isn't on this source.`;
     if (stream.error) return errorText(stream.error);
     return null;
+  };
+  /** Something failed that may work a moment later (the network, the source): try it again. */
+  const canRetry = () =>
+    !!(page.error || source.match.error || source.items.error || stream.error || (videoError() && stream()));
+  const retry = () => {
+    uiLog("player: retry after a failure");
+    if (page.error) return void refetchPage();
+    if (source.match.error) return void source.rematch();
+    if (source.items.error) return void source.reloadItems();
+    if (stream.error) return void refetchStream();
+    // The video itself failed: load the same stream again from where it was.
+    setVideoError(null);
+    reattachPaused = false;
+    setReattach((n) => n + 1);
   };
 
   // ── Video element and HLS
@@ -366,20 +380,51 @@ export default function Player(props: { behind: boolean }) {
       setHover(null);
       preview.leave(true);
     }
-    if (t !== null && together.mayMoveTimeline()) video.currentTime = t;
+    if (t !== null && together.mayMoveTimeline()) {
+      video.currentTime = t;
+      // The bar stays at the new spot. Falling back to the old time until the video caught up
+      // put the slider's value back there, and the change event a release outside the bar fires
+      // afterwards (a finger lifted mid-screen) then jumped the video back to it.
+      setTime(t);
+    }
+  };
+  /**
+   * A finger dragging the timeline: where it points is worked out here, from how far across the
+   * bar it is, wherever it is on the screen. Android's own slider stops following once the
+   * finger leaves the bar (dragged up into the picture, say), so the video went to where the
+   * finger left the bar instead of where it was let go.
+   */
+  let touchDrag: HTMLElement | null = null;
+  /** When a finger last let go of the timeline: the change event after it is the slider's own. */
+  let touchDragEnded = 0;
+  const scrubToX = (x: number, bar: HTMLElement) => {
+    if (!duration()) return;
+    const r = bar.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (x - r.left) / r.width));
+    const t = f * duration();
+    setScrub(t);
+    setHover({ x: f, t });
+    preview.hover(t);
   };
   onMount(() => {
     const release = () => {
       if (!holding) return;
       holding = false;
       commitScrub();
+      if (touchDrag) touchDragEnded = performance.now();
+      touchDrag = null;
       wake();
+    };
+    const follow = (e: PointerEvent) => {
+      if (holding && touchDrag && e.pointerType === "touch") scrubToX(e.clientX, touchDrag);
     };
     window.addEventListener("pointerup", release);
     window.addEventListener("pointercancel", release);
+    window.addEventListener("pointermove", follow);
     onCleanup(() => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
+      window.removeEventListener("pointermove", follow);
     });
   });
   const pct = (t: number) => (duration() ? Math.min(100, Math.max(0, (t / duration()) * 100)) : 0);
@@ -468,16 +513,54 @@ export default function Player(props: { behind: boolean }) {
   // sound and controls fine). Reload only the video, at the same second, when B-Anime is back.
   if (onWebKit) {
     let hiddenSince = 0;
+    let lastReload = 0;
+    /** Loads the video again from here (paused stays paused), at most every 10 s. */
+    const reloadVideo = (why: string) => {
+      if (!video || !stream() || videoError() || video.currentTime <= 1 || Date.now() - lastReload < 10_000) return;
+      lastReload = Date.now();
+      uiLog(`player: reloading the video (${why})`);
+      reattachPaused = video.paused;
+      setReattach((n) => n + 1);
+    };
+    // Back from the background: once the window is really on screen again (focused, two frames
+    // drawn). Reloading as soon as the page said "visible" happened while a full-screen window
+    // was still sliding back into view, and gave sound without a picture.
+    const whenOnScreen = (run: () => void) => {
+      const go = () => requestAnimationFrame(() => requestAnimationFrame(() => window.setTimeout(run, 250)));
+      if (document.hasFocus()) return go();
+      window.addEventListener("focus", go, { once: true });
+    };
     const onVisibility = () => {
       if (document.hidden) return void (hiddenSince = Date.now());
       const away = hiddenSince ? Date.now() - hiddenSince : 0;
       hiddenSince = 0;
-      if (away < 60_000 || !video || !stream() || videoError() || video.currentTime <= 1) return;
-      reattachPaused = video.paused;
-      setReattach((n) => n + 1);
+      if (away >= 60_000) whenOnScreen(() => reloadVideo("back after a while away"));
     };
     document.addEventListener("visibilitychange", onVisibility);
     onCleanup(() => document.removeEventListener("visibilitychange", onVisibility));
+
+    // Watchdog: playing (time moving) but no new picture for 2 s means WebKit lost the video's
+    // picture (black, with sound): load it again from here.
+    type FrameVideo = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+    let lastFrame = performance.now();
+    let watchedAt = 0;
+    const onFrame = () => {
+      lastFrame = performance.now();
+      (video as FrameVideo).requestVideoFrameCallback?.(onFrame);
+    };
+    onMount(() => {
+      const v = video as FrameVideo;
+      if (!v.requestVideoFrameCallback) return;
+      v.requestVideoFrameCallback(onFrame);
+      v.addEventListener("loadeddata", () => v.requestVideoFrameCallback?.(onFrame));
+      const check = window.setInterval(() => {
+        const t = v.currentTime;
+        const moving = !v.paused && !v.seeking && v.readyState >= 3 && t - watchedAt > 0.5;
+        watchedAt = t;
+        if (!document.hidden && moving && performance.now() - lastFrame > 2000) reloadVideo("no picture while playing");
+      }, 1000);
+      onCleanup(() => clearInterval(check));
+    });
   }
   createEffect(
     on([stream, sourceIndex, reattach], async ([s, idx]) => {
@@ -705,6 +788,14 @@ export default function Player(props: { behind: boolean }) {
       };
     }
     applyOffset();
+    if (repick) {
+      const want = repick;
+      const again = list.findIndex((t) => t.label === want.label && t.language === want.language && trackElement(t)?.readyState !== 3);
+      if (again >= 0) {
+        repick = null;
+        return chooseTrack(again, false);
+      }
+    }
     const showing = list.findIndex((t) => t.mode === "showing");
     if (showing >= 0) setActiveTrack(showing);
     else if (!autoPicked && list.length) {
@@ -734,6 +825,48 @@ export default function Player(props: { behind: boolean }) {
   const [subLoading, setSubLoading] = createSignal(false);
   /** The list of subtitle languages hasn't arrived yet (the episode's stream is still loading). */
   const subListLoading = () => stream.loading || (!!stream() && duration() === 0 && tracks().length === 0);
+  /**
+   * Subtitle downloads that failed, retried by making their <track> again (a failed one never
+   * loads again, even when picked: only reopening the episode made new ones). Each URL's count
+   * keys its element; two retries happen by themselves, then the menu offers Retry.
+   */
+  const [subTries, setSubTries] = createSignal<Record<string, number>>({});
+  /** Bumped when a subtitle fails, so the menu reads the tracks' states again. */
+  const [subErrors, setSubErrors] = createSignal(0);
+  /** The track to pick again once its new <track> is in (it was showing when it was retried). */
+  let repick: { label: string; language: string } | null = null;
+  const subKept = new Map<string, { s: Stream["subtitles"][number]; key: string }>();
+  const subElements = createMemo(() =>
+    (stream()?.subtitles ?? []).map((s) => {
+      const key = `${s.url}#${subTries()[s.url] ?? 0}`;
+      let e = subKept.get(key);
+      if (!e) subKept.set(key, (e = { s, key }));
+      return e;
+    }),
+  );
+  createEffect(on(stream, () => { setSubTries({}); subKept.clear(); repick = null; }, { defer: true }));
+  const trackElement = (t: TextTrack) => Array.from(video.querySelectorAll("track")).find((e) => e.track === t);
+  /** The track couldn't be loaded (after its automatic retries). */
+  const trackFailed = (t: TextTrack) => {
+    subErrors();
+    return trackElement(t)?.readyState === 3;
+  };
+  const retrySub = (url: string) => {
+    const t = tracks()[activeTrack()];
+    const el = t && trackElement(t);
+    if (el?.dataset.url === url) repick = { label: t.label, language: t.language };
+    setSubTries((m) => ({ ...m, [url]: (m[url] ?? 0) + 1 }));
+  };
+  const onSubError = (url: string) => {
+    checkSubLoading();
+    setSubErrors((n) => n + 1);
+    const s = stream();
+    if ((subTries()[url] ?? 0) < 2) {
+      window.setTimeout(() => s === stream() && retrySub(url), 1500);
+    } else {
+      uiLog(`subtitles: couldn't load ${url.slice(0, 120)}`);
+    }
+  };
   const checkSubLoading = () => {
     const t = tracks()[activeTrack()];
     const el = t && Array.from(video.querySelectorAll("track")).find((e) => e.track === t);
@@ -1025,17 +1158,11 @@ export default function Player(props: { behind: boolean }) {
   // ── Auto-skip: jump over each opening / ending / recap once as playback reaches it.
   // On unless the viewer turned it off.
   // ── Previews on the timeline: the frame where the pointer rests (PC and Mac), or where a finger
-  // drags the bar to (phones).
-  const [previews, setPreviewsSignal] = createSignal(stored("banime.seekpreview", 1) === 1);
-  const setPreviews = (on: boolean) => {
-    setPreviewsSignal(on);
-    store("banime.seekpreview", on ? 1 : 0);
-    if (!on) preview.reset();
-  };
+  // drags the bar to (phones). Always on.
   const preview = createSeekPreview(() => {
     const s = stream()?.sources[Math.min(sourceIndex(), (stream()?.sources.length ?? 1) - 1)];
     return s ? { url: s.url, kind: s.kind } : null;
-  }, previews);
+  }, () => true);
   // Another episode or server: the kept frames are another video's.
   createEffect(on([stream, sourceIndex], () => preview.reset(), { defer: true }));
 
@@ -1441,16 +1568,17 @@ export default function Player(props: { behind: boolean }) {
         onDblClick={() => !fromTouch() && void toggleFullscreen()}
         onPointerUp={onPictureTap}
       >
-        <For each={stream()?.subtitles ?? []}>
-          {(s) => (
+        <For each={subElements()}>
+          {({ s }) => (
             <track
               ref={(el) => s.images && pictureUrl.set(el.track, s.url)}
               kind="subtitles"
               src={s.images ? `${s.url}?as=cues` : s.url}
               srclang={s.lang}
               label={s.label}
+              data-url={s.url}
               onLoad={() => { refreshTracks(); checkSubLoading(); }}
-              onError={checkSubLoading}
+              onError={() => onSubError(s.url)}
             />
           )}
         </For>
@@ -1516,6 +1644,9 @@ export default function Player(props: { behind: boolean }) {
           <div class="player-message" role="alert">
             <p>{msg()}</p>
             <div class="setting-actions">
+              <Show when={canRetry()}>
+                <button type="button" class="btn btn-primary" onClick={retry}>Try again</button>
+              </Show>
               <Show when={videoError() && (stream()?.sources.length ?? 0) > sourceIndex() + 1}>
                 <button type="button" class="btn btn-primary" onClick={() => chooseServer(sourceIndex() + 1)}>Try next source</button>
               </Show>
@@ -1814,6 +1945,8 @@ export default function Player(props: { behind: boolean }) {
             // While held: only the bar, the time and the preview follow. On release the video goes
             // there (change fires once, on release; and per press with the arrow keys).
             onInput={(e) => {
+              // A finger's drag is followed from its position instead (see scrubToX).
+              if (touchDrag) return;
               if (!together.mayMoveTimeline()) {
                 e.currentTarget.value = String(video.currentTime);
                 return;
@@ -1825,12 +1958,34 @@ export default function Player(props: { behind: boolean }) {
                 preview.hover(t);
               }
             }}
-            // Pressed: the bar keeps the pointer until it's released (see commitScrub).
+            // Pressed: held until it's released (see commitScrub). The slider follows a drag
+            // outside it by itself; capturing the pointer as well left WebKit's slider dragging
+            // after the button was let go (the Mac: it followed the mouse without a click).
             onPointerDown={(e) => {
               holding = true;
-              e.currentTarget.setPointerCapture?.(e.pointerId);
+              if (e.pointerType === "touch" && together.mayMoveTimeline()) {
+                touchDrag = e.currentTarget;
+                scrubToX(e.clientX, e.currentTarget);
+              }
+            }}
+            // Phones: the finger lifting is the release. The browser can cancel a touch's pointer
+            // mid-drag, and then neither pointerup nor change came, so the video never jumped.
+            onTouchEnd={() => {
+              holding = false;
+              commitScrub();
+              if (touchDrag) touchDragEnded = performance.now();
+              touchDrag = null;
+            }}
+            onTouchCancel={() => {
+              holding = false;
+              commitScrub();
+              if (touchDrag) touchDragEnded = performance.now();
+              touchDrag = null;
             }}
             onChange={(e) => {
+              // A finger's drag was already committed where it was let go; the slider's own value
+              // (where the finger left the bar) is not where it pointed.
+              if (performance.now() - touchDragEnded < 1000) return;
               // Released (or an arrow key): the video goes there, once (the release itself may
               // have taken it there already).
               if (scrub() === null) {
@@ -1944,6 +2099,25 @@ export default function Player(props: { behind: boolean }) {
                                     <i class="spin-dot" aria-hidden="true" /> Loading…
                                   </span>
                                 </Show>
+                                <Show when={trackFailed(t) && trackElement(t)?.dataset.url}>
+                                  {(url) => (
+                                    <span class="menu-sub sub-failed">
+                                      Couldn't load ·{" "}
+                                      <span
+                                        role="button"
+                                        tabindex="0"
+                                        class="sub-retry"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (activeTrack() !== i()) chooseTrack(i(), false);
+                                          retrySub(url());
+                                        }}
+                                      >
+                                        Retry
+                                      </span>
+                                    </span>
+                                  )}
+                                </Show>
                               </button>
                             )}
                           </For>
@@ -2020,21 +2194,6 @@ export default function Player(props: { behind: boolean }) {
                       </span>
                       <span class="menu-switch" aria-hidden="true" />
                     </button>
-                    <button
-                        type="button"
-                        role="menuitemcheckbox"
-                        class="menu-toggle"
-                        aria-checked={previews()}
-                        onClick={() => setPreviews(!previews())}
-                      >
-                        <span>
-                          Timeline previews
-                          <span class="menu-sub">
-                            {(local() ? "A frame where you " : "Loads a small piece where you ") + (onAndroid ? "drag" : "point")}
-                          </span>
-                        </span>
-                        <span class="menu-switch" aria-hidden="true" />
-                      </button>
                     {/* Phones: here rather than its own button, so the control bar fits held upright. */}
                     <Show when={onAndroid}>
                       <button type="button" role="menuitem" onClick={() => { setMenu(null); togglePip(); }}>

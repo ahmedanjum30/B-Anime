@@ -15,6 +15,20 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-27
+
+### Added
+- When an episode can't load, the player offers Try again.
+
+### Changed
+- Timeline previews are always on; their switch in the player's menu is gone.
+
+### Fixed
+- Subtitles that fail to download are tried again, and the subtitle menu offers Retry if they still can't load.
+- On the Mac, the timeline no longer follows the mouse after you let go of it.
+- On phones, letting go of the timeline now jumps the video there.
+- On the Mac, a video that goes black (with sound) after full screen or time away loads its picture again by itself.
+
 ## [0.5.0] - 2026-11-27
 
 ### Fixed
