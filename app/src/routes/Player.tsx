@@ -359,12 +359,14 @@ export default function Player(props: { behind: boolean }) {
   const commitScrub = () => {
     const t = scrub();
     setScrub(null);
-    if (t !== null && together.mayMoveTimeline()) video.currentTime = t;
     // A finger lifted: its time tip and preview go (a mouse keeps them while it's over the bar).
+    // The preview's video goes before the jump: phones have few video decoders, and while it held
+    // one the player ignored the jump.
     if (!matchMedia("(hover: hover)").matches) {
       setHover(null);
-      preview.leave();
+      preview.leave(true);
     }
+    if (t !== null && together.mayMoveTimeline()) video.currentTime = t;
   };
   onMount(() => {
     const release = () => {
@@ -1413,6 +1415,9 @@ export default function Player(props: { behind: boolean }) {
           void onMeta();
         }}
         onTimeUpdate={onTime}
+        // A jump (buttons, keys, skips, letting go of the timeline) shows on the bar and clock at
+        // once, not once the new spot has loaded.
+        onSeeking={() => setTime(video.currentTime)}
         onDurationChange={() => setDuration(video.duration || 0)}
         onPlay={() => { setPlaying(true); wake(); keepScreenOn(true); }}
         onPause={() => { setPlaying(false); setIdle(false); persist(); keepScreenOn(false); }}

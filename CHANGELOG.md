@@ -15,6 +15,12 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
+### Fixed
+- The timeline jumps at once when you skip forward or back, instead of once the video has loaded.
+- On phones, letting go of the timeline jumps the video there again.
+
 ## [0.4.9] - 2026-11-27
 
 ### Added

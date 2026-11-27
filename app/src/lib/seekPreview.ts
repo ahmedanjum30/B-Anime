@@ -164,14 +164,16 @@ export function createSeekPreview(source: () => PreviewSource | null, enabled: (
       const src = source();
       restTimer = window.setTimeout(() => void fetchAt(t), src?.kind === "file" ? REST_FILE : REST_STREAM);
     },
-    /** The pointer left the timeline: the preview's video goes shortly after. */
-    leave() {
+    /** The pointer left the timeline: the preview's video goes shortly after (`now`: at once,
+     *  so a phone's video decoder is the player's again before it jumps). */
+    leave(now = false) {
       want = null;
       clearTimeout(restTimer);
       setFrame(null);
       setActive(false);
       clearTimeout(releaseTimer);
-      releaseTimer = window.setTimeout(release, RELEASE_AFTER);
+      if (now) release();
+      else releaseTimer = window.setTimeout(release, RELEASE_AFTER);
     },
     /** Another episode or source: what's kept is another video's. */
     reset() {

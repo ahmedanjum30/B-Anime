@@ -13,6 +13,7 @@ import "./styles/base.css";
 import "./styles/app.css";
 
 import Shell from "./components/Shell";
+import { uiLog } from "./lib/api";
 import Home from "./routes/Home";
 
 // Home ships in the first bundle; every other screen loads on first visit.
@@ -25,6 +26,16 @@ const WatchPage = lazy(() => import("./routes/WatchPage"));
 const Reader = lazy(() => import("./routes/Reader"));
 const Settings = lazy(() => import("./routes/Settings"));
 const Together = lazy(() => import("./routes/Together"));
+
+// Errors no page caught go to the log file (Settings → About → Show log file), so a problem
+// in an installed copy can be traced afterwards.
+window.addEventListener("error", (e) =>
+  uiLog(`error: ${e.message} at ${e.filename?.split("/").pop()}:${e.lineno}:${e.colno}${e.error?.stack ? `\n${e.error.stack}` : ""}`),
+);
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  uiLog(`unhandled rejection: ${r instanceof Error ? `${r.message}\n${r.stack ?? ""}` : String(r)}`);
+});
 
 render(
   () => (
