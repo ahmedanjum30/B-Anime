@@ -1,0 +1,20 @@
+{
+  "version": "0.5.0",
+  "notes": "## What's new in 0.5.0\n\n### Fixed\n- The timeline jumps at once when you skip forward or back, instead of once the video has loaded.\n- On phones, letting go of the timeline jumps the video there again.\n\n\n## Install\n\n**Windows:** download **B-Anime-Setup-0.5.0.exe** below and run it. It installs for your user only, without admin rights. Already have B-Anime? It updates itself.\n\n> **Windows says \"Windows protected your PC\"?** Click **More info**, then **Run anyway**. B-Anime isn't code-signed yet, so Windows doesn't know the publisher. The installer is the one built by this repository's release workflow; you can check it against `SHA256SUMS.txt`.\n\n**Android:** download **B-Anime-0.5.0-arm64.apk** below (arm64, for most phones). The first time, your phone asks you to allow installing from this source. Installed copies update themselves.\n\n**Mac (Apple Silicon):** `brew install --cask ahmedanjum30/tap/b-anime`. Or download **B-Anime-0.5.0-macos.zip** below, unzip it and drag the app to Applications; the first time, right-click it and choose **Open**. Installed copies update themselves.\n",
+  "publishedAt": "2026-11-27T11:17:31Z",
+  "pageUrl": "https://github.com/ahmedanjum30/B-Anime/releases/tag/v0.5.0",
+  "files": {
+    "B-Anime-0.5.0-arm64.apk": {
+      "url": "https://github.com/ahmedanjum30/B-Anime/releases/download/v0.5.0/B-Anime-0.5.0-arm64.apk",
+      "sha256": "1579135eb4cd46af654b0360c2eee4fe07528dfd66f4cf1d7e624dd0197e99e1"
+    },
+    "B-Anime-0.5.0-macos.zip": {
+      "url": "https://github.com/ahmedanjum30/B-Anime/releases/download/v0.5.0/B-Anime-0.5.0-macos.zip",
+      "sha256": "3d7289c6af8a75c57d8558dadcca920721144096e6150eabb411b07f2a141df3"
+    },
+    "B-Anime-Setup-0.5.0.exe": {
+      "url": "https://github.com/ahmedanjum30/B-Anime/releases/download/v0.5.0/B-Anime-Setup-0.5.0.exe",
+      "sha256": "115920878276727423f37510bc80c92f71ea231315ee35cf189d96d92d2fd726"
+    }
+  }
+}

@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>B-Anime: your anime and manga library, synced with AniList</title>
+<meta name="description" content="B-Anime finds the anime and manga on your PC, matches them to AniList, plays them and keeps your list in sync. A fast, light app for Windows, Mac and Android. Free, no ads.">
+<link rel="canonical" href="https://ahmedanjum30.github.io/B-Anime/">
+<link rel="icon" type="image/png" href="images/icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="B-Anime: your anime library, synced with AniList">
+<meta property="og:description" content="Pick a show and it plays. Episodes matched, progress synced, this week's releases at a glance. Windows, Mac and Android.">
+<meta property="og:url" content="https://ahmedanjum30.github.io/B-Anime/">
+<meta property="og:image" content="https://ahmedanjum30.github.io/B-Anime/images/social.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#121318">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "B-Anime",
+  "operatingSystem": "Windows 10, Windows 11, macOS 11 or later (Apple Silicon), Android 7.0 or later (64-bit ARM)",
+  "applicationCategory": "MultimediaApplication",
+  "description": "An anime and manga library app: finds your episodes and chapters, matches them to AniList, plays them and syncs your progress. Online sources and manga through extensions.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Ahmad Anjum", "url": "https://github.com/ahmedanjum30" },
+  "url": "https://ahmedanjum30.github.io/B-Anime/",
+  "downloadUrl": "https://ahmedanjum30.github.io/B-Anime/download/B-Anime-Setup.exe",
+  "codeRepository": "https://github.com/ahmedanjum30/B-Anime",
+  "screenshot": "https://ahmedanjum30.github.io/B-Anime/images/home.png"
+}
+</script>
+<style>
+  /* B-Anime's own world (DESIGN.md): a fixed graphite ramp, newsprint-white type, and listings
+     colours that each do one job. */
+  :root {
+    --z0: #121318; --z1: #191b22; --z2: #20232c; --z3: #2a2e3a; --z4: #3a3f4e;
+    --z5: #555b6d; --z6: #878da1; --z8: #b9bcc6; --z10: #ece7dc;
+    --red: #e5483b; --amber: #e2a43b; --teal: #3fa79c;
+    /* Listings red tuned for contrast: deeper under white button text, lighter as small text. */
+    --red-button: #c93a2e; --red-button-hover: #bf3427; --red-text: #f0675b;
+    --ui: "Archivo", system-ui, sans-serif;
+    --head: "Archivo Narrow", "Archivo", system-ui, sans-serif;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--z1); color: var(--z10); font: 400 17px/1.6 var(--ui); -webkit-font-smoothing: antialiased; }
+  ::selection { background: color-mix(in srgb, var(--red) 45%, transparent); color: var(--z10); }
+  :focus-visible { outline: 2px solid var(--red); outline-offset: 3px; border-radius: 4px; }
+  a { color: var(--z10); text-decoration-color: var(--z5); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--red); }
+  img { max-width: 100%; height: auto; display: block; }
+  .command { display: block; width: fit-content; max-width: 100%; margin: 12px 0; padding: 10px 14px; overflow-x: auto; white-space: nowrap; user-select: all; }
+  code { font: 0.9em/1 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--z2); border: 1px solid var(--z3); border-radius: 4px; padding: 2px 6px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)); }
+
+  /* Header */
+  header.bar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--z0) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--z3); }
+  header.bar .wrap { display: flex; align-items: center; gap: 16px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 700 19px/1 var(--head); letter-spacing: 0.04em; text-decoration: none; }
+  .brand img { width: 28px; height: 28px; border-radius: 6px; }
+  .brand .word span { color: var(--red); }
+  nav { margin-left: auto; display: flex; gap: 22px; }
+  nav a { color: var(--z8); text-decoration: none; font: 600 14px/1 var(--head); letter-spacing: 0.1em; text-transform: uppercase; }
+  nav a:hover { color: var(--z10); }
+  @media (max-width: 640px) { nav a.optional { display: none; } }
+
+  /* Hero */
+  .hero { padding: 72px 0 0; background: radial-gradient(1200px 520px at 50% -120px, color-mix(in srgb, var(--red) 14%, transparent), transparent 70%); }
+  .hero-text { max-width: 760px; }
+  .dateline { font: 700 13px/16px var(--head); letter-spacing: 0.14em; text-transform: uppercase; color: var(--z8); margin: 0 0 18px; display: flex; align-items: center; gap: 10px; }
+  .mark { display: inline-grid; place-items: center; height: 20px; padding: 0 5px; border: 1.5px solid currentColor; border-radius: 2px; font: 700 11px/1 var(--head); letter-spacing: 0.06em; }
+  .mark.new { color: var(--red-text); }
+  .mark.beta { color: var(--amber); }
+  h1 { font: 700 clamp(40px, 6.4vw, 72px)/1.02 var(--head); letter-spacing: -0.01em; margin: 0 0 20px; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--red); }
+  .lead { font-size: clamp(17px, 2.1vw, 20px); color: var(--z8); max-width: 640px; margin: 0 0 30px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .button { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 20px; border-radius: 4px; font: 600 16px/1 var(--ui); text-decoration: none; transition: background-color 120ms var(--ease), transform 240ms var(--ease); }
+  .button svg { width: 18px; height: 18px; flex: none; }
+  .button.primary { background: var(--red-button); color: #fff; }
+  .button.primary:hover { background: var(--red-button-hover); }
+  .button.secondary { background: var(--z3); color: var(--z10); }
+  .button.secondary:hover { background: var(--z4); }
+  .button:active { transform: translateY(1px); }
+  .meta { margin: 16px 0 0; color: var(--z6); font-size: 14px; }
+  .shot { margin: 56px 0 0; border-radius: 8px 8px 0 0; overflow: hidden; border: 1px solid var(--z3); border-bottom: 0; box-shadow: 0 -20px 80px rgb(0 0 0 / 0.35); }
+
+  /* Sections: the newsprint head, 2px rule under it. */
+  section { padding: 88px 0; }
+  section.band { background: var(--z0); border-block: 1px solid var(--z3); }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; padding-bottom: 10px; margin: 0 0 36px; border-bottom: 2px solid var(--z10); }
+  .head h2 { font: 700 15px/1.2 var(--head); letter-spacing: 0.14em; text-transform: uppercase; margin: 0; }
+  .head p { margin: 0; color: var(--z6); font-size: 15px; }
+  h3 { font: 600 19px/1.3 var(--ui); margin: 0 0 6px; }
+
+  /* Features: a listings column, not a wall of cards. */
+  .listings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--z3); }
+  .listing { padding: 26px 26px 30px 0; border-bottom: 1px solid var(--z3); }
+  .listing + .listing { padding-left: 26px; border-left: 1px solid var(--z3); }
+  .listing:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+  /* The newest one, alone in the middle of its row, framed by the grid's lines. */
+  .listings .listing.centre { grid-column: 2; padding: 26px 26px 30px; border-left: 1px solid var(--z3); border-right: 1px solid var(--z3); }
+  .listing .slot .mark { margin-left: 4px; }
+  .listing .slot { display: flex; align-items: center; gap: 8px; font: 700 12px/1 var(--head); letter-spacing: 0.12em; text-transform: uppercase; color: var(--z6); margin-bottom: 14px; }
+  .listing .slot i { width: 8px; height: 8px; border-radius: 1px; }
+  .listing p { margin: 0; color: var(--z8); font-size: 16px; }
+  @media (max-width: 900px) {
+    .listings { grid-template-columns: 1fr; }
+    .listing, .listing + .listing, .listings .listing.centre { grid-column: auto; padding: 22px 0; border-left: 0; border-right: 0; }
+  }
+
+  /* Split rows */
+  .split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 56px; align-items: center; }
+  .split.phone { grid-template-columns: minmax(0, 1fr) minmax(0, 340px); }
+  @media (max-width: 860px) { .split, .split.phone { grid-template-columns: 1fr; gap: 36px; } }
+  .points { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 0; }
+  .points li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--z3); color: var(--z8); font-size: 16px; }
+  .points li:first-child { border-top: 1px solid var(--z3); }
+  .points b { color: var(--z10); font-weight: 600; }
+  .points svg { width: 18px; height: 18px; margin-top: 4px; color: var(--teal); }
+  .frame { border-radius: 8px; overflow: hidden; border: 1px solid var(--z3); box-shadow: 0 24px 60px rgb(0 0 0 / 0.45); }
+  .phone-frame { max-width: 340px; margin: 0 auto; border-radius: 28px; border: 8px solid var(--z0); outline: 1px solid var(--z3); overflow: hidden; box-shadow: 0 30px 80px rgb(0 0 0 / 0.5); }
+  .note { color: var(--z6); font-size: 14px; margin: 18px 0 0; }
+
+  /* FAQ */
+  .faq { max-width: 800px; }
+  details { border-bottom: 1px solid var(--z3); }
+  details:first-of-type { border-top: 1px solid var(--z3); }
+  summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 16px; padding: 18px 0; font-weight: 600; font-size: 17px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font: 600 22px/1 var(--head); color: var(--z6); transition: transform 240ms var(--ease); }
+  details[open] summary::after { transform: rotate(45deg); color: var(--red); }
+  details p { color: var(--z8); margin: 0 0 18px; max-width: 70ch; }
+
+  /* Closing band and footer */
+  .closing { text-align: left; }
+  .closing h2 { font: 700 clamp(30px, 4.4vw, 48px)/1.1 var(--head); margin: 0 0 12px; text-wrap: balance; }
+  .closing p { color: var(--z8); margin: 0 0 28px; }
+  footer { padding: 32px 0 max(32px, env(safe-area-inset-bottom)); color: var(--z6); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; }
+  footer a { color: var(--z6); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition-duration: 1ms !important; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="images/icon.png" width="28" height="28" alt=""><span class="word">B<span>·</span>ANIME</span></a>
+    <nav aria-label="Page">
+      <a class="optional" href="#features">Features</a>
+      <a class="optional" href="#android">Android</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/ahmedanjum30/B-Anime">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="dateline"><span class="mark new">NEW</span> Watch together with friends</p>
+        <h1>Pick a show. It plays. <em>AniList</em> keeps up.</h1>
+        <p class="lead">B-Anime finds the anime and manga on your PC, matches them to AniList without you renaming a thing, plays the next episode in one click and records your progress. It shows what's up next and what airs this week, like an evening's TV listings.</p>
+        <div class="cta">
+          <a class="button primary" href="download/B-Anime-Setup.exe">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.4 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.4z"/></svg>
+            Download for Windows
+          </a>
+          <a class="button secondary" href="download/B-Anime-arm64.apk">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg>
+            Android (APK)
+          </a>
+          <a class="button secondary" href="#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
+            Mac (Homebrew)
+          </a>
+          <a class="button secondary" href="https://github.com/ahmedanjum30/B-Anime">View on GitHub</a>
+        </div>
+        <p class="meta">Windows 10 and 11 · Macs with Apple Silicon · Android 7.0+ on 64-bit phones · Free, no ads · Updates itself</p>
+      </div>
+      <div class="shot"><img src="images/home.png" width="1440" height="900" alt="B-Anime's Home screen: Up next with four shows and their next episodes, and This week's airing times set as a listings grid"></div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="head"><h2>What's on</h2><p>Your collection does the work; the app stays out of the way.</p></div>
+      <div class="listings">
+        <div class="listing">
+          <div class="slot"><i style="background: var(--red)"></i>Library</div>
+          <h3>Finds your episodes</h3>
+          <p>Point it at your folders. Files are matched to AniList whatever they're called: release-group names, <code>S01E05</code>, season folders, absolute numbering. New files appear as they arrive, and nothing is moved or renamed.</p>
+        </div>
+        <div class="listing">
+          <div class="slot"><i style="background: var(--teal)"></i>AniList</div>
+          <h3>Progress syncs itself</h3>
+          <p>Finish an episode and AniList knows. Your lists, progress and the airing schedule sync on their own, with the time it last synced always on screen.</p>
+        </div>
+        <div class="listing">
+          <div class="slot"><i style="background: var(--amber)"></i>Up next</div>
+          <h3>One click to the next episode</h3>
+          <p>Home shows the next unwatched episode of every show you're watching, where you left off, and this week's releases in local time.</p>
+        </div>
+        <div class="listing">
+          <div class="slot"><i style="background: var(--red)"></i>Player</div>
+          <h3>Plays in the app, or in yours</h3>
+          <p>A built-in player with subtitles, intro and outro skipping, resume and the next episode lined up. Prefer MPV or VLC? It plays there too, and MPV still tracks your progress.</p>
+        </div>
+        <div class="listing">
+          <div class="slot"><i style="background: #8d7be3"></i>Extensions</div>
+          <h3>Online sources and manga</h3>
+          <p>Add streaming and manga sources from extension repositories, then read chapters in the built-in reader, single page, double page or strip.</p>
+        </div>
+        <div class="listing">
+          <div class="slot"><i style="background: var(--teal)"></i>Rust</div>
+          <h3>Small, fast, quiet</h3>
+          <p>Written in Rust: a 7 MB installer, instant start and smooth scrolling through thousands of shows. No ads, and no analytics.</p>
+        </div>
+        <div class="listing centre">
+          <div class="slot"><i style="background: var(--amber)"></i>Together <span class="mark new">NEW</span></div>
+          <h3>Watch with friends</h3>
+          <p>Send an invite link and watch an episode in step, each from your own library or source. Everyone loads before it starts, pauses and jumps reach the whole room, and it carries on if the host leaves.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap split">
+      <div>
+        <div class="head"><h2>Every show, one page</h2></div>
+        <h3>Episodes, your list and the source, together</h3>
+        <ul class="points">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Watched is stamped, not hidden.</b> Every episode shows its state, with the next one marked.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Edit your list in place.</b> Status, episodes and score save straight to AniList.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Local first, online when it's not on disk.</b> Pick a source and the episodes play from there.</span></li>
+        </ul>
+      </div>
+      <div class="frame"><img src="images/show.png" width="1440" height="900" alt="A show page in B-Anime: banner, cover, list editor, and the episode list with watched episodes stamped"></div>
+    </div>
+  </section>
+
+  <section id="android">
+    <div class="wrap split phone">
+      <div>
+        <div class="head"><h2>On your phone</h2><p><span class="mark beta">BETA</span></p></div>
+        <h3>The same app, laid out for one hand</h3>
+        <p style="color: var(--z8); margin: 0">B-Anime for Android has the same look and the same engine. Home, Library, Manga and Discover sit in a bottom bar; Up next swipes sideways; this week reads as a list of days.</p>
+        <ul class="points">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Android 7.0 or later</b> on 64-bit ARM phones (nearly every phone since 2017).</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Updates itself.</b> It downloads new versions, checks them, and asks Android to install.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg><span><b>Early days.</b> Staying signed in to AniList and local folders are still coming to Android.</span></li>
+        </ul>
+        <div class="cta" style="margin-top: 28px">
+          <a class="button primary" href="download/B-Anime-arm64.apk">Download the APK</a>
+        </div>
+      </div>
+      <div class="phone-frame"><img src="images/phone.png" width="1080" height="2400" alt="B-Anime on an Android phone: Up next cards that swipe sideways, this week as a list of days, and the bottom bar"></div>
+    </div>
+  </section>
+
+  <section id="faq" class="band">
+    <div class="wrap faq">
+      <div class="head"><h2>Questions</h2><p>Didn't find yours? Open an <a href="https://github.com/ahmedanjum30/B-Anime/issues">issue on GitHub</a>.</p></div>
+      <details>
+        <summary>Is B-Anime free?</summary>
+        <p>Yes, with every feature, no ads and no paid version. If you'd like to support it, there's <a href="https://www.patreon.com/cw/ahmedanjum30">Patreon</a>.</p>
+      </details>
+      <details>
+        <summary>Do I need an AniList account?</summary>
+        <p>To sync your lists and progress, yes: sign in once from Settings (it opens AniList in your browser). Without one, B-Anime still plays your files.</p>
+      </details>
+      <details>
+        <summary>Does it download anime?</summary>
+        <p>No. B-Anime plays the files you already have, and online sources you add yourself through extensions. It has no torrent client or downloader, and it doesn't host any media.</p>
+      </details>
+      <details>
+        <summary>Windows says "Windows protected your PC"</summary>
+        <p>Click <b>More info</b>, then <b>Run anyway</b>. The installer isn't code-signed yet, so Windows doesn't know the publisher. It's built from the public source by the project's <a href="https://github.com/ahmedanjum30/B-Anime/blob/main/.github/workflows/release.yml">release workflow</a>; you can check it against <code>SHA256SUMS.txt</code> on the <a href="https://github.com/ahmedanjum30/B-Anime/releases/latest">release page</a>.</p>
+      </details>
+      <details>
+        <summary>How do I install the Android app?</summary>
+        <p>Download the APK on your phone and open it. Android asks once to allow installs from your browser; allow it, then tap <b>Install</b>. After that, B-Anime finds new versions itself and asks Android to update.</p>
+      </details>
+      <details id="mac">
+        <summary>How do I install it on a Mac?</summary>
+        <p>With <a href="https://brew.sh">Homebrew</a>, in Terminal:</p>
+        <code class="command">brew install --cask ahmedanjum30/tap/b-anime</code>
+        <p>Or download <a href="download/B-Anime-macos.zip">the app</a>, unzip it and drag B-Anime to Applications. It isn't signed with an Apple developer ID yet, so the first time macOS won't open it: right-click it and choose <b>Open</b>, or allow it in System Settings → Privacy &amp; Security. Homebrew takes care of that for you. B-Anime for Mac needs a Mac with Apple Silicon (M1 or later) and updates itself.</p>
+      </details>
+      <details>
+        <summary>Does it send my data anywhere?</summary>
+        <p>Only where it has to: AniList (your lists and progress, when you sign in), GitHub (to check for updates) and the extension sources you install. If you sign in with Google to keep your place on every device, your latest episode of each show and where you are in it go to a private B-Anime folder in your own Google Drive (B-Anime can't see your other files). There are no ads, analytics or tracking.</p>
+      </details>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap closing">
+      <h2>Tonight's listings start here.</h2>
+      <p>Install B-Anime, point it at your folders and sign in to AniList.</p>
+      <div class="cta">
+        <a class="button primary" href="download/B-Anime-Setup.exe">Download for Windows</a>
+        <a class="button secondary" href="download/B-Anime-arm64.apk">Android (APK)</a>
+        <a class="button secondary" href="#mac">Mac (Homebrew)</a>
+        <a class="button secondary" href="https://www.patreon.com/cw/ahmedanjum30">Support on Patreon</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ahmad Anjum · B-Anime isn't affiliated with AniList</span>
+    <span><a href="https://github.com/ahmedanjum30/B-Anime">GitHub</a> · <a href="https://github.com/ahmedanjum30/B-Anime/releases">Releases</a> · <a href="https://github.com/ahmedanjum30/B-Anime/issues">Issues</a> · <a href="https://www.patreon.com/cw/ahmedanjum30">Patreon</a> · <a href="privacy.html">Privacy</a></span>
+  </div>
+</footer>
+<script>
+  // "Mac (Homebrew)" links to its answer: open it on the way there.
+  const openLinked = () => {
+    const el = location.hash && document.getElementById(location.hash.slice(1));
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  };
+  addEventListener("hashchange", openLinked);
+  openLinked();
+</script>
+</body>
+</html>
