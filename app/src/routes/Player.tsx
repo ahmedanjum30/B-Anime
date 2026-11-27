@@ -360,8 +360,11 @@ export default function Player(props: { behind: boolean }) {
     const t = scrub();
     setScrub(null);
     if (t !== null && together.mayMoveTimeline()) video.currentTime = t;
-    // A finger lifted: its time tip goes (a mouse keeps it while it's over the bar).
-    if (!matchMedia("(hover: hover)").matches) setHover(null);
+    // A finger lifted: its time tip and preview go (a mouse keeps them while it's over the bar).
+    if (!matchMedia("(hover: hover)").matches) {
+      setHover(null);
+      preview.leave();
+    }
   };
   onMount(() => {
     const release = () => {
@@ -1019,7 +1022,8 @@ export default function Player(props: { behind: boolean }) {
 
   // ── Auto-skip: jump over each opening / ending / recap once as playback reaches it.
   // On unless the viewer turned it off.
-  // ── Previews on the timeline: the frame where the pointer rests (PC and Mac).
+  // ── Previews on the timeline: the frame where the pointer rests (PC and Mac), or where a finger
+  // drags the bar to (phones).
   const [previews, setPreviewsSignal] = createSignal(stored("banime.seekpreview", 1) === 1);
   const setPreviews = (on: boolean) => {
     setPreviewsSignal(on);
@@ -2011,8 +2015,7 @@ export default function Player(props: { behind: boolean }) {
                       </span>
                       <span class="menu-switch" aria-hidden="true" />
                     </button>
-                    <Show when={!onAndroid}>
-                      <button
+                    <button
                         type="button"
                         role="menuitemcheckbox"
                         class="menu-toggle"
@@ -2021,11 +2024,12 @@ export default function Player(props: { behind: boolean }) {
                       >
                         <span>
                           Timeline previews
-                          <span class="menu-sub">{local() ? "A frame where you point" : "Loads a small piece where you point"}</span>
+                          <span class="menu-sub">
+                            {(local() ? "A frame where you " : "Loads a small piece where you ") + (onAndroid ? "drag" : "point")}
+                          </span>
                         </span>
                         <span class="menu-switch" aria-hidden="true" />
                       </button>
-                    </Show>
                     {/* Phones: here rather than its own button, so the control bar fits held upright. */}
                     <Show when={onAndroid}>
                       <button type="button" role="menuitem" onClick={() => { setMenu(null); togglePip(); }}>

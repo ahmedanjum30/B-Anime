@@ -152,7 +152,8 @@ export function createSeekPreview(source: () => PreviewSource | null, enabled: (
     aspect,
     /** The pointer is over `t` on the timeline. */
     hover(t: number) {
-      if (failed || !enabled() || !matchMedia("(hover: hover)").matches) return setActive(false);
+      // A mouse resting on the bar, or (phones) a finger dragging along it.
+      if (failed || !enabled()) return setActive(false);
       setActive(true);
       clearTimeout(releaseTimer);
       want = t;

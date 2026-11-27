@@ -15,6 +15,14 @@ one line each, written for users (see CLAUDE.md).
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-11-27
+
+### Added
+- On phones, drag along the timeline to see the frame at that spot.
+
+### Fixed
+- On the Mac, subtitles and the sidebar update again instead of staying stuck on what they first showed.
+
 ## [0.4.8]
 
 ### Added
